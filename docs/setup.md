@@ -75,7 +75,15 @@ CI runs the same check on Linux, Windows and macOS for every pull request.
 
 ## Training box
 
-We train on two machines: a Windows desktop (the box) and a Mac. OPS-01 sets up access. Three rules, from the first day:
+We train on two machines: a Windows desktop (the box) and a Mac. You reach the box over Tailscale, a private network, with the SSH server that ships with Windows.
+
+1. Install [Tailscale](https://tailscale.com/download) and sign in. Accept the share Sahil sends you for the box.
+2. If you have no SSH key, make one with `ssh-keygen -t ed25519`. Send Sahil the `.pub` file it prints the path of. Never send the file without `.pub`.
+3. Once Sahil confirms your key is added, connect with `ssh <user>@<box>`, using the user and machine name from the share. `hostname` should print the box's name.
+
+The shell on the box is Windows `cmd`. The repo is cloned in the home folder, and runs write to its `data\runs\`. Copy results off with `scp -r <user>@<box>:AlgoArcade/data/runs/<run_id> .`
+
+Three rules, from the first day:
 
 - Nobody debugs on the box. Debug on your own machine with one environment and 1,000 steps.
 - Runs go through the queue once OPS-04 lands. Do not launch runs by hand after that.
