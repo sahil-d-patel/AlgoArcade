@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from algoarcade.backends.base import Button
 
 RAM_BASE = 0x0200_0000
-RAM_SIZE = 12
+RAM_SIZE = 15
 # Offsets from RAM_BASE. FRAME and RNG are little-endian u32, the rest are one byte.
 PLAYER_X = 0x00
 PLAYER_Y = 0x01
@@ -21,6 +21,9 @@ ROOM = 0x02
 FLAGS = 0x03
 FRAME = 0x04
 RNG = 0x08
+LEVEL_SUM = 0x0C
+BADGES = 0x0D
+MILESTONES = 0x0E
 
 FLAG_CHEST_OPENED = 0x01
 TILE_PIXELS = 8
@@ -57,6 +60,7 @@ class FakeBackend:
         self._ram = bytearray(RAM_SIZE)
         self._ram[PLAYER_X] = 1
         self._ram[PLAYER_Y] = 1
+        self._ram[LEVEL_SUM] = 5
         struct.pack_into("<I", self._ram, RNG, 0x2545F491)
 
     def step(self, frames: int = 1) -> None:
