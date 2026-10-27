@@ -20,4 +20,6 @@ A wrong address does not crash. It returns a believable number, the reward funct
 
 Locations are always `(map_group, map_num, x, y)`. Progress counts use only ranges that go up: the badge byte, trainer flags, world-map flags and the story whitelist. Temporary flags reset on every map load.
 
+`FireRedReader` in `games/firered/reader.py` currently reads position only. It raises `StateNotReady` before reading fields when `gSaveBlock1Ptr` is outside `gSaveBlock1` through `gSaveBlock1 + 0x7C`, or is not four-byte aligned. Its synthetic-memory tests cover relocation and invalid pointers; these do not replace captured-state validation.
+
 The memory map and the rules are in `docs/harness-spec.md` under "FireRed memory map". ENV-05 owns this skill and updates it when the reader lands.
