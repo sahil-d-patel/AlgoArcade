@@ -20,4 +20,8 @@ A wrong address does not crash. It returns a believable number, the reward funct
 
 Locations are always `(map_group, map_num, x, y)`. Progress counts use only ranges that go up: the badge byte, trainer flags, world-map flags and the story whitelist. Temporary flags reset on every map load.
 
+`FireRedReader` in `games/firered/reader.py` reads position and a tuple of live party entries (level, HP, max HP and status); `party_count` is the tuple length. It raises `StateNotReady` before reading position when `gSaveBlock1Ptr` is outside `gSaveBlock1` through `gSaveBlock1 + 0x7C`, or is not four-byte aligned. A party count above six also raises `StateNotReady`. Party fields come from the plaintext tail of each 100-byte `gPlayerParty` entry, never the saved copy. Its synthetic-memory tests cover relocation, invalid pointers and live party reads; these do not replace captured-state validation.
+
 The memory map and the rules are in `docs/harness-spec.md` under "FireRed memory map". ENV-05 owns this skill and updates it when the reader lands.
+
+`scripts/state_diff.py` provides `compare_states(backend, state_a, state_b)` for save-state bytes. It prints changed EWRAM addresses and byte values, then restores the backend's original state. File-based command-line loading awaits ENV-04; do not compare serialized save-file offsets as if they were RAM addresses.
