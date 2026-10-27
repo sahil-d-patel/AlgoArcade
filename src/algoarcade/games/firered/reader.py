@@ -1,9 +1,17 @@
 import struct
 from dataclasses import dataclass
 
-from algoarcade.backends.base import GameBackend, read_u32
+from algoarcade.backends.base import GameBackend, read_u8, read_u32
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.addresses import ADDRESSES
+
+
+@dataclass(frozen=True)
+class PartyPokemon:
+    level: int
+    hp: int
+    max_hp: int
+    status: int
 
 
 @dataclass(frozen=True)
@@ -12,6 +20,11 @@ class FireRedState:
     map_num: int
     x: int
     y: int
+    party: tuple[PartyPokemon, ...]
+
+    @property
+    def party_count(self) -> int:
+        return len(self.party)
 
     @property
     def location(self) -> tuple[int, int, int, int]:
@@ -30,4 +43,13 @@ class FireRedReader:
             raise StateNotReady(f"Invalid gSaveBlock1Ptr: {pointer:#010x}")
         # SaveBlock1.pos/location: include/global.h at the same source commit.
         x, y, map_group, map_num = struct.unpack("<hhbb", backend.read(pointer, 6))
-        return FireRedState(map_group=map_group, map_num=map_num, x=x, y=y)
+        count = read_u8(backend, self._addresses["gPlayerPartyCount"].address)
+        if count > 6:
+            raise StateNotReady(f"Invalid gPlayerPartyCount: {count}")
+        party = []
+        for index in range(count):
+            # struct Pokemon: include/pokemon.h at the same source commit; live party only.
+            address = self._addresses["gPlayerParty"].address + index * 100
+            status, level, hp, max_hp = struct.unpack("<IBxHH", backend.read(address + 0x50, 10))
+            party.append(PartyPokemon(level=level, hp=hp, max_hp=max_hp, status=status))
+        return FireRedState(map_group=map_group, map_num=map_num, x=x, y=y, party=tuple(party))
