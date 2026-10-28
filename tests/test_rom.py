@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from algoarcade import rom
+from algoarcade.backends.pyboy import PyBoyBackend
 
 FIRERED_REV0 = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 FIRERED_REV1 = "dd5945db9b930750cb39d00c84da8571feebf417"
+SUPER_MARIO_LAND = "418203621b887caa090215d97e3f509b79affd3e"
 
 
 @pytest.fixture
@@ -19,7 +21,7 @@ def dump(tmp_path: Path) -> Path:
 
 
 def test_table_holds_only_the_verified_hashes() -> None:
-    assert set(rom.KNOWN_ROMS) == {FIRERED_REV0, FIRERED_REV1}
+    assert set(rom.KNOWN_ROMS) == {FIRERED_REV0, FIRERED_REV1, SUPER_MARIO_LAND}
     assert all(sha1 == entry.sha1 for sha1, entry in rom.KNOWN_ROMS.items())
 
 
@@ -60,3 +62,14 @@ def test_module_entry_point_exits_non_zero_on_a_bad_path(dump: Path, name: str) 
     assert result.returncode == 1
     assert result.stdout == ""
     assert name in result.stderr
+
+
+@pytest.mark.parametrize("game", [None, "firered"])
+def test_pyboy_backend_refuses_any_rom_but_super_mario_land(
+    dump: Path, monkeypatch: pytest.MonkeyPatch, game: str | None
+) -> None:
+    if game:
+        sha1 = hashlib.sha1(dump.read_bytes()).hexdigest()
+        monkeypatch.setitem(rom.KNOWN_ROMS, sha1, rom.Rom(sha1, game, "Another known game"))
+    with pytest.raises(rom.UnknownRomError):
+        PyBoyBackend(dump)

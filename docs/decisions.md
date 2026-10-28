@@ -58,3 +58,4 @@ AGENTS.md treats names, dependencies and architecture as PM decisions. These wer
 ## Log
 
 - 2026-10-11: Plan fine-tuned before kickoff.
+- 2026-10-27: Two Super Mario Land addresses have no label in the kaspermeerts/supermarioland disassembly (commit 618d00e): the level block at 0xC0AB and Mario's screen x at 0xC202. The reader cites PyBoy 2.8.1's `game_wrapper_super_mario_land.py` for both (ENV-03).

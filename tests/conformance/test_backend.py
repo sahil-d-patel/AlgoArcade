@@ -7,12 +7,24 @@ the file is absent, and its entry is wrapped in pytest.param(..., marks=pytest.m
 import hashlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
+from algoarcade.backends.pyboy import ADDRESS_SPACE, PyBoyBackend
+
+SUPER_MARIO_LAND_ROM = Path(__file__).parents[2] / "data/roms/super_mario_land.gb"
+
+
+def make_pyboy() -> GameBackend:
+    if not SUPER_MARIO_LAND_ROM.exists():
+        pytest.skip(f"no ROM at {SUPER_MARIO_LAND_ROM}")
+    backend = PyBoyBackend(SUPER_MARIO_LAND_ROM)
+    backend.step(120)  # WRAM stays zero until the game initialises it, about frame 96
+    return backend
 
 
 @dataclass(frozen=True)
@@ -27,6 +39,10 @@ BACKENDS = {
         make=fake.FakeBackend,
         ram=(fake.RAM_BASE, fake.RAM_SIZE),
         unmapped=fake.RAM_BASE + fake.RAM_SIZE,
+    ),
+    "pyboy": pytest.param(
+        BackendCase(make=make_pyboy, ram=(0xC000, 0x2000), unmapped=ADDRESS_SPACE),
+        marks=pytest.mark.rom,
     ),
 }
 

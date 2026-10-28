@@ -45,7 +45,7 @@ FireRed shipped in several revisions, and addresses differ between them. On load
 |---|---|
 | Pokémon FireRed (USA) rev 0, the target | 41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc |
 | Pokémon FireRed (USA) rev 1, accepted | dd5945db9b930750cb39d00c84da8571feebf417 |
-| Super Mario Land | Recorded by ENV-03 once two members confirm the same dump |
+| Super Mario Land (World) rev A | 418203621b887caa090215d97e3f509b79affd3e |
 
 Address tables are keyed by this hash. Rev 0 and rev 1 share every RAM address we use, but ROM function addresses differ.
 
