@@ -233,18 +233,22 @@ The fake logger writes synthetic runs in the exact frozen schema: a random walke
 
 ## MCP tool surface
 
-The MCP server exposes the same harness to a language model. It uses the official MCP Python SDK over stdio. One server process owns one emulator, created when the server starts, and every evaluation attempt gets a fresh process. Nothing but protocol messages may reach standard output.
+The MCP server exposes the same harness to a language model. It uses the official MCP Python SDK over stdio. One server process owns one emulator, created when the server starts, and every evaluation attempt gets a fresh process. State belongs to the process, not to a session: the 2026-07-28 protocol revision has none. Nothing but protocol messages may reach standard output, and logging goes to stderr.
 
-| Tool | Returns | Level |
-|---|---|---|
-| press | The state after a short button sequence, with a screenshot | L0 |
-| get_state | The GameState as compact JSON, with an optional 2x screenshot | L1 |
-| navigate_to | The state after walking to a tile on the current map by A*. Stops on a battle, dialogue or warp and says which. | L2 |
-| advance_dialogue | The text shown, after pressing A until the box closes or a choice appears | L2 |
+| Tool | Arguments | Returns | Level |
+|---|---|---|---|
+| press | `buttons`: a list of button names, each one of A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L | The GameState after pressing them in order, one decision each | L0 |
+| get_state | none | The GameState | L1 |
+| navigate_to | — (AGT-04) | The state after walking to a tile on the current map by A*. Stops on a battle, dialogue or warp and says which. | L2 |
+| advance_dialogue | — (AGT-04) | The text shown, after pressing A until the box closes or a choice appears | L2 |
+
+`get_state` and `press` return the GameState as structured JSON, one field per name. On the fake backend that is `room`, `x`, `y`, `chest_opened` and `frame`. The SDK sends a text copy of the same object beside it, indented two spaces by a constant no option reaches, so structured content is the compact payload a client reads. Screenshots arrive with the level option in AGT-04.
 
 A level includes every tool below it. The server takes the level as a launch option, so the same code serves all three rungs of the ladder.
 
-Jayden updates this section when AGT-02 and AGT-04 land.
+`.mcp.json` at the repo root launches the server through `uv`, so Claude Code and VS Code list the tools after `uv sync`.
+
+Jayden updates this section when AGT-04 lands.
 
 ## Open questions before the freeze
 
