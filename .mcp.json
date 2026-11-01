@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "algoarcade": {
+      "command": "uv",
+      "args": ["run", "--no-sync", "python", "-m", "algoarcade.agent.server"]
+    }
+  }
+}

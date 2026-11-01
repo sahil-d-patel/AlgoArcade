@@ -233,18 +233,24 @@ The fake logger writes synthetic runs in the exact frozen schema: a random walke
 
 ## MCP tool surface
 
-The MCP server exposes the same harness to a language model. It uses the official MCP Python SDK over stdio. One server process owns one emulator, created when the server starts, and every evaluation attempt gets a fresh process. Nothing but protocol messages may reach standard output.
+The MCP server exposes the same harness to a language model. It uses the official MCP Python SDK over stdio. One server process owns one emulator, created when the server starts, and every evaluation attempt gets a fresh process. State belongs to the process, not to a session: the 2026-07-28 protocol revision has none. Nothing but protocol messages may reach standard output, and logging goes to stderr.
 
-| Tool | Returns | Level |
-|---|---|---|
-| press | The state after a short button sequence, with a screenshot | L0 |
-| get_state | The GameState as compact JSON, with an optional 2x screenshot | L1 |
-| navigate_to | The state after walking to a tile on the current map by A*. Stops on a battle, dialogue or warp and says which. | L2 |
-| advance_dialogue | The text shown, after pressing A until the box closes or a choice appears | L2 |
+| Tool | Arguments | Returns | Level |
+|---|---|---|---|
+| press | `buttons`: a list of button names, each one of A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L. `screenshot`: optional, default false | The GameState after pressing them in order, one decision each | L0 |
+| get_state | `screenshot`: optional, default false | The GameState | L1 |
+| navigate_to | — (AGT-04) | The state after walking to a tile on the current map by A*. Stops on a battle, dialogue or warp and says which. | L2 |
+| advance_dialogue | — (AGT-04) | The text shown, after pressing A until the box closes or a choice appears | L2 |
+
+`get_state` and `press` return the GameState twice: as structured content and as one compact JSON text block, one field per name. On the fake backend that is `room`, `x`, `y`, `chest_opened` and `frame`. With `screenshot` true, a PNG of the screen upscaled 2x (480x320 on FireRed) follows the text. The server takes the game as a launch option, `--game`; `fake` is the only entry until ENV-04 and ENV-05 land.
+
+The loop in `src/algoarcade/agent/loop.py` drives one attempt: it lists the tools once, keeps an append-only history with a cache breakpoint on the system prompt and the automatic one on the last turn, prices every response from `usage`, and stops at the goal, the action cap, the dollar cap, or when the model stops calling tools. One action is one button press. Each request is one line of `steps.jsonl` under `data/llm/<name>/`: tokens by kind, dollars, buttons pressed, the model's text and the state after.
 
 A level includes every tool below it. The server takes the level as a launch option, so the same code serves all three rungs of the ladder.
 
-Jayden updates this section when AGT-02 and AGT-04 land.
+`.mcp.json` at the repo root launches the server through `uv`, so Claude Code and VS Code list the tools after `uv sync`.
+
+Jayden updates this section when AGT-04 lands.
 
 ## Open questions before the freeze
 
