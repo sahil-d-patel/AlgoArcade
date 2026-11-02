@@ -302,7 +302,7 @@ It also protects the demo. If RL underdelivers, we still have an agent that visi
 
 | Tool | What it does |
 |---|---|
-| get_state | The GameState as compact JSON, with an optional 2x-upscaled screenshot |
+| get_state | The GameState as structured JSON, with an optional 2x-upscaled screenshot |
 | press | A short sequence of buttons |
 | navigate_to | A* over the current map's collision grid, read live from memory. Stops on a battle, dialogue or warp and says why. |
 | advance_dialogue | Presses A until the text box closes or a choice appears, and returns the text |
