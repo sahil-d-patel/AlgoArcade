@@ -7,12 +7,21 @@ the file is absent, and its entry is wrapped in pytest.param(..., marks=pytest.m
 import hashlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
+from algoarcade.backends.mgba import EWRAM_BASE, EWRAM_SIZE, MgbaBackend
+
+
+def make_mgba() -> GameBackend:
+    path = Path(__file__).resolve().parents[2] / "data" / "roms" / "firered.gba"
+    if not path.is_file():
+        pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    return MgbaBackend(path)
 
 
 @dataclass(frozen=True)
@@ -28,6 +37,11 @@ BACKENDS = {
         ram=(fake.RAM_BASE, fake.RAM_SIZE),
         unmapped=fake.RAM_BASE + fake.RAM_SIZE,
     ),
+    "mgba": BackendCase(
+        make=make_mgba,
+        ram=(EWRAM_BASE, EWRAM_SIZE),
+        unmapped=EWRAM_BASE + EWRAM_SIZE,
+    ),
 }
 
 INPUTS: list[list[Button]] = [
@@ -42,7 +56,12 @@ INPUTS: list[list[Button]] = [
 ]
 
 
-@pytest.fixture(params=list(BACKENDS.values()), ids=list(BACKENDS))
+@pytest.fixture(
+    params=[
+        pytest.param(value, id=name, marks=pytest.mark.rom if name == "mgba" else ())
+        for name, value in BACKENDS.items()
+    ]
+)
 def case(request: pytest.FixtureRequest) -> BackendCase:
     return request.param
 

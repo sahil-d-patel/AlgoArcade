@@ -41,17 +41,33 @@ The harness runs the same check every time it loads a ROM. A wrong revision woul
 
 ## The mGBA binding
 
-Not run yet. ENV-01 lands the fetch script and ENV-04 proves it on all three systems. This is what it will be:
+The fetch script installs the pinned libmgba-py binding into the project environment. The backend
+loads FireRed from `data/roms/firered.gba`; conformance tests skip when that file is absent.
 
 | OS | First | Then |
 |---|---|---|
 | Windows x64 | Nothing | `uv run python scripts/fetch_mgba.py` |
-| macOS (Apple Silicon) | `brew install mgba` | `uv run python scripts/fetch_mgba.py` |
+| macOS (Apple Silicon) | `brew install mgba ffmpeg@8` | `uv run python scripts/fetch_mgba.py` |
 | Ubuntu 24.04 or later | `sudo apt install libmgba0.10t64` | `uv run python scripts/fetch_mgba.py` |
 
 Ubuntu 22.04 only packages an older libmgba, so use 24.04 or later. Nobody compiles mGBA. If the binding fails on your machine, post the error on ENV-01 (or ENV-04 after week 1) instead of working around it.
 
-Until then, everything that does not need FireRed runs on the fake backend, which needs no ROM.
+On Apple Silicon, mGBA 0.10.5 links against ffmpeg 8. Keep that version installed beside the
+current ffmpeg, without linking it, and set the library search path before starting Python:
+
+```sh
+export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib:/opt/homebrew/opt/ffmpeg@8/lib
+uv run python -c "import mgba.core"
+uv run pytest tests/conformance -k mgba -q
+```
+
+Use `uv run` directly: macOS can strip `DYLD_*` variables when a system executable sits in
+the launch chain. ENV-04 is verified locally on macOS arm64; Windows/Linux verification and
+the team-controlled archive mirror remain pending. States are native mGBA bytes with flash
+and RTC data included, plus a screenshot when rendering is enabled. They are not battery saves.
+`MgbaBackend(..., render=False)` disables video; `screen()` then raises `RuntimeError`.
+Loading a state without a screenshot into a rendered backend requires advancing a frame
+before calling `screen()`.
 
 ## Checks
 

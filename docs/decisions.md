@@ -58,3 +58,4 @@ AGENTS.md treats names, dependencies and architecture as PM decisions. These wer
 ## Log
 
 - 2026-10-11: Plan fine-tuned before kickoff.
+- 2026-11-02: Prince authorized an ENV-04 implementation on `issue-11/mgba-backend` to unblock FireRed reader validation, with no separate ENV-04 PR. Future PRs that use this backend must identify the branch/commit and note the macOS-only verification and pending binary mirror. The implementation reuses ENV-01's installer from PR #55; ENV-04 remains open until all acceptance criteria are met.
