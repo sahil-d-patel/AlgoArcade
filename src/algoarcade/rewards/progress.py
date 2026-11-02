@@ -8,8 +8,6 @@ from algoarcade.rewards.base import RewardComponent
 
 
 class Progress(GameState, Protocol):
-    """The counts the progress components read. Readers validate them before they get here."""
-
     @property
     def story_flags(self) -> int: ...
 
@@ -26,13 +24,23 @@ class Progress(GameState, Protocol):
 class NewMaximum(RewardComponent[Progress]):
     """Pays the amount a count rises above its best so far this episode, up to `cap` per step.
     A drop, or a climb back to the old best, pays nothing, so moving a count up and down cannot be
-    farmed. The excess of a rise above the cap is never paid."""
+    farmed. The excess of a rise above the cap is never paid.
+
+    A count above `maximum`, or more than `max_rise` above the best, is a bad read: it pays nothing
+    and does not become the best, so it cannot silence the real gains that follow."""
 
     def __init__(
-        self, name: str, count: Callable[[Progress], int], cap: float = float("inf")
+        self,
+        name: str,
+        count: Callable[[Progress], int],
+        maximum: int,
+        max_rise: float = float("inf"),
+        cap: float = float("inf"),
     ) -> None:
         self.name = name
         self._count = count
+        self._maximum = maximum
+        self._max_rise = max_rise
         self._cap = cap
         self._best = 0
 
@@ -43,6 +51,8 @@ class NewMaximum(RewardComponent[Progress]):
     @override
     def score(self, prev: Progress, curr: Progress) -> float:
         value = self._count(curr)
+        if value > self._maximum or value - self._best > self._max_rise:
+            return 0.0
         gain = max(0, value - self._best)
         self._best = max(self._best, value)
         return min(float(gain), self._cap)

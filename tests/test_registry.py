@@ -122,6 +122,15 @@ def test_level_gain_is_capped_at_one_per_step_and_the_excess_is_lost() -> None:
     assert raw_values("level", [9, 9, 10]) == [1.0, 0.0, 1.0]
 
 
+def test_a_misread_badge_byte_neither_pays_nor_silences_later_badges() -> None:
+    # 0xFF reads as eight badges one step after the first; a step earns at most one.
+    assert raw_values("badge", [0x01, 0xFF, 0x01, 0x03, 0x07]) == [1.0, 0.0, 0.0, 1.0, 1.0]
+
+
+def test_a_count_above_its_maximum_is_ignored() -> None:
+    assert raw_values("milestone", [1, 200, 2]) == [1.0, 0.0, 1.0]
+
+
 def test_chest_pays_events_once() -> None:
     backend, registry = start({"events": 1.0})
     rewards = []
