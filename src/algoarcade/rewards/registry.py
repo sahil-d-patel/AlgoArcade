@@ -19,8 +19,9 @@ from algoarcade.rewards.progress import NewMaximum, Progress
 #   rises by at most MAX_LEVEL.
 # - badge: at most NUM_BADGES. Each badge is set by its own gym leader's script, so a step
 #   earns at most one. The rise bound is what rejects a misread 0xFF; its popcount is 8.
-# - milestone: at most the nine milestones in ENV-13. No rise bound, because
-#   data/maps/PewterCity_Gym/scripts.inc sets the last two flags one after the other.
+# - milestone: at most the nine milestones in ENV-13. No rise bound: the last two are
+#   FLAG_DEFEATED_BROCK and FLAG_BADGE01_GET, which data/maps/PewterCity_Gym/scripts.inc sets
+#   one after the other.
 COMPONENTS: dict[str, Callable[[], RewardComponent[Progress]]] = {
     "events": lambda: NewMaximum("events", lambda s: s.story_flags, maximum=0x900),
     "explore": Explore,
