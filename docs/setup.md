@@ -79,9 +79,13 @@ We train on two machines: a Windows desktop (the box) and a Mac. You reach the b
 
 1. Install [Tailscale](https://tailscale.com/download) and sign in. Accept the share Sahil sends you for the box.
 2. If you have no SSH key, make one with `ssh-keygen -t ed25519`. Send Sahil the `.pub` file it prints the path of. Never send the file without `.pub`.
-3. Once Sahil confirms your key is added, connect with `ssh <user>@<box>`, using the user and machine name from the share. `hostname` should print the box's name.
+3. Once Sahil confirms your key is added, connect with `ssh <user>@<box>`. Sahil gives you the user name; `<box>` is the box's name in your Tailscale machine list. `hostname` should print it.
 
-The shell on the box is Windows `cmd`. The repo is cloned in the home folder, and runs write to its `data\runs\`. Copy results off with `scp -r <user>@<box>:AlgoArcade/data/runs/<run_id> .`
+The shell on the box is Windows `cmd`. The repo is cloned in the home folder, and each run writes to its own `data\runs\run_id=<id>\` folder. Copy one off with:
+
+```sh
+scp -r <user>@<box>:AlgoArcade/data/runs/run_id=<id> .
+```
 
 Three rules, from the first day:
 
