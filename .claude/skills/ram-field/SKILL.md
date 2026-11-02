@@ -20,7 +20,9 @@ A wrong address does not crash. It returns a believable number, the reward funct
 
 Locations are always `(map_group, map_num, x, y)`. Progress counts use only ranges that go up: the badge byte, trainer flags, world-map flags and the story whitelist. Temporary flags reset on every map load.
 
-`FireRedReader` reads position, party count, level, HP, max HP and status. It raises `StateNotReady` for a save-block pointer outside the valid range or alignment, or a party count above six.
+`FireRedReader` reads position, money, badges, defeated trainers, Pokédex counts, battle/dialogue/script/control context, and live party level, HP, max HP, status, species and moves. Both save-block pointers are checked on each read. Money uses the current SaveBlock2 key; species and moves require a valid decrypted checksum. Invalid pointers, party counts above six and bad checksums raise `StateNotReady`.
+
+ENV-08 layouts and symbols are listed in `docs/harness-spec.md`, FireRed memory map. Pokédex counts use 386 national entries and the screen's cross-check of all three seen-bit copies. `script_active` follows `ScriptContext_IsEnabled`: waiting and shut-down scripts are false. Story flags, world-map counts and the options interface are not implemented yet.
 
 The memory map and the rules are in `docs/harness-spec.md` under "FireRed memory map". ENV-05 owns this skill.
 

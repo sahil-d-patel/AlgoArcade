@@ -75,7 +75,8 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Context | text_active, script_active, controls_locked | What the game is waiting on |
 | Battle | own and enemy HP, level, moves, PP | Only meaningful while in_battle is true |
 
-Fields arrive in stages: position, party and badges in week 2 (ENV-05), the rest of the table in week 3 (ENV-08), battle and milestones in week 5 (ENV-13).
+Fields arrive in stages: position and plaintext party fields in ENV-05; badges, encrypted party
+fields and the remaining context in ENV-08; detailed battle fields and milestones in ENV-13.
 
 Every field has a validation test against a captured save state with a known value.
 
@@ -87,6 +88,8 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 |---|---|---|
 | gSaveBlock1Ptr | 0x03005008 | Pointer. Dereference on every read. |
 | gSaveBlock2Ptr | 0x0300500C | Pointer. Dereference on every read. |
+| gSaveBlock2 | 0x02024588 | Relocation base; current pointer must be base through base+0x7C, four-byte aligned. |
+| gSaveBlock1 | 0x0202552C | Same relocation range and alignment rule. |
 | gPlayerPartyCount | 0x02024029 | |
 | gPlayerParty | 0x02024284 | Six entries of 100 bytes |
 | gBattleMons | 0x02023BE4 | Plaintext battle data |
@@ -98,6 +101,30 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
 Inside a party entry: status at 0x50, level at 0x54, HP at 0x56, max HP at 0x58, all plain. The encrypted block is at 0x20 to 0x4F.
+
+ENV-08 source layouts below were checked at `e93eb12a336fb97df420b0961753d8a3713c9fcc`,
+the source commit used for the pinned symbol build:
+
+| Fields | Symbol and layout | Source |
+|---|---|---|
+| money | `gSaveBlock1Ptr` + 0x290, XOR `gSaveBlock2Ptr` + 0xF20 | `include/global.h`, `src/money.c` |
+| badge_flags, badge_count | `gSaveBlock1Ptr` + 0xFE4; flags 0x820 through 0x827 | `include/constants/flags.h`, `src/event_data.c` |
+| trainers_defeated | `gSaveBlock1Ptr` + 0xEE0; flags 0x500 through 0x7FF | Same flag definitions and indexing |
+| pokedex_owned, pokedex_seen | `gSaveBlock2Ptr` + 0x28 and +0x5C; seen copies at `gSaveBlock1Ptr` +0x5F8 and +0x3A18 | `include/global.h`, `src/pokedex_screen.c` |
+| in_battle | `gMain` +0x439, bit 1 | `include/main.h` |
+| text_active | `sMessageBoxType` is not hidden (0) | `src/field_message_box.c` |
+| script_active | `sGlobalScriptContextStatus` is running (0); waiting (1) and shut down (2) are false | `src/script.c`, `ScriptContext_IsEnabled` |
+| controls_locked | `sLockFieldControls` is nonzero | `src/script.c` |
+| party species, moves | `gPlayerParty`, 100-byte entries; XOR twelve words at +0x20 with personality (+0x00) XOR trainer id (+0x04), then check the 16-bit sum against +0x1C | `include/pokemon.h`, `src/pokemon.c` |
+
+The Pokédex screen counts only the 386 national entries. Seen bits must agree in all three
+copies; an owned bit also needs that seen bit. Party substructures have 24 physical orders,
+selected by personality modulo 24: species is in growth and four move ids are in attacks.
+`party_level_sum` sums the live party levels. Species and move ids use the game's internal ids.
+
+Local trainer-card capture `env08-money-3000.state` validates money 3000 and zero badges.
+Other ENV-08 fields still need captured-state validation; the story whitelist and options
+interface remain pending confirmation. No logged fields change in this implementation.
 
 Rules:
 
