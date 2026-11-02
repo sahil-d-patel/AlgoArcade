@@ -227,7 +227,7 @@ Tests 1 to 3 live in `tests/conformance/` and run against every backend in the r
 
 ## Fake backend and fake logger
 
-The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
+The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It also has three count bytes (party level sum, badge byte, milestone count) that nothing in the game writes; tests set them directly. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
 
 The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids that sometimes earns a badge. It arrives with the logging pipeline in week 3 (OPS-03). In week 6 everyone builds their panel against it before pointing at real runs.
 

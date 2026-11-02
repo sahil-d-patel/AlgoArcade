@@ -1,5 +1,8 @@
 """A toy console that needs no ROM: two rooms, a door, walls and one chest.
 
+RAM also holds a level sum, a badge byte and a milestone count. Nothing in the game writes them;
+tests set them directly to drive the reward components.
+
 Tests and CI run on it. All game state lives in a small RAM block, so readers, rewards and
 the conformance suite exercise the same read path they use on a real emulator.
 """
