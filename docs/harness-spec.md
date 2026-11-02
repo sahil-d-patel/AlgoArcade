@@ -53,7 +53,7 @@ A wrong ROM is an error, never a warning.
 
 ## StateReader and GameState
 
-A StateReader is written per game. It reads memory through a GameBackend and returns a GameState: a frozen record of everything we care about. The protocols live in `src/algoarcade/games/base.py`.
+A StateReader is written per game. It reads memory through a GameBackend and returns a GameState: a frozen record of everything we care about. The protocols live in `src/algoarcade/games/base.py`. A reader raises `StateNotReady` from that module when game memory cannot provide a valid state; callers must handle this as not ready rather than substitute zero-valued fields.
 
 The framework asks one thing of every GameState: a `location`, a hashable tuple that identifies where the player is. Exploration rewards, the archive and the heatmap all key on it. For FireRed it is `(map_group, map_num, x, y)`.
 

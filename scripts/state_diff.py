@@ -15,8 +15,6 @@ def compare_states(backend: GameBackend, state_a: bytes, state_b: bytes) -> None
         before = backend.read(EWRAM_BASE, EWRAM_SIZE)
         backend.load_state(state_b)
         after = backend.read(EWRAM_BASE, EWRAM_SIZE)
-        if len(before) != EWRAM_SIZE or len(after) != EWRAM_SIZE:
-            raise ValueError("Backend must return the full EWRAM region")
         for offset, (old, new) in enumerate(zip(before, after, strict=True)):
             if old != new:
                 print(f"0x{EWRAM_BASE + offset:08x}: {old:02x} -> {new:02x}")

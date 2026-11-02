@@ -9,7 +9,7 @@ class Address:
 
 SOURCE_COMMIT = "3b401eaf14f193946899eb7c056d5ac02a470126"
 
-# Verified independently against both revisions' symbol files at SOURCE_COMMIT.
+# From pokefirered.sym and pokefirered_rev1.sym at SOURCE_COMMIT.
 ADDRESSES = {
     sha1: {
         "gSaveBlock1": Address(0x0202552C, SOURCE_COMMIT),
