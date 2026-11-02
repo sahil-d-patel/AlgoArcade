@@ -7,7 +7,7 @@ from algoarcade.backends.base import GameBackend
 
 
 class StateNotReady(Exception):
-    """Game memory is not ready to provide a valid state."""
+    pass
 
 
 class GameState(Protocol):

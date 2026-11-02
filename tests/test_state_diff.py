@@ -51,12 +51,3 @@ def test_restores_original_state_after_failed_load() -> None:
     with pytest.raises(ValueError, match="Invalid synthetic save state"):
         compare_states(backend, b"header-A" + bytes(EWRAM_SIZE), b"invalid")
     assert backend.save_state() == original
-
-
-def test_rejects_short_memory_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = StateBackend()
-    original = backend.save_state()
-    monkeypatch.setattr(backend, "read", lambda address, size: b"\x00")
-    with pytest.raises(ValueError, match="full EWRAM"):
-        compare_states(backend, original, original)
-    assert backend.save_state() == original

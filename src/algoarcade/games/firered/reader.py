@@ -38,7 +38,7 @@ class FireRedReader:
     def read(self, backend: GameBackend) -> FireRedState:
         pointer = read_u32(backend, self._addresses["gSaveBlock1Ptr"].address)
         base = self._addresses["gSaveBlock1"].address
-        # SetSaveBlocksPointers: src/load_save.c at ce6406d8c2eaf46d543c8a2606de0c3cb1951982.
+        # SetSaveBlocksPointers: src/load_save.c at e93eb12a336fb97df420b0961753d8a3713c9fcc.
         if not (0 <= pointer - base <= 0x7C) or (pointer - base) % 4:
             raise StateNotReady(f"Invalid gSaveBlock1Ptr: {pointer:#010x}")
         # SaveBlock1.pos/location: include/global.h at the same source commit.
