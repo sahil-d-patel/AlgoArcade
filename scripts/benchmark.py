@@ -1,10 +1,10 @@
 """Throughput benchmark (OPS-02). Prints the docs/benchmarks.md tables as Markdown on stdout.
 
     uv run python scripts/benchmark.py --backend mgba --rom data/roms/firered.gba \
-        --menu-state data/states/menu_open.state
+        --state data/states/s1.state --menu-state data/states/menu_open.state
 
-Every cell runs one emulator per spawned process under a uniform random policy, for --seconds,
-and reports the median of --runs runs. Progress goes to stderr.
+Every cell runs one emulator per spawned process, loaded from --state, under a uniform random
+policy for --seconds, and reports the median of --runs runs. Progress goes to stderr.
 """
 
 import argparse
@@ -17,7 +17,7 @@ import statistics
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from multiprocessing.synchronize import Barrier
 from pathlib import Path
 
@@ -43,6 +43,7 @@ class Cell:
     render: bool
     read_state: bool
     seconds: float
+    state: bytes | None = field(repr=False)
 
 
 def make_backend(name: str, rom: Path | None, render: bool) -> tuple[GameBackend, tuple]:
@@ -65,6 +66,8 @@ def decide(backend: GameBackend, regions: tuple, cell: Cell, rng: random.Random)
 
 def worker(cell: Cell, seed: int, barrier: Barrier, results: mp.Queue) -> None:
     backend, regions = make_backend(cell.backend, cell.rom, cell.render)
+    if cell.state is not None:
+        backend.load_state(cell.state)
     rng = random.Random(seed)
     decide(backend, regions, cell, rng)
     barrier.wait()
@@ -108,7 +111,7 @@ def median_rate(cell: Cell, envs: int, runs: int) -> float:
     return statistics.median(rates)
 
 
-def menu_check(args: argparse.Namespace, frames: int) -> tuple[int, bool]:
+def menu_check(args: argparse.Namespace, state: bytes, frames: int) -> tuple[int, bool]:
     """Presses DOWN 20 times from the menu state and counts presses that changed the screen.
 
     The second value is True when the screen also changes with no input, which makes the count
@@ -116,7 +119,6 @@ def menu_check(args: argparse.Namespace, frames: int) -> tuple[int, bool]:
     """
     hold, release = SPLITS[frames]
     backend, _ = make_backend(args.backend, args.rom, render=True)
-    state = args.menu_state.read_bytes()
     backend.load_state(state)
     before = backend.screen()
     backend.step(hold + release)
@@ -131,7 +133,7 @@ def menu_check(args: argparse.Namespace, frames: int) -> tuple[int, bool]:
     return moved, animates
 
 
-def header() -> list[str]:
+def header(state: Path | None) -> list[str]:
     commit = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
     ).stdout.strip()
@@ -142,6 +144,7 @@ def header() -> list[str]:
         f"OS: {platform.platform()}, {platform.machine()}, {mp.cpu_count()} logical CPUs",
         f"Python: {platform.python_version()}",
         f"Date: {datetime.datetime.now(datetime.UTC):%Y-%m-%d %H:%M} UTC",
+        f"Start state: `{state}`" if state else "Start state: ROM boot",
     ]
 
 
@@ -149,16 +152,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--backend", choices=["fake", "mgba"], default="mgba")
     parser.add_argument("--rom", type=Path)
-    parser.add_argument("--menu-state", type=Path, help="a save state with a menu open")
+    parser.add_argument(
+        "--state", type=Path, help="save state every worker loads first (default: ROM boot)"
+    )
+    parser.add_argument(
+        "--menu-state",
+        type=Path,
+        help="save state with the start menu open; a menu that does not wrap caps the count",
+    )
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--runs", type=int, default=3)
     args = parser.parse_args()
     if args.backend != "fake" and args.rom is None:
         parser.error("--rom is required for a real backend")
+    start = args.state.read_bytes() if args.state else None
+    menu = args.menu_state.read_bytes() if args.menu_state else None
 
     cells = (4 + len(SPLITS) * len(ENV_COUNTS)) * args.runs
     print(f"about {cells * args.seconds / 60:.0f} minutes of measurement", file=sys.stderr)
-    lines = [*header(), ""]
+    lines = [*header(args.state), ""]
 
     lines += [
         f"### Emulator frames per second, one process, {DEFAULT_FRAMES} frames per decision",
@@ -169,7 +181,7 @@ def main() -> None:
     for render in (False, True):
         fps = [
             median_rate(
-                Cell(args.backend, args.rom, DEFAULT_FRAMES, render, read, args.seconds),
+                Cell(args.backend, args.rom, DEFAULT_FRAMES, render, read, args.seconds, start),
                 1,
                 args.runs,
             )
@@ -188,7 +200,7 @@ def main() -> None:
         "|---|---|" + "---|" * len(ENV_COUNTS),
     ]
     for frames, (hold, release) in SPLITS.items():
-        cell = Cell(args.backend, args.rom, frames, False, True, args.seconds)
+        cell = Cell(args.backend, args.rom, frames, False, True, args.seconds, start)
         rates = [median_rate(cell, n, args.runs) for n in ENV_COUNTS]
         lines.append(
             f"| {frames} | {hold} / {release} | " + " | ".join(f"{r:,.0f}" for r in rates) + " |"
@@ -199,7 +211,7 @@ def main() -> None:
         f"### Menu presses that moved the cursor, out of {MENU_PRESSES}",
         "",
     ]
-    if args.menu_state is None:
+    if menu is None:
         lines.append("Not run: no --menu-state given.")
     else:
         lines += [
@@ -207,7 +219,7 @@ def main() -> None:
             "|---|---|---|---|",
         ]
         for frames, (hold, release) in SPLITS.items():
-            moved, animates = menu_check(args, frames)
+            moved, animates = menu_check(args, menu, frames)
             flag = "yes, count unreliable" if animates else "no"
             lines.append(f"| {frames} | {hold} / {release} | {moved} | {flag} |")
 
