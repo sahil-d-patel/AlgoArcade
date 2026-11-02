@@ -84,10 +84,17 @@ def steps_per_second(cell: Cell, envs: int) -> float:
     procs = [ctx.Process(target=worker, args=(cell, i, barrier, results)) for i in range(envs)]
     for p in procs:
         p.start()
-    try:
-        rates = [results.get(timeout=cell.seconds + 120) for _ in procs]
-    except queue.Empty:
-        sys.exit(f"a worker died during {cell}; run one env by hand to see its traceback")
+    # Poll so a worker that dies before the barrier does not leave the others waiting on it.
+    deadline = time.monotonic() + cell.seconds + 120
+    rates = []
+    while len(rates) < envs:
+        try:
+            rates.append(results.get(timeout=1))
+        except queue.Empty:
+            if any(p.exitcode for p in procs) or time.monotonic() > deadline:
+                for p in procs:
+                    p.terminate()
+                sys.exit(f"a worker failed or stalled during {cell}, envs={envs}; see stderr above")
     for p in procs:
         p.join()
     return sum(rates)
