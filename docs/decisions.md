@@ -58,3 +58,10 @@ AGENTS.md treats names, dependencies and architecture as PM decisions. These wer
 ## Log
 
 - 2026-10-11: Plan fine-tuned before kickoff.
+- 2026-10-25: On macOS arm64, Homebrew's mgba links ffmpeg 8 but Homebrew ships ffmpeg 9. We pin `ffmpeg@8` and put `/opt/homebrew/lib:/opt/homebrew/opt/ffmpeg@8/lib` on `DYLD_FALLBACK_LIBRARY_PATH` until Homebrew rebuilds mgba. libretro.py stays the fallback (#4).
+- 2026-11-02: The schema freeze moves to Nov 8. ENV-08 was not validated on real memory by Nov 1, which is the rule's trigger (#20).
+- 2026-11-02: ENV-04 is built on Kumario1's `issue-11/mgba-backend` branch, with their commits kept, and opened from the team repo (#11).
+- 2026-11-02: The three libmgba-py 0.2.0-2 zips (MPL-2.0) are mirrored as a release on this repo, because upstream has had no push since December 2024 (#11).
+- 2026-11-02: matplotlib is allowed as a dependency in the `train` group only, for learning-curve figures (#7, #14).
+- 2026-11-02: `StateNotReady` is the shared way a reader says memory is not ready. It is raised when the reader detects that; on the title screen and intro the FireRed v0 reader returns zeros instead, a known gap (#12).
+- 2026-11-02: The LLM attempt loop's dollar cap is hard. It stops before a request whose upper-bound cost would pass the cap (#16).
