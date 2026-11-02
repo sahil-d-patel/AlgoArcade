@@ -111,26 +111,25 @@ def median_rate(cell: Cell, envs: int, runs: int) -> float:
     return statistics.median(rates)
 
 
-def menu_check(args: argparse.Namespace, state: bytes, frames: int) -> tuple[int, bool]:
+def menu_check(args: argparse.Namespace, state: bytes, frames: int) -> int:
     """Presses DOWN 20 times from the menu state and counts presses that changed the screen.
 
-    The second value is True when the screen also changes with no input, which makes the count
-    unreliable for that split.
+    Each press is compared with a no-input step from the same saved state, so animation does not
+    count as a move.
     """
     hold, release = SPLITS[frames]
     backend, _ = make_backend(args.backend, args.rom, render=True)
     backend.load_state(state)
-    before = backend.screen()
-    backend.step(hold + release)
-    animates = not np.array_equal(before, backend.screen())
-    backend.load_state(state)
     moved = 0
     for _ in range(MENU_PRESSES):
-        before = backend.screen()
+        before = backend.save_state()
+        backend.step(hold + release)
+        idle = backend.screen()
+        backend.load_state(before)
         backend.press([Button.DOWN], hold, release)
-        moved += not np.array_equal(before, backend.screen())
+        moved += not np.array_equal(idle, backend.screen())
     backend.close()
-    return moved, animates
+    return moved
 
 
 def header(state: Path | None) -> list[str]:
@@ -215,13 +214,12 @@ def main() -> None:
         lines.append("Not run: no --menu-state given.")
     else:
         lines += [
-            "| Frames per decision | Hold / release | Moved | Screen changes with no input |",
-            "|---|---|---|---|",
+            "| Frames per decision | Hold / release | Moved |",
+            "|---|---|---|",
         ]
         for frames, (hold, release) in SPLITS.items():
-            moved, animates = menu_check(args, menu, frames)
-            flag = "yes, count unreliable" if animates else "no"
-            lines.append(f"| {frames} | {hold} / {release} | {moved} | {flag} |")
+            moved = menu_check(args, menu, frames)
+            lines.append(f"| {frames} | {hold} / {release} | {moved} |")
 
     print("\n".join(lines))
 
