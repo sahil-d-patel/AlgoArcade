@@ -12,11 +12,11 @@ A component implements the `RewardComponent` protocol in `src/algoarcade/rewards
 
 To add one:
 
-1. Write the component. A term that pays when an integer count reaches a new maximum needs no new class: `NewMaximum("name", lambda s: s.some_count)`, from `rewards/progress.py`. If it needs a field `Progress` lacks, add the field to `Progress` and to every state class that is passed to the registry, starting with `FakeState`.
-2. Add it to `COMPONENTS` in `rewards/registry.py`. The registry builds only names in that table and raises with the valid names for any other.
+1. Write the component. A term that pays when an integer count reaches a new maximum needs no new class: `NewMaximum("name", lambda s: s.some_count)`, from `rewards/progress.py`. If it needs a field `Progress` lacks, add the field to `Progress`, to the state class of each game whose table includes the component, and to `FakeState` so the tests can drive it. A game whose table leaves the component out does not need the field.
+2. Add it to the game's component table. FireRed's is `COMPONENTS` in `rewards/registry.py`. The registry builds only names in the table it is given and raises with the valid names for any other.
 3. Add the tests below to `tests/test_registry.py`.
 
-`RewardRegistry(weights).step(prev, curr)` returns the weighted sum and an info dict with each configured component's raw value as `reward/<name>`.
+`RewardRegistry(COMPONENTS, weights).step(prev, curr)` returns the weighted sum and an info dict with each configured component's raw value as `reward/<name>`.
 
 Every component ships with four things.
 

@@ -1,4 +1,5 @@
 import random
+from dataclasses import dataclass
 from itertools import pairwise
 
 import pytest
@@ -7,6 +8,8 @@ from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.fake import FakeReader, FakeState
+from algoarcade.rewards.explore import Explore
+from algoarcade.rewards.progress import Progress
 from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
 
 read = FakeReader().read
@@ -27,9 +30,9 @@ def poke(backend: GameBackend, offset: int, value: int) -> None:
     backend.load_state(bytes(ram))
 
 
-def start(weights: dict[str, float]) -> tuple[FakeBackend, RewardRegistry]:
+def start(weights: dict[str, float]) -> tuple[FakeBackend, RewardRegistry[Progress]]:
     backend = FakeBackend()
-    registry = RewardRegistry(weights)
+    registry = RewardRegistry(COMPONENTS, weights)
     registry.reset(read(backend))
     return backend, registry
 
@@ -49,7 +52,7 @@ def rollout(steps: int, seed: int) -> list[tuple[float, dict[str, float]]]:
 
 def test_unknown_component_raises_and_lists_valid_names() -> None:
     with pytest.raises(ValueError, match="'speed'") as error:
-        RewardRegistry({"explore": 1.0, "speed": 1.0})
+        RewardRegistry(COMPONENTS, {"explore": 1.0, "speed": 1.0})
     for name in COMPONENTS:
         assert name in str(error.value)
 
@@ -62,6 +65,17 @@ def test_reward_is_the_weighted_sum_of_raw_values() -> None:
         assert reward == pytest.approx(expected, abs=1e-9)
     for name in WEIGHTS:
         assert any(info[f"reward/{name}"] > 0 for _, info in results), f"{name} never paid"
+
+
+@dataclass(frozen=True)
+class Spot:
+    location: tuple[int, int]
+
+
+def test_explore_alone_needs_only_a_location() -> None:
+    registry = RewardRegistry({"explore": Explore}, {"explore": 1.0})
+    registry.reset(Spot((0, 0)))
+    assert registry.step(Spot((0, 0)), Spot((0, 1))) == (1.0, {"reward/explore": 1.0})
 
 
 def test_info_has_only_configured_components() -> None:
@@ -123,7 +137,7 @@ def test_chest_pays_events_once() -> None:
 
 
 def test_reset_clears_per_episode_state() -> None:
-    registry = RewardRegistry({"explore": 1.0, "level": 1.0})
+    registry = RewardRegistry(COMPONENTS, {"explore": 1.0, "level": 1.0})
     for _ in range(2):
         backend = FakeBackend()
         registry.reset(read(backend))

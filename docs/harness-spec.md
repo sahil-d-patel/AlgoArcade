@@ -111,7 +111,7 @@ Rules:
 
 A reward component is a small object with a name, a reset step that runs at the start of an episode, and a scoring step. The scoring step looks at the previous GameState and the current one and returns a number. The protocol lives in `src/algoarcade/rewards/base.py`.
 
-Components are combined from a config that gives each a weight. The environment returns the weighted total as the reward and reports each component's raw value in the step info, so each can be logged on its own.
+Components are combined from a config that gives each a weight. Each game passes the registry its own table of components, so its GameState needs only the fields those components read. The environment returns the weighted total as the reward and reports each component's raw value in the step info, so each can be logged on its own.
 
 The components and their starting weights are in the technical plan, under Reward design. Five are on by default (events, explore, level, badge, milestone) and five are off (heal, blackout, anti_loop, anti_spam, time).
 
