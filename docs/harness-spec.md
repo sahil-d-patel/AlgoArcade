@@ -167,44 +167,90 @@ Evaluation always starts from the fixed state with the archive off, even when tr
 
 ## Logging schema
 
-Frozen November 1. Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03.
+Freezes November 8 under the tag `schema-v1`. It moved from November 1 because ENV-08 was not validated on real memory by then (#20). Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section.
 
-Logs are Parquet files under `data/runs/run_id=<id>/`. Each writing process owns its own files and rolls to a new file every so many rows, because a Parquet file cannot be read until it is closed.
+Logs are Parquet files under `data/runs/run_id=<id>/<table>/`, one folder per table: `steps`, `visits`, `episodes`, `runs`. Each writing process owns its own files, named `<writer_id>-<n>.parquet`, and rolls to a new file every 100,000 rows by default, because a Parquet file cannot be read until it is closed. The open file ends in `.inprogress`, so a glob on `*.parquet` finds only closed files.
+
+The writer validates every batch. A missing column, an extra column, a wrong type or a null in a required column raises `SchemaError`. Column order is free.
+
+Types: Text is `string`, Integer is `int32`, 64-bit integer is `int64`, Small integer is `int16`, Decimal is `float64`, Boolean is `bool`. A column is required unless its row says nullable.
+
+### Reward columns
+
+Each of the ten components in the technical plan has a column `reward_<name>`: events, explore, level, badge, milestone, heal, blackout, anti_loop, anti_spam, time. It holds the raw value the registry reports, before the weight. It is null when the run's config leaves the component out. The weights are in the per-run `hyperparameters` under `reward_weights`, and `reward_total` is the sum of weight times raw value. A new component after the freeze adds a column, which is a PM decision.
 
 ### Per-step table
 
-Written every Nth step. The default N is 4.
+Written every Nth step. The default N is 4: each environment writes the row of a decision whose `episode_step` is a multiple of N.
 
 | Field | Type | Notes |
 |---|---|---|
 | run_id | Text | |
-| seed | Integer | |
+| seed | Integer | The run's seed |
 | env_idx | Integer | Which parallel environment |
-| env_steps | 64-bit integer | Total agent decisions across all environments |
+| env_steps | 64-bit integer | Total agent decisions across all environments, counted after this one |
 | wall_clock_s | Decimal | Seconds since the run started |
-| episode_id, episode_step | Integer | |
-| action | Small integer | |
-| map_group, map_num, x, y | Small integer | |
+| episode_id | Integer | Counts from 0 within each environment |
+| episode_step | Integer | Counts from 1 at the episode's first decision |
+| action | Small integer | Index into the environment's action set |
+| map_group, map_num, x, y | Small integer | The location after the decision |
 | in_battle | Boolean | |
 | milestone_count | Small integer | |
-| reward_total | Decimal | |
-| reward_ plus component name | Decimal | One column per component |
+| reward_total | Decimal | The weighted reward the environment returned |
+| reward_ plus component name | Decimal, nullable | One column per component |
 
 Both `env_steps` and `wall_clock_s` are required. Sample efficiency and wall-clock efficiency are separate claims.
 
 ### Visit-count table
 
-The per-step table is sampled, so the heatmap cannot use it for exact counts. Each environment also counts visits per tile and flushes them once per checkpoint window: run_id, window start step, map_group, map_num, x, y, visits. This table is exact and small.
+The per-step table is sampled, so the heatmap cannot use it for exact counts. Each environment counts one visit per decision, on the tile the player stands on after it, and flushes its counts once per checkpoint window of 500,000 `env_steps`. A run's visits sum to its `env_steps`. Several environments can write a row for the same tile and window; readers sum them. This table is exact and small.
+
+| Field | Type | Notes |
+|---|---|---|
+| run_id | Text | |
+| window_start_step | 64-bit integer | 0, 500,000, 1,000,000 and so on. A decision with `env_steps` e falls in the window starting at (e - 1) // 500,000 * 500,000 |
+| map_group, map_num, x, y | Small integer | |
+| visits | Integer | |
 
 ### Per-episode table
 
-Return, length, each component's total, badge count, party level sum, story flags, unique tiles, milestone count, start state name, whether the start came from the archive, and why the episode ended.
+One row per finished episode. An episode the end of the run cuts off is not written. LLM attempts are episodes too.
 
-LLM attempts are episodes too. Four columns are empty for RL runs and filled for the LLM: model, tool level, tokens in and out, and cost in dollars.
+| Field | Type | Notes |
+|---|---|---|
+| run_id, seed, env_idx | As in the per-step table | |
+| episode_id | Integer | With run_id and env_idx, names the episode |
+| env_steps | 64-bit integer | At the episode's last decision |
+| wall_clock_s | Decimal | At the episode's last decision |
+| episode_return | Decimal | Sum of `reward_total` over the episode |
+| episode_length | Integer | Decisions in the episode |
+| reward_ plus component name | Decimal, nullable | The component's raw total over the episode |
+| badge_count, party_level_sum, story_flags | Small integer | At the episode's end |
+| unique_tiles | Integer | Distinct `(map_group, map_num, x, y)` this episode |
+| milestone_count | Small integer | At the episode's end |
+| start_state | Text | The manifest name |
+| archive_start | Boolean | Whether the start came from the archive |
+| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap` |
+| llm_model | Text, nullable | Null for RL runs, like the four below |
+| llm_tool_level | Small integer, nullable | 0, 1 or 2 for L0 to L2 |
+| llm_tokens_in, llm_tokens_out | 64-bit integer, nullable | |
+| llm_cost_usd | Decimal, nullable | |
 
 ### Per-run table
 
-Written once per run: experiment id, arm, algorithm, trainer, seed, environment id, backend, ROM SHA-1, start state, observation mode, frames per decision, number of environments, reward config hash, git commit, hyperparameters, and total wall-clock time.
+One row per run, written when it ends.
+
+| Field | Type | Notes |
+|---|---|---|
+| run_id | Text | What every other table joins on |
+| experiment_id, arm, algorithm, trainer | Text | |
+| seed | Integer | |
+| env_id, backend, rom_sha1, start_state, obs_mode | Text | |
+| frames_per_decision, num_envs | Small integer | |
+| reward_config_hash, git_commit | Text | |
+| hyperparameters | Text | The resolved config as JSON, with gamma and `reward_weights` (name to weight) |
+| env_steps | 64-bit integer | Total decisions. The visit counts sum to it |
+| wall_clock_s | Decimal | Total wall-clock time in seconds |
 
 ### Checkpoints
 
@@ -229,7 +275,7 @@ Tests 1 to 3 live in `tests/conformance/` and run against every backend in the r
 
 The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
 
-The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids that sometimes earns a badge. It arrives with the logging pipeline in week 3 (OPS-03). In week 6 everyone builds their panel against it before pointing at real runs.
+The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids, from the player's bedroom to Pewter Gym, that earns the badge in about one episode in four. The same seed gives identical tables. `uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0` writes a 2,000,000-step run with four environments under `data/runs/`. In week 6 everyone builds their panel against it before pointing at real runs.
 
 ## MCP tool surface
 
