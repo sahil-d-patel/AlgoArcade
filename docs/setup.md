@@ -41,7 +41,7 @@ The harness runs the same check every time it loads a ROM. A wrong revision woul
 
 ## The mGBA binding
 
-Run on macOS arm64. Windows and Linux are not run yet; ENV-04 proves all three systems.
+The fetch script installs the pinned libmgba-py binding into the project environment. Run on macOS arm64; Windows and Linux are not run yet.
 
 | OS | First | Then |
 |---|---|---|
@@ -59,7 +59,7 @@ dyld reads it only at process start, and macOS strips it when a system binary su
 
 Ubuntu 22.04 only packages an older libmgba, so use 24.04 or later. Nobody compiles mGBA. If the binding fails on your machine, post the error on ENV-01 (or ENV-04 after week 1) instead of working around it.
 
-Until then, everything that does not need FireRed runs on the fake backend, which needs no ROM.
+With the ROM at `data/roms/firered.gba`, check the backend with `uv run pytest tests/conformance -k mgba -q`; the FireRed tests skip when the file is absent. States are native mGBA bytes, with flash and RTC data and, when rendering is on, a screenshot. They are not battery saves. `MgbaBackend(..., render=False)` turns video off, and `screen()` then raises `RuntimeError`. After loading a state without a screenshot into a rendered backend, advance one frame before calling `screen()`.
 
 ## Checks
 
