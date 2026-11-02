@@ -45,6 +45,13 @@ def test_second_room_is_new_ground() -> None:
     assert read(backend).location == (1, 1, 3)
 
 
+def test_door_loop_pays_nothing() -> None:
+    backend, explore = start()
+    walk(backend, explore, Button.DOWN, Button.DOWN, *[Button.RIGHT] * 8)
+    assert read(backend).location == (1, 1, 3)
+    assert sum(walk(backend, explore, *[Button.LEFT, Button.RIGHT] * 50)) == 0.0
+
+
 def test_reset_clears_visited_tiles() -> None:
     explore = Explore()
     for _ in range(2):
