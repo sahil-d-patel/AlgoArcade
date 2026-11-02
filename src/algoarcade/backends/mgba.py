@@ -41,7 +41,9 @@ class MgbaBackend:
             ).reshape(160, 240, 4)
         self._core.reset()
         self._screen_ready = True
-        # libmgba-py 0.2.0-2: keep private RAM access confined to this initialization.
+        # libmgba-py 0.2.0-2 exposes neither RAM pointers nor state flags. These two lines are
+        # the only reads of its private fields: the mCore handle and the GBA memory struct.
+        self._handle = self._core._core
         memory = self._core._native.memory
         self._regions: tuple[tuple[int, memoryview], ...] = (
             (EWRAM_BASE, memoryview(self._ffi.buffer(memory.wram, EWRAM_SIZE))),
@@ -89,7 +91,7 @@ class MgbaBackend:
             flags |= SAVESTATE_SCREENSHOT
         file = self._vfile.fromEmpty()
         try:
-            if not self._lib.mCoreSaveStateNamed(self._core._core, file.handle, flags):
+            if not self._lib.mCoreSaveStateNamed(self._handle, file.handle, flags):
                 raise RuntimeError("mGBA could not save state")
             file.seek(0, 0)
             return file.read_all()
@@ -102,7 +104,7 @@ class MgbaBackend:
             file.write(state, len(state))
             file.seek(0, 0)
             flags = SAVESTATE_SCREENSHOT | SAVESTATE_SAVEDATA | SAVESTATE_RTC
-            if not self._lib.mCoreLoadStateNamed(self._core._core, file.handle, flags):
+            if not self._lib.mCoreLoadStateNamed(self._handle, file.handle, flags):
                 raise ValueError("mGBA rejected the save state")
             self._screen_ready = state.startswith(b"\x89PNG\r\n\x1a\n")
         finally:
@@ -111,7 +113,7 @@ class MgbaBackend:
     def close(self) -> None:
         if self._core is not None:
             self._regions = ()
-            self._ffi.release(self._core._core)
+            self._ffi.release(self._handle)
             self._core = None
             self._pixels = None
             self._image = None
