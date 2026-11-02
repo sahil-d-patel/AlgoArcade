@@ -104,26 +104,22 @@ def test_no_component_goes_negative() -> None:
     assert all(value >= 0.0 for _, info in results for value in info.values())
 
 
-def test_level_drop_and_return_to_the_old_maximum_pays_nothing() -> None:
-    backend, registry = start({"level": 0.5})
-
-    def level_to(value: int) -> float:
+def raw_values(name: str, byte_values: list[int]) -> list[float]:
+    backend, registry = start({name: 1.0})
+    paid = []
+    for value in byte_values:
         prev = read(backend)
-        poke(backend, fake.LEVEL_SUM, value)
-        return registry.step(prev, read(backend))[1]["reward/level"]
+        poke(backend, COUNT_BYTES[name], value)
+        paid.append(registry.step(prev, read(backend))[1][f"reward/{name}"])
+    return paid
 
-    assert [level_to(v) for v in (6, 4, 6, 7)] == [1.0, 0.0, 0.0, 1.0]
+
+def test_level_drop_and_return_to_the_old_maximum_pays_nothing() -> None:
+    assert raw_values("level", [6, 4, 6, 7]) == [1.0, 0.0, 0.0, 1.0]
 
 
 def test_level_gain_is_capped_at_one_per_step_and_the_excess_is_lost() -> None:
-    backend, registry = start({"level": 0.5})
-
-    def level_to(value: int) -> float:
-        prev = read(backend)
-        poke(backend, fake.LEVEL_SUM, value)
-        return registry.step(prev, read(backend))[1]["reward/level"]
-
-    assert [level_to(v) for v in (9, 9, 10)] == [1.0, 0.0, 1.0]
+    assert raw_values("level", [9, 9, 10]) == [1.0, 0.0, 1.0]
 
 
 def test_chest_pays_events_once() -> None:
@@ -167,7 +163,7 @@ def test_exploit_grass_camping_pays_at_most_one_level_per_step() -> None:
     backend = FakeBackend()
     start_level = backend.save_state()[fake.LEVEL_SUM]
     states = [read(backend)]
-    for value in range(start_level + 1, start_level + 41):
+    for value in range(start_level + 3, start_level + 121, 3):
         poke(backend, fake.LEVEL_SUM, value)
         states.append(read(backend))
     assert total_reward("level", states) <= 40.0
