@@ -85,8 +85,8 @@ class _Walker:
         _, _, _, width, height = MAPS[self.map]
         self.x, self.y = int(rng.integers(width)), int(rng.integers(height))
 
-    def step(self, rng: np.random.Generator) -> tuple[int, dict[str, float]]:
-        """Moves one decision and returns the action and each component's raw reward."""
+    def step(self, rng: np.random.Generator) -> tuple[int, dict[str, float], float]:
+        """Moves one decision. Returns the action, each component's raw value and the reward."""
         self.episode_step += 1
         action = int(rng.integers(len(MOVES)))
         level_sum, badges, milestones = self.level_sum, self.badges, self.milestone_count
@@ -121,8 +121,9 @@ class _Walker:
         }
         for c, value in raw.items():
             self.totals[c] += value
-        self.episode_return += sum(WEIGHTS[c] * value for c, value in raw.items())
-        return action, raw
+        reward = sum(WEIGHTS[c] * value for c, value in raw.items())
+        self.episode_return += reward
+        return action, raw, reward
 
 
 def _rewards(columns: dict[str, list], raw: dict[str, float]) -> None:
@@ -143,7 +144,7 @@ def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
         clock = total / STEPS_PER_SECOND
         window = (total - 1) // WINDOW_STEPS * WINDOW_STEPS
         for env_idx, w in enumerate(walkers):
-            action, raw = w.step(rng)
+            action, raw, reward = w.step(rng)
             visits[(window, *w.location)] += 1
             if w.episode_step % SAMPLE_EVERY == 0:
                 group, num, x, y = w.location
@@ -162,7 +163,7 @@ def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
                     "y": y,
                     "in_battle": w.battle > 0,
                     "milestone_count": w.milestone_count,
-                    "reward_total": sum(WEIGHTS[c] * value for c, value in raw.items()),
+                    "reward_total": reward,
                 }
                 for name, value in row.items():
                     steps[name].append(value)
@@ -208,7 +209,7 @@ def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
         "num_envs": NUM_ENVS,
         "reward_config_hash": hashlib.sha1(weights.encode()).hexdigest(),
         "git_commit": "none",
-        "hyperparameters": json.dumps({"reward_weights": WEIGHTS}),
+        "hyperparameters": json.dumps({"gamma": 0.997, "reward_weights": WEIGHTS}),
         "env_steps": total,
         "wall_clock_s": total / STEPS_PER_SECOND,
     }
