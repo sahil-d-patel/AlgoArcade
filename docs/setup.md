@@ -41,13 +41,21 @@ The harness runs the same check every time it loads a ROM. A wrong revision woul
 
 ## The mGBA binding
 
-Not run yet. ENV-01 lands the fetch script and ENV-04 proves it on all three systems. This is what it will be:
+Run on macOS arm64. Windows and Linux are not run yet; ENV-04 proves all three systems.
 
 | OS | First | Then |
 |---|---|---|
 | Windows x64 | Nothing | `uv run python scripts/fetch_mgba.py` |
-| macOS (Apple Silicon) | `brew install mgba` | `uv run python scripts/fetch_mgba.py` |
+| macOS (Apple Silicon) | `brew install mgba ffmpeg@8`, then the export below | `uv run python scripts/fetch_mgba.py` |
 | Ubuntu 24.04 or later | `sudo apt install libmgba0.10t64` | `uv run python scripts/fetch_mgba.py` |
+
+On macOS, Homebrew's mgba is linked against ffmpeg 8 while Homebrew now ships ffmpeg 9, and the binding does not search Homebrew's library folder. Until Homebrew rebuilds mgba, put both folders on the fallback path in `~/.zshrc`:
+
+```sh
+export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib:/opt/homebrew/opt/ffmpeg@8/lib
+```
+
+dyld reads it only at process start, and macOS strips it when a system binary such as `/bin/sh` is in the launch chain, so run Python through `uv run`. Do not `brew link ffmpeg@8`.
 
 Ubuntu 22.04 only packages an older libmgba, so use 24.04 or later. Nobody compiles mGBA. If the binding fails on your machine, post the error on ENV-01 (or ENV-04 after week 1) instead of working around it.
 
