@@ -66,6 +66,7 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Progress | badge_flags, badge_count | The badge byte and its popcount |
 | Progress | story_flags | Count of set flags on the story whitelist |
 | Progress | trainers_defeated | Popcount of the trainer flag range |
+| Progress | world_map_flags | Count of the visited-map flags, 0x890 through 0x8C2 |
 | Progress | milestone_count | How far down the ordered Pallet-to-Brock list |
 | Progress | pokedex_owned, pokedex_seen | Pokédex counts |
 | Party | party | Up to six Pokémon: species, level, HP, max HP, status, moves |
@@ -73,6 +74,7 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Context | money | Decrypted |
 | Context | in_battle | Whether a battle is active |
 | Context | text_active, script_active, controls_locked | What the game is waiting on |
+| Context | text_speed, battle_scene_off | Saved options; fast text is 2 and battle scenes must be off |
 | Battle | own and enemy HP, level, moves, PP | Only meaningful while in_battle is true |
 
 Fields arrive in stages: position and plaintext party fields in ENV-05; badges, encrypted party
@@ -110,6 +112,9 @@ the source commit used for the pinned symbol build:
 | money | `gSaveBlock1Ptr` + 0x290, XOR `gSaveBlock2Ptr` + 0xF20 | `include/global.h`, `src/money.c` |
 | badge_flags, badge_count | `gSaveBlock1Ptr` + 0xFE4; flags 0x820 through 0x827 | `include/constants/flags.h`, `src/event_data.c` |
 | trainers_defeated | `gSaveBlock1Ptr` + 0xEE0; flags 0x500 through 0x7FF | Same flag definitions and indexing |
+| story_flags | Six persistent flags listed below, indexed from `gSaveBlock1Ptr` +0xEE0 | `include/constants/flags.h`, `src/event_data.c` |
+| world_map_flags | `gSaveBlock1Ptr` +0xFF2; 51 bits for flags 0x890 through 0x8C2 | Same flag definitions and indexing |
+| text_speed, battle_scene_off | `gSaveBlock2Ptr` +0x14 bits 0–2; +0x15 bit 2 | `include/global.h` |
 | pokedex_owned, pokedex_seen | `gSaveBlock2Ptr` + 0x28 and +0x5C; seen copies at `gSaveBlock1Ptr` +0x5F8 and +0x3A18 | `include/global.h`, `src/pokedex_screen.c` |
 | in_battle | `gMain` +0x439, bit 1 | `include/main.h` |
 | text_active | `sMessageBoxType` is not hidden (0) | `src/field_message_box.c` |
@@ -120,11 +125,29 @@ the source commit used for the pinned symbol build:
 The Pokédex screen counts only the 386 national entries. Seen bits must agree in all three
 copies; an owned bit also needs that seen bit. Party substructures have 24 physical orders,
 selected by personality modulo 24: species is in growth and four move ids are in attacks.
-`party_level_sum` sums the live party levels. Species and move ids use the game's internal ids.
+`party_level_sum` sums the live party levels. `party_hp_frac` is total current party HP divided
+by total maximum party HP, or 0 when that total is zero. Species and move ids use the game's
+internal ids. `FireRedReader.check_options(backend)` raises `ValueError` unless saved text
+speed is fast (2) and battle scenes are off. Call it at environment reset.
 
-Local trainer-card capture `env08-money-3000.state` validates money 3000 and zero badges.
-Other ENV-08 fields still need captured-state validation; the story whitelist and options
-interface remain pending confirmation. No logged fields change in this implementation.
+The approved story whitelist counts each of these persistent events once:
+
+| Symbol | Flag id | Event |
+|---|---|---|
+| FLAG_SYS_POKEMON_GET | 0x828 | Starter received |
+| FLAG_BEAT_RIVAL_IN_OAKS_LAB | 0x258 | Lab rival defeated |
+| FLAG_SYS_POKEDEX_GET | 0x829 | Pokedex received |
+| FLAG_GOT_POTION_ON_ROUTE_1 | 0x230 | Route 1 gift potion received |
+| FLAG_DEFEATED_BROCK | 0x4B0 | Brock defeated |
+| FLAG_GOT_TM39_FROM_BROCK | 0x254 | Brock's TM received |
+
+`tests/test_firered_fields.py` verifies hash-pinned local captures of the trainer card,
+party/summary screens, options, dialogue, battle and Pokedex. Money changes from 3000 to 3080
+after the lab rival win; the Pokedex screen shows Seen 4 and Owned 1. A 163-decision replay
+crosses the house warps and rival battle, checking map ids, money and nondecreasing progress.
+Capture tests carry the `rom` marker and skip when their local files are absent. Captures
+are FireRed USA rev 0 on macOS arm64; live nonzero status ailments and earned badges are
+not covered by these captures. No logged fields change.
 
 Rules:
 

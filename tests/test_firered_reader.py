@@ -1,4 +1,5 @@
 import struct
+from dataclasses import replace
 from itertools import permutations
 
 import pytest
@@ -6,7 +7,7 @@ import pytest
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.addresses import ADDRESSES
-from algoarcade.games.firered.reader import FireRedReader, PartyPokemon
+from algoarcade.games.firered.reader import STORY_FLAGS, FireRedReader, PartyPokemon
 
 
 class MemoryBackend(FakeBackend):
@@ -47,6 +48,7 @@ def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
     assert first.location == (3, 4, 12, 19)
     assert first.party == ()
     assert first.party_count == 0
+    assert first.party_hp_frac == 0
 
     backend.write(pointer_address, (base + offset).to_bytes(4, "little"))
     backend.write(base + offset, struct.pack("<hhbb", 27, 31, 5, 6))
@@ -227,3 +229,76 @@ def test_temporary_and_hide_flags_do_not_count_as_progress(sha1: str) -> None:
     state = FireRedReader(sha1).read(backend)
     assert state.badge_count == 0
     assert state.trainers_defeated == 0
+    assert state.story_flags == state.world_map_flags == 0
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_story_whitelist_isolated_from_other_flags(sha1: str) -> None:
+    assert STORY_FLAGS == {
+        "FLAG_SYS_POKEMON_GET": 0x828,
+        "FLAG_BEAT_RIVAL_IN_OAKS_LAB": 0x258,
+        "FLAG_SYS_POKEDEX_GET": 0x829,
+        "FLAG_GOT_POTION_ON_ROUTE_1": 0x230,
+        "FLAG_DEFEATED_BROCK": 0x4B0,
+        "FLAG_GOT_TM39_FROM_BROCK": 0x254,
+    }
+    assert min(STORY_FLAGS.values()) >= 0x230
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    reader = FireRedReader(sha1)
+    for count, flag in enumerate([0x828, 0x258, 0x829, 0x230, 0x4B0, 0x254], start=1):
+        address = base + 0xEE0 + flag // 8
+        backend.write(address, bytes([backend.read(address, 1)[0] | (1 << (flag % 8))]))
+        assert reader.read(backend).story_flags == count
+    backend.write(base + 0xEE0, bytes([0xFF] * (0x230 // 8)))
+    assert reader.read(backend).story_flags == 6
+    backend.write(base + 0xEE0 + 0x231 // 8, b"\xff")
+    assert reader.read(backend).story_flags == 6
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize(
+    ("speed", "scene_off"), [(0, False), (1, False), (2, False), (1, True), (2, True)]
+)
+def test_world_flags_and_options_follow_relocated_save_blocks(
+    sha1: str, speed: int, scene_off: bool
+) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base1 = addresses["gSaveBlock1"].address + 0x7C
+    base2 = addresses["gSaveBlock2"].address + 0x7C
+    backend.write(addresses["gSaveBlock1Ptr"].address, base1.to_bytes(4, "little"))
+    backend.write(addresses["gSaveBlock2Ptr"].address, base2.to_bytes(4, "little"))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base1 + 0xFF2, bytes([0xFF] * 7))
+    backend.write(base2 + 0x14, bytes([0xF8 | speed, 0xFB | (4 if scene_off else 0)]))
+    reader = FireRedReader(sha1)
+    state = reader.read(backend)
+    assert state.world_map_flags == 51
+    assert state.text_speed == speed
+    assert state.battle_scene_off == scene_off
+    if speed == 2 and scene_off:
+        reader.check_options(backend)
+    else:
+        with pytest.raises(ValueError, match="fast text speed and battle scene off"):
+            reader.check_options(backend)
+    backend.write(base1 + 0xFF2, b"\x01\x00\x00\x00\x00\x00\xfc")
+    assert reader.read(backend).world_map_flags == 2
+
+
+def test_party_hp_fraction_uses_total_hp() -> None:
+    addresses = next(iter(ADDRESSES.values()))
+    backend = MemoryBackend()
+    backend.write(
+        addresses["gSaveBlock1Ptr"].address, addresses["gSaveBlock1"].address.to_bytes(4, "little")
+    )
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    state = FireRedReader(next(iter(ADDRESSES))).read(backend)
+    party = (
+        PartyPokemon(level=5, hp=10, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0)),
+        PartyPokemon(level=5, hp=0, max_hp=80, status=0, species=1, moves=(33, 45, 0, 0)),
+    )
+    assert replace(state, party=party).party_hp_frac == 0.1

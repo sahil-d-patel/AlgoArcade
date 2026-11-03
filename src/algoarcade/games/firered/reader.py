@@ -8,6 +8,15 @@ from algoarcade.games.firered.addresses import ADDRESSES
 
 # GetSubstruct in src/pokemon.c: physical order of growth, attacks, EVs and miscellaneous.
 SUBSTRUCT_ORDERS = tuple(permutations(range(4)))
+# include/constants/flags.h at source e93eb12a336fb97df420b0961753d8a3713c9fcc.
+STORY_FLAGS = {
+    "FLAG_SYS_POKEMON_GET": 0x828,
+    "FLAG_BEAT_RIVAL_IN_OAKS_LAB": 0x258,
+    "FLAG_SYS_POKEDEX_GET": 0x829,
+    "FLAG_GOT_POTION_ON_ROUTE_1": 0x230,
+    "FLAG_DEFEATED_BROCK": 0x4B0,
+    "FLAG_GOT_TM39_FROM_BROCK": 0x254,
+}
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,10 @@ class FireRedState:
     text_active: bool
     script_active: bool
     controls_locked: bool
+    story_flags: int
+    world_map_flags: int
+    text_speed: int
+    battle_scene_off: bool
 
     @property
     def party_count(self) -> int:
@@ -52,6 +65,11 @@ class FireRedState:
     @property
     def party_level_sum(self) -> int:
         return sum(pokemon.level for pokemon in self.party)
+
+    @property
+    def party_hp_frac(self) -> float:
+        maximum = sum(pokemon.max_hp for pokemon in self.party)
+        return sum(pokemon.hp for pokemon in self.party) / maximum if maximum else 0.0
 
 
 class FireRedReader:
@@ -73,6 +91,14 @@ class FireRedReader:
         badge_flags = read_u8(backend, pointer + 0xFE4)
         # flags.h trainer ids 0x500..0x7FF; FlagGet indexes SaveBlock1.flags at 0xEE0.
         trainers_defeated = sum(byte.bit_count() for byte in backend.read(pointer + 0xF80, 96))
+        story_flags = sum(
+            bool(read_u8(backend, pointer + 0xEE0 + flag // 8) & (1 << (flag % 8)))
+            for flag in STORY_FLAGS.values()
+        )
+        # World-map ids 0x890..0x8C2 occupy 51 bits; exclude padding in the final byte.
+        world_map_flags = int.from_bytes(backend.read(pointer + 0xFF2, 7), "little")
+        world_map_flags &= (1 << 51) - 1
+        options = backend.read(pointer2 + 0x14, 2)
         # DexScreen_GetSetPokedexFlag requires matching seen bits in all three copies.
         seen = int.from_bytes(backend.read(pointer2 + 0x5C, 49), "little")
         seen &= int.from_bytes(backend.read(pointer + 0x5F8, 49), "little")
@@ -126,4 +152,13 @@ class FireRedReader:
             text_active=text_active,
             script_active=script_active,
             controls_locked=controls_locked,
+            story_flags=story_flags,
+            world_map_flags=world_map_flags.bit_count(),
+            text_speed=options[0] & 7,
+            battle_scene_off=bool(options[1] & 4),
         )
+
+    def check_options(self, backend: GameBackend) -> None:
+        state = self.read(backend)
+        if state.text_speed != 2 or not state.battle_scene_off:
+            raise ValueError("FireRed requires fast text speed and battle scene off")

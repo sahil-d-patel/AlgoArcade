@@ -22,7 +22,11 @@ Locations are always `(map_group, map_num, x, y)`. Progress counts use only rang
 
 `FireRedReader` reads position, money, badges, defeated trainers, Pokédex counts, battle/dialogue/script/control context, and live party level, HP, max HP, status, species and moves. Both save-block pointers are checked on each read. Money uses the current SaveBlock2 key; species and moves require a valid decrypted checksum. Invalid pointers, party counts above six and bad checksums raise `StateNotReady`.
 
-ENV-08 layouts and symbols are listed in `docs/harness-spec.md`, FireRed memory map. Pokédex counts use 386 national entries and the screen's cross-check of all three seen-bit copies. `script_active` follows `ScriptContext_IsEnabled`: waiting and shut-down scripts are false. Story flags, world-map counts and the options interface are not implemented yet.
+ENV-08 layouts and symbols are listed in `docs/harness-spec.md`, FireRed memory map. Pokédex counts use 386 national entries and the screen's cross-check of all three seen-bit copies. `script_active` follows `ScriptContext_IsEnabled`: waiting and shut-down scripts are false.
+
+Story progress counts only `STORY_FLAGS`: starter, lab rival win, Pokédex, Route 1 gift potion, Brock win and Brock's TM. World-map progress counts flags 0x890 through 0x8C2, masking padding bits. `check_options(backend)` raises `ValueError` unless text speed is 2 (fast) and battle scenes are off. `party_hp_frac` is total HP divided by total maximum HP, or 0 for a zero-capacity party.
+
+`uv run pytest -k firered_fields` runs the hash-pinned capture checks and the house-warp/rival-battle trace. Captures stay under `data/states/` and skip when absent. The available rev 0 captures include zero badges and healthy party status; positive badge and status cases currently have synthetic coverage only.
 
 The memory map and the rules are in `docs/harness-spec.md` under "FireRed memory map". ENV-05 owns this skill.
 
