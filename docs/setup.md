@@ -27,7 +27,7 @@ Run every project command through `uv run`. Do not activate the virtual environm
 
 ### The mGBA binding
 
-Each OS needs one system package for the mGBA binding, then the fetch script installs the pinned binding into the project environment. Run on macOS arm64 and on Ubuntu 24.04 x64 (in a container); Windows is not run yet.
+Install your OS's system packages for the mGBA binding, then run the fetch script, which installs the pinned binding into the project environment. Run on macOS arm64 and on Ubuntu 24.04 x64 (in a container); Windows is not run yet.
 
 | OS | First | Then |
 |---|---|---|

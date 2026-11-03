@@ -21,6 +21,9 @@ def make_mgba() -> GameBackend:
     path = Path(__file__).resolve().parents[2] / "data" / "roms" / "firered.gba"
     if not path.is_file():
         pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     return MgbaBackend(path)
 
 

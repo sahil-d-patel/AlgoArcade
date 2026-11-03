@@ -15,6 +15,9 @@ ROM = Path(__file__).resolve().parents[1] / "data" / "roms" / "firered.gba"
 def mgba_backend() -> MgbaBackend:
     if not ROM.is_file():
         pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     return MgbaBackend(ROM)
 
 
@@ -87,6 +90,9 @@ def test_input_release_memory_boundaries_and_bad_states(mgba_backend: MgbaBacken
 def test_rendering_can_be_disabled() -> None:
     if not ROM.is_file():
         pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     backend = MgbaBackend(ROM, render=False)
     try:
         backend.step(1000)
@@ -99,7 +105,7 @@ def test_rendering_can_be_disabled() -> None:
             backend.screen()
     finally:
         backend.close()
-        backend.close()
+        backend.close()  # a second close must be safe
 
 
 @pytest.mark.rom
