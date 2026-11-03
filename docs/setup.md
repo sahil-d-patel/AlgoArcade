@@ -77,7 +77,7 @@ The states were captured on FireRed rev 1 and have not been tried on rev 0. With
 uv run python scripts/capture_states.py
 ```
 
-The script replays recorded inputs from power-on, checks the location and the options after each stage, and writes the nine states plus the `_goal` states the tests use. mGBA is deterministic, so the output hashes match the manifest. `--from s1` resumes from a state you already have.
+The script replays recorded inputs from power-on, checks the location and the options after each stage, and writes the nine states plus the `_goal` states the tests use. mGBA is deterministic, so the output hashes match the manifest. `--from gym_door` replays that stage and the ones after it, starting from the states already in `data/states/`.
 
 ## Checks
 

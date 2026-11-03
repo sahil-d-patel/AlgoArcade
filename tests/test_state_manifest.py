@@ -45,6 +45,9 @@ def backend():
         pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
     if identify(ROM).sha1 != ROM_SHA1:
         pytest.skip("The states were captured on rev 1")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     backend = MgbaBackend(ROM)
     yield backend
     backend.close()

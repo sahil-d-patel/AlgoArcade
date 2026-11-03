@@ -1,7 +1,7 @@
 """Regenerate the ENV-06 start states in data/states/ from power-on.
 
-    uv run python scripts/capture_states.py               # every stage, from power-on
-    uv run python scripts/capture_states.py --from s1     # resume from data/states/s1.state
+    uv run python scripts/capture_states.py                 # every stage, from power-on
+    uv run python scripts/capture_states.py --from gym_door # that stage on, from saved states
 
 Each stage loads the state the previous stage saved, replays recorded inputs, checks the
 reader's location and the options, and saves. mGBA is deterministic, so the same inputs on the
@@ -12,10 +12,10 @@ Inputs, separated by spaces; a suffix xN repeats one input N times:
     wN                wait N frames
     tU tD tL tR       walk one tile, then press A through any dialogue or battle it starts
     aa                press A until the player can walk again
-    gN                from the Viridian Pokemon Center door, fight on Route 1 until level N
+    bb                press B until the player can walk again: it answers NO to a question
     ab                press A until a battle starts
     ff                press A until the battle ends: the first move every turn
-    bb                press B until the player can walk again: it answers NO to a question
+    gN                from the Viridian Pokemon Center door, fight on Route 1 until level N
 """
 
 import argparse
@@ -27,11 +27,10 @@ from pathlib import Path
 from algoarcade.backends.base import Button, GameBackend, read_u8, read_u32
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.firered.addresses import ADDRESSES
+from algoarcade.games.firered.manifest import STATES
 from algoarcade.games.firered.reader import FireRedReader
 
-ROOT = Path(__file__).resolve().parents[1]
-ROM = ROOT / "data" / "roms" / "firered.gba"
-STATES = ROOT / "data" / "states"
+ROM = Path(__file__).resolve().parents[1] / "data" / "roms" / "firered.gba"
 
 KEYS = {
     "A": Button.A,
@@ -160,7 +159,7 @@ STAGES = (
     Stage(
         saves=("brock",),
         source="gym_door",
-        # Column 9 and 8 stay outside the camper's four-tile sight line on row 8. The state is
+        # Columns 9 and 8 stay outside the camper's four-tile sight line on row 8. The state is
         # the first "What will SQUIRTLE do?" menu against Geodude.
         inputs="tU tUx4 tRx3 tUx2 tL tUx2 tLx2 U ab w300 A w420",
         location=(6, 2, 6, 6),
@@ -255,6 +254,7 @@ class Player:
                 self._do(name)
 
     def _in_battle(self) -> bool:
+        # gMain.inBattle, bit 1 of +0x439: docs/harness-spec.md, FireRed memory map.
         return bool(read_u8(self.backend, self._main + 0x439) & 2)
 
     def _has_control(self) -> bool:
