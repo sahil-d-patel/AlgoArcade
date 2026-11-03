@@ -45,7 +45,9 @@ def first_crossing(timesteps: np.ndarray, means: np.ndarray, target: float) -> i
     return int(timesteps[hits[0]]) if hits.size else None
 
 
-def save_curve(timesteps: np.ndarray, means: np.ndarray, stds: np.ndarray, path: Path, seed: int) -> None:
+def save_curve(
+    timesteps: np.ndarray, means: np.ndarray, stds: np.ndarray, path: Path, seed: int
+) -> None:
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(timesteps, means, label=f"seed {seed}")
     ax.fill_between(timesteps, means - stds, means + stds, alpha=0.2)
@@ -121,7 +123,9 @@ def main() -> None:
     model_path = run_dir / "model.zip"
     model.save(model_path)
 
-    mean_return, std_return = evaluate_policy(model, eval_env, n_eval_episodes=20, deterministic=True)
+    mean_return, std_return = evaluate_policy(
+        model, eval_env, n_eval_episodes=20, deterministic=True
+    )
 
     log = np.load(run_dir / "evaluations.npz")
     timesteps = log["timesteps"]
@@ -134,7 +138,9 @@ def main() -> None:
     eval_env.close()
 
     print(f"model saved to {model_path}")
-    print(f"steps to >= {TARGET_RETURN:.0f}: {crossed_at if crossed_at is not None else 'not reached'}")
+    print(
+        f"steps to >= {TARGET_RETURN:.0f}: {crossed_at if crossed_at is not None else 'not reached'}"
+    )
     print(f"wall time: {wall_time:.1f}s")
     print(f"final mean eval return: {mean_return:.1f} +/- {std_return:.1f}")
 
