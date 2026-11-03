@@ -145,7 +145,9 @@ def git(*args: str) -> str:
     ).stdout.strip()
 
 
-def run_row(config: TrainConfig, run_id: str, backend: str, rom_sha1: str, commit: str) -> dict:
+def run_row(
+    config: TrainConfig, run_id: str, backend: str, rom_sha1: str, commit: str
+) -> dict[str, Any]:
     """The per-run table's fields that do not change between the start and end rows."""
     return {
         "run_id": run_id,
