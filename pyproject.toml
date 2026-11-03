@@ -48,14 +48,14 @@ ignore = ["E501"]
 "tests/**" = ["ARG", "PLR2004"]
 
 [tool.pyrefly]
-project-includes = ["src", "tests", "tools"]
-search-path = ["src", "tools", "tools/github", ".claude/hooks"]
+project-includes = ["src", "tests", "tools", "scripts"]
+search-path = ["src", "tools", "tools/github", ".claude/hooks", "scripts"]
 # The train group is optional; without it these resolve to Any instead of failing.
 ignore-missing-imports = ["stable_baselines3", "stable_baselines3.*", "wandb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tools", "tools/github", ".claude/hooks"]
+pythonpath = ["tools", "tools/github", ".claude/hooks", "scripts"]
 addopts = ["--strict-markers"]
 markers = ["rom: needs a ROM file; skipped when the ROM is absent"]
 
