@@ -106,6 +106,8 @@ MANIFEST = (
         left_forest_north,
         8192,
     ),
+    # gym_door and brock carry a level 14 Squirtle with Water Gun, ground on Route 1 before the
+    # forest. Pressing A every turn wins the Brock battle, so label results from these states.
     StartState(
         "gym_door",
         "ed1ff580b2b01aaaebd7407bec6843dbd714e85e55ad3398874c2501f2f9a318",

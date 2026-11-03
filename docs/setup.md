@@ -71,13 +71,15 @@ uv run python -m algoarcade.games.firered.manifest
 
 It prints one line per state, `OK` or `MISSING` or `MISMATCH`, and exits non-zero unless all nine are OK. Never post the files anywhere public.
 
-The states were captured on FireRed rev 1 and have not been tried on rev 0. With a rev 1 ROM you can regenerate them yourself instead; it takes about 90 seconds:
+The states were captured on FireRed rev 1. With a rev 1 ROM you can regenerate them yourself instead; it takes about 90 seconds:
 
 ```sh
 uv run python scripts/capture_states.py
 ```
 
-The script replays recorded inputs from power-on, checks the location and the options after each stage, and writes the nine states plus the `_goal` states the tests use. mGBA is deterministic, so the output hashes match the manifest. `--from gym_door` replays that stage and the ones after it, starting from the states already in `data/states/`.
+The script replays recorded inputs from power-on, checks the location and the options after each stage, and writes the nine states plus the `_goal` states the tests use. On macOS arm64 with libmgba-py 0.2.0, the output hashes matched the manifest on every run; other platforms are not run yet. `--from gym_door` replays that stage and the ones after it, starting from the states already in the folder. `--out DIR` reads and writes `DIR` instead of `data/states/`, and the script writes `data/states/` only with the rev 1 ROM. To check a file, regenerate into a scratch folder and run `uv run python -m algoarcade.games.firered.manifest DIR`.
+
+With a rev 0 ROM, use `--out`. The address table is the same for both revisions, but nobody has run the script on rev 0.
 
 ## Checks
 
