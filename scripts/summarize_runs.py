@@ -43,7 +43,8 @@ def main(out_dir: Path, runs_dir: Path = Path("data/runs")) -> None:
         if threshold is not None:
             ax.axhline(threshold, color="gray", linestyle="--", label="threshold")
         # Fewer than five seeds is exploratory (.claude/skills/experiment).
-        seeds = f"{len(runs)} seeds" + (", exploratory" if len(runs) < 5 else "")
+        n_seeds = len({seed for seed, _, _ in runs})
+        seeds = f"{n_seeds} seeds" + (", exploratory" if n_seeds < 5 else "")
         ax.set(
             title=f"{name} ({seeds})", xlabel="env steps", ylabel="mean eval return (deterministic)"
         )
