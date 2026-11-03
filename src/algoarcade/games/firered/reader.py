@@ -21,6 +21,7 @@ class FireRedState:
     x: int
     y: int
     party: tuple[PartyPokemon, ...]
+    badge_flags: int
 
     @property
     def party_count(self) -> int:
@@ -43,6 +44,9 @@ class FireRedReader:
             raise StateNotReady(f"Invalid gSaveBlock1Ptr: {pointer:#010x}")
         # SaveBlock1.pos/location: include/global.h at the same source commit.
         x, y, map_group, map_num = struct.unpack("<hhbb", backend.read(pointer, 6))
+        # SaveBlock1.flags is at 0xEE0 and FLAG_BADGE01_GET is 0x820 (include/constants/flags.h),
+        # so the eight badges are the byte at 0xFE4, Boulder Badge in bit 0.
+        badge_flags = read_u8(backend, pointer + 0xFE4)
         count = read_u8(backend, self._addresses["gPlayerPartyCount"].address)
         if count > 6:
             raise StateNotReady(f"Invalid gPlayerPartyCount: {count}")
@@ -52,4 +56,11 @@ class FireRedReader:
             address = self._addresses["gPlayerParty"].address + index * 100
             status, level, hp, max_hp = struct.unpack("<IBxHH", backend.read(address + 0x50, 10))
             party.append(PartyPokemon(level=level, hp=hp, max_hp=max_hp, status=status))
-        return FireRedState(map_group=map_group, map_num=map_num, x=x, y=y, party=tuple(party))
+        return FireRedState(
+            map_group=map_group,
+            map_num=map_num,
+            x=x,
+            y=y,
+            party=tuple(party),
+            badge_flags=badge_flags,
+        )

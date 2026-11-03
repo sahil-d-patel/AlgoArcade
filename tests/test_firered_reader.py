@@ -14,7 +14,7 @@ class MemoryBackend(FakeBackend):
         self.memory: dict[int, int] = {}
 
     def read(self, address: int, size: int) -> bytes:
-        return bytes(self.memory[address + offset] for offset in range(size))
+        return bytes(self.memory.get(address + offset, 0) for offset in range(size))
 
     def write(self, address: int, data: bytes) -> None:
         self.memory.update((address + offset, value) for offset, value in enumerate(data))
@@ -96,3 +96,19 @@ def test_invalid_party_count_is_not_ready(sha1: str, count: int) -> None:
     backend.write(addresses["gPlayerPartyCount"].address, bytes([count]))
     with pytest.raises(StateNotReady, match="gPlayerPartyCount"):
         FireRedReader(sha1).read(backend)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_badge_flags_follow_moving_pointer(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    reader = FireRedReader(sha1)
+    base = addresses["gSaveBlock1"].address
+    pointer_address = addresses["gSaveBlock1Ptr"].address
+    backend.write(pointer_address, base.to_bytes(4, "little"))
+    backend.write(base + 0xFE4, b"\x01")
+    assert reader.read(backend).badge_flags == 0x01
+
+    backend.write(pointer_address, (base + 0x40).to_bytes(4, "little"))
+    backend.write(base + 0x40 + 0xFE4, b"\x03")
+    assert reader.read(backend).badge_flags == 0x03
