@@ -273,16 +273,18 @@ E1 to E4 share one baseline arm, so they need 30 runs, not 45.
 
 ### Compute budget
 
-These numbers are arithmetic on the 500 steps per second assumption. They get replaced after OPS-02.
+Measured on the Mac (docs/benchmarks.md): 1,005 agent steps per second at 24 frames per decision with 16 environments, under a random policy, so about 86.8M steps a day (1,005 × 86,400). The training box is not measured yet; its column still uses the 500 steps per second guess.
 
-| Block | Runs | Steps each | Box-days at 500 steps/s |
-|---|---|---|---|
-| E1 to E4 | 30 | 15M | 10.4 |
-| E5 | 3 new | 15M | 1.0 |
-| E6 from S1 | 3 | 100M | 6.9 |
-| E6 from S0 | 2 | 100M or more | 4.6 or more |
+| Block | Runs | Steps each | Mac-days at 1,005 steps/s | Box-days at 500 steps/s (guess) |
+|---|---|---|---|---|
+| E1 to E4 | 30 | 15M | 5.2 (450M / 86.8M) | 10.4 |
+| E5 | 3 new | 15M | 0.5 (45M / 86.8M) | 1.0 |
+| E6 from S1 | 3 | 100M | 3.5 (300M / 86.8M) | 6.9 |
+| E6 from S0 | 2 | 100M or more | 2.3 or more (200M / 86.8M) | 4.6 or more |
 
-That is about 23 box-days. The queue goes live November 8 and results freeze November 22, which leaves 14 days, or 28 machine-days across two machines. On paper that fits. In practice most arms only become ready during week 5, so it does not.
+Policy inference and logging will lower these; the benchmark measures emulation only.
+
+That is about 23 box-days at the guessed rate, or about 11.5 days at the Mac's measured rate. The queue goes live November 8 and results freeze November 22, which leaves 14 days, or 28 machine-days across two machines. On paper that fits. In practice most arms only become ready during week 5, so it does not.
 
 So the Mac is the second training machine. The training box runs E1, E3, E4 and the S1 Brock runs. The Mac runs E2, E5, E9 and the cold-start runs. The Brock runs are the first thing to spill past November 22: they keep running, and the writeup reports where they stood. If the benchmark comes in low, ablation runs drop from 15M to 10M steps before any arm loses seeds.
 
