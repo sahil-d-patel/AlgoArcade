@@ -109,7 +109,7 @@ def main() -> None:
     eval_callback = EvalCallback(
         eval_env,
         n_eval_episodes=10,
-        eval_freq=max(eval_every_timesteps // N_ENVS, 1),
+        eval_freq=eval_every_timesteps // N_ENVS,
         log_path=str(run_dir),  # writes evaluations.npz
         best_model_save_path=None,
         deterministic=True,
