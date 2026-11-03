@@ -22,9 +22,10 @@ def _valid(state: Party) -> bool:
 
 def blacked_out(prev: Party, curr: Party) -> bool:
     """The party went from all fainted to healed. In FireRed that is a whiteout: DoWhiteOut in
-    src/overworld.c heals the party and warps in one call. Losing the Oak's Lab battle also heals
-    a fainted party, without a warp (PalletTown_ProfessorOaksLab/scripts.inc), and counts too.
-    The party_count checks keep an empty party, which reads 0.0, from looking fainted."""
+    src/overworld.c (pret/pokefirered at ce6406d8) heals the party and warps in one call. Losing
+    the Oak's Lab battle also heals a fainted party, without a warp
+    (data/maps/PalletTown_ProfessorOaksLab/scripts.inc), and counts too. The party_count checks
+    keep an empty party, which reads 0.0, from looking fainted."""
     return (
         prev.party_count > 0
         and curr.party_count == prev.party_count

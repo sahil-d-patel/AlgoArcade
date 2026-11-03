@@ -11,9 +11,9 @@ LOOP_WINDOW = 30  # steps; docs/technical-plan.md, Reward design
 
 
 class AntiLoop(RewardComponent[GameState]):
-    """Fires on a move onto a tile the player stood on in the last 30 steps. Standing still is
-    not a move, so it never fires. This is a penalty, not novelty: novelty keeps a permanent
-    per-episode set (Explore)."""
+    """Fires on a move onto a tile the player stood on in the last 30 steps. Standing still
+    never fires it. This window is a penalty, not novelty: novelty keeps a permanent per-episode
+    set (Explore)."""
 
     name = "anti_loop"
 
