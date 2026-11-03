@@ -156,6 +156,11 @@ def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
     assert raw_values(name, byte_values) == paid
 
 
+def test_a_misread_story_flag_count_neither_pays_nor_silences_later_flags() -> None:
+    # 0xFF reads as eight flags; no script sets more than three at once.
+    assert raw_values("events", [0x00, 0x01, 0xFF, 0x01, 0x03]) == [1.0, 0.0, 0.0, 1.0]
+
+
 def test_chest_pays_events_once() -> None:
     backend, registry = start({"events": 1.0})
     rewards = []

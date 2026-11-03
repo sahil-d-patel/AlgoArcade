@@ -37,7 +37,7 @@ class NewMaximum(RewardComponent[Progress]):
         name: str,
         count: Callable[[Progress], int],
         maximum: int,
-        max_rise: float = float("inf"),
+        max_rise: int,
         cap: float = float("inf"),
     ) -> None:
         self.name = name
