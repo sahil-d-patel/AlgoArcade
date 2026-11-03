@@ -21,7 +21,8 @@ ACTIONS: tuple[tuple[Button, ...], ...] = (
 )
 HOLD = 8
 RELEASE = 16
-# A guess at enough spread that parallel workers do not replay one episode.
+# A guess. A 24-frame step absorbs most of the offset, so it changes outcomes only through the
+# game's RNG; measured in docs/harness-spec.md, AlgoArcadeEnv.
 MAX_NOOP_FRAMES = 7
 # Rows and columns of tiles around the player. A guess: FireRed shows 15 by 10 tiles.
 CROP = (9, 15)
