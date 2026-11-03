@@ -21,5 +21,5 @@ class GameState(Protocol):
 
 class StateReader(Protocol):
     def read(self, backend: GameBackend) -> GameState:
-        """Raise StateNotReady when game memory cannot provide a valid state."""
+        """Raise StateNotReady when the reader detects memory is not ready."""
         ...

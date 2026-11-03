@@ -1,11 +1,47 @@
 import struct
+from pathlib import Path
 
 import pytest
 
 from algoarcade.backends.fake import FakeBackend
+from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.addresses import ADDRESSES
-from algoarcade.games.firered.reader import FireRedReader, PartyPokemon
+from algoarcade.games.firered.reader import FireRedReader, FireRedState, PartyPokemon
+from algoarcade.rom import identify
+
+DATA = Path(__file__).resolve().parents[1] / "data"
+ROM = DATA / "roms" / "firered.gba"
+STATES_ROM_SHA1 = "dd5945db9b930750cb39d00c84da8571feebf417"  # rev 1, as captured by ENV-06
+
+# Written down from the screen of each state. Map ids are (group, number) in
+# data/maps/map_groups.json of pret/pokefirered at e93eb12a336fb97df420b0961753d8a3713c9fcc, and x
+# and y share the frame of the event coordinates in each map's map.json there.
+SCREEN = {
+    # Player's bedroom, MAP_PALLET_TOWN_PLAYERS_HOUSE_2F. The player faces up, and A prints "RED
+    # played with the NES.": the bg event at (6, 5). The START menu has no POKéMON entry.
+    "s0": FireRedState(map_group=4, map_num=1, x=6, y=6, party=()),
+    # Oak's lab, MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB, after the starter and the parcel. The last
+    # item ball, (10, 4) in map.json, sits four tiles right on the player's row, with Oak at
+    # (6, 3) directly above. Party screen: SQUIRTLE Lv7, HP 14/ 25, no status icon.
+    "s1": FireRedState(
+        map_group=4,
+        map_num=3,
+        x=6,
+        y=4,
+        party=(PartyPokemon(level=7, hp=14, max_hp=25, status=0),),
+    ),
+    # MAP_VIRIDIAN_FOREST, on the middle tile of the south entrance warps (28 to 30, 62). The sign
+    # at (31, 60) is two tiles right and two up. Party screen: SQUIRTLE Lv13, HP 37/ 37, no status
+    # icon.
+    "seg_05_forest": FireRedState(
+        map_group=1,
+        map_num=0,
+        x=29,
+        y=62,
+        party=(PartyPokemon(level=13, hp=37, max_hp=37, status=0),),
+    ),
+}
 
 
 class MemoryBackend(FakeBackend):
@@ -54,6 +90,18 @@ def test_invalid_pointer_is_not_ready(sha1: str, offset: int | None) -> None:
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
+def test_empty_save_block_is_not_ready(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(base, bytes(6))
+    backend.write(addresses["gPlayerPartyCount"].address, bytes(1))
+    with pytest.raises(StateNotReady, match="empty"):
+        FireRedReader(sha1).read(backend)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
 @pytest.mark.parametrize("count", range(1, 7))
 def test_party_uses_live_entries_and_refreshes_each_read(sha1: str, count: int) -> None:
     addresses = ADDRESSES[sha1]
@@ -96,3 +144,24 @@ def test_invalid_party_count_is_not_ready(sha1: str, count: int) -> None:
     backend.write(addresses["gPlayerPartyCount"].address, bytes([count]))
     with pytest.raises(StateNotReady, match="gPlayerPartyCount"):
         FireRedReader(sha1).read(backend)
+
+
+@pytest.mark.rom
+@pytest.mark.parametrize("name", SCREEN)
+def test_captured_state_matches_the_screen(name: str) -> None:
+    if not ROM.is_file():
+        pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    if identify(ROM).sha1 != STATES_ROM_SHA1:
+        pytest.skip("The states were captured on rev 1")
+    state = DATA / "states" / f"{name}.state"
+    if not state.is_file():
+        pytest.skip(f"Missing {state.name}; scripts/capture_states.py (ENV-06) regenerates it")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    backend = MgbaBackend(ROM, render=False)
+    try:
+        backend.load_state(state.read_bytes())
+        assert FireRedReader(STATES_ROM_SHA1).read(backend) == SCREEN[name]
+    finally:
+        backend.close()
