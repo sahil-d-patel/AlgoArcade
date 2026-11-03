@@ -1,8 +1,9 @@
 """The MCP server a language model plays through. Contract: docs/harness-spec.md, MCP tool surface.
 
-One process owns one game, named by `--game` and created when the server starts. It serves
-`get_state` and `press`, each returning the state as compact JSON text plus structured content,
-and a 2x PNG of the screen when asked for one.
+One process owns one game, named by `--game` and created when the server starts, optionally from
+a save state in data/states/ named by `--state`. It serves `get_state` and `press`, each
+returning the state as compact JSON text plus structured content, and a 2x PNG of the screen
+when asked for one.
 """
 
 import argparse
@@ -13,6 +14,7 @@ import zlib
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -23,12 +25,14 @@ from pydantic_core import to_jsonable_python
 
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
+from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateReader
 from algoarcade.games.fake import FakeReader
 
 # Names, not the Button bit positions an IntEnum would put in the schema a model reads.
 ButtonName = Literal["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L"]
 SCALE = 2
+DATA = Path(__file__).resolve().parents[3] / "data"
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +43,20 @@ class Game:
     reader: StateReader
 
 
-# FireRed joins when ENV-04 (MgbaBackend) and ENV-05 (FireRedReader) land.
-GAMES: dict[str, Callable[[], Game]] = {"fake": lambda: Game(FakeBackend(), FakeReader())}
+def firered() -> Game:
+    # FireRedReader arrives with ENV-05 (#57); until then `--game firered` fails at launch.
+    from algoarcade.games.firered.reader import (  # pyrefly: ignore[missing-import]
+        FireRedReader,
+    )
+
+    backend = MgbaBackend(DATA / "roms" / "firered.gba")
+    return Game(backend, FireRedReader(backend.rom.sha1))
+
+
+GAMES: dict[str, Callable[[], Game]] = {
+    "fake": lambda: Game(FakeBackend(), FakeReader()),
+    "firered": firered,
+}
 
 
 def png(rgb: NDArray[np.uint8]) -> bytes:
@@ -108,8 +124,17 @@ def build(make_game: Callable[[], Game]) -> MCPServer[Game]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m algoarcade.agent.server")
     parser.add_argument("--game", choices=sorted(GAMES), default="fake")
+    parser.add_argument("--state", help="load data/states/<STATE>.state before serving")
     args = parser.parse_args(argv)
-    build(GAMES[args.game]).run()
+    state = (DATA / "states" / f"{args.state}.state").read_bytes() if args.state else None
+
+    def start() -> Game:
+        game = GAMES[args.game]()
+        if state is not None:
+            game.backend.load_state(state)
+        return game
+
+    build(start).run()
 
 
 if __name__ == "__main__":

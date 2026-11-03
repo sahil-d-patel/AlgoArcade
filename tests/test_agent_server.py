@@ -15,15 +15,17 @@ import pytest
 from mcp import Client, StdioServerParameters
 from numpy.typing import NDArray
 
+from algoarcade.agent.loop import server
 from algoarcade.agent.server import SCALE, ButtonName
 from algoarcade.backends.base import Button
 from algoarcade.backends.fake import FakeBackend
+from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.fake import FakeReader
-from algoarcade.rom import identify
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 MCP_JSON = Path(__file__).parents[1] / ".mcp.json"
 ROM = Path(__file__).parents[1] / "data" / "roms" / "firered.gba"
+STATES = Path(__file__).parents[1] / "data" / "states"
 # Two steps right lands on the chest, A opens it. Each button is its own decision.
 TO_THE_CHEST = ["RIGHT", "RIGHT", "A"]
 RAW_REQUESTS: list[dict[str, Any]] = [
@@ -151,21 +153,23 @@ def test_ten_tool_calls_over_stdio() -> None:
 
 
 @pytest.mark.rom
-def test_firered_get_state_matches_the_reader_and_the_png_is_480x320() -> None:
-    """Waits on ENV-04 (MgbaBackend), ENV-05 (FireRedReader) and a `firered` entry in GAMES."""
-    if not ROM.exists():
-        pytest.skip(f"no ROM at {ROM}")
-    mgba = pytest.importorskip("algoarcade.backends.mgba")
+@pytest.mark.parametrize("name", ["seg_01_house", "seg_02_pallet"])
+def test_firered_get_state_matches_the_reader_and_the_png_is_480x320(name: str) -> None:
+    """Runs once ENV-05 (#57) adds FireRedReader. Two states, so a constant location fails."""
+    state_file = STATES / f"{name}.state"
+    if not ROM.is_file() or not state_file.is_file():
+        pytest.skip(f"needs {ROM} and {state_file}")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     firered = pytest.importorskip("algoarcade.games.firered.reader")
-    backend = mgba.MgbaBackend(ROM)
+    backend = MgbaBackend(ROM)
     try:
-        expected = firered.FireRedReader(identify(ROM).sha1).read(backend)
+        backend.load_state(state_file.read_bytes())
+        expected = firered.FireRedReader(backend.rom.sha1).read(backend)
     finally:
         backend.close()
-    params = StdioServerParameters(
-        command=sys.executable, args=["-m", "algoarcade.agent.server", "--game", "firered"]
-    )
-    state, png = asyncio.run(state_and_png(params))
+    state, png = asyncio.run(state_and_png(server(("--game", "firered", "--state", name))))
     assert state is not None
     assert (state["map_group"], state["map_num"], state["x"], state["y"]) == expected.location
     assert png_pixels(png).shape == (320, 480, 3)

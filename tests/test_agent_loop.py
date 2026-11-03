@@ -2,8 +2,10 @@ import asyncio
 import base64
 import copy
 import itertools
+import json
 import sys
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -16,8 +18,11 @@ from algoarcade.agent.loop import (
     Attempt,
     AttemptConfig,
     Prices,
+    Run,
     Step,
     json_bytes,
+    report,
+    run,
     run_attempt,
 )
 from algoarcade.agent.server import png
@@ -31,14 +36,14 @@ USAGE = Usage(
 )
 
 
-def press(buttons: object, **arguments: Any) -> Message:
+def press(buttons: object, usage: Usage = USAGE, **arguments: Any) -> Message:
     block = ToolUseBlock(
         type="tool_use", id="toolu_1", name="press", input={"buttons": buttons, **arguments}
     )
-    return reply([block], "tool_use")
+    return reply([block], "tool_use", usage)
 
 
-def reply(content: list[Any], stop_reason: str) -> Message:
+def reply(content: list[Any], stop_reason: str, usage: Usage = USAGE) -> Message:
     return Message(
         id="msg_1",
         type="message",
@@ -47,7 +52,7 @@ def reply(content: list[Any], stop_reason: str) -> Message:
         content=content,
         stop_reason=stop_reason,  # pyrefly: ignore[bad-argument-type]
         stop_sequence=None,
-        usage=USAGE,
+        usage=usage,
     )
 
 
@@ -170,3 +175,36 @@ def test_a_blank_screenshot_counts_for_more_than_its_image_tokens() -> None:
     # A blank screen compresses best, so its base64 PNG is the shortest a 480x320 one can be.
     blank = base64.b64encode(png(np.zeros((320, 480, 3), np.uint8))).decode()
     assert json_bytes(blank) > 480 * 320 / 750
+
+
+def test_a_run_logs_every_request_and_reports_per_action(tmp_path: Path) -> None:
+    usage = Usage(
+        input_tokens=300,
+        output_tokens=60,
+        cache_creation_input_tokens=900,
+        cache_read_input_tokens=1500,
+    )
+    model = StubModel([press(["RIGHT"], usage), press(["RIGHT", "A"], usage)])
+    settings = Run(name="pilot", out=tmp_path, max_actions=20, max_dollars=1.0)
+    result = asyncio.run(run(settings, model))
+
+    lines = (tmp_path / "pilot" / "steps.jsonl").read_text().splitlines()
+    assert [json.loads(line)["buttons"] for line in lines] == [["RIGHT"], ["RIGHT", "A"]]
+    summary = json.loads((tmp_path / "pilot" / "attempt.json").read_text())
+    assert (summary["segment"], summary["outcome"], summary["actions"]) == ("fake", "goal", 3)
+    # 2 requests of $0.0001875 each over 3 presses.
+    assert summary["per_action"] == pytest.approx(
+        {
+            "input_tokens": 200,
+            "output_tokens": 40,
+            "cache_write_tokens": 600,
+            "cache_read_tokens": 1000,
+            "dollars": 0.000125,
+        }
+    )
+    assert report(result).splitlines() == [
+        "goal: 3 actions in 2 requests, $0.0004",
+        "per action: input_tokens 200.0, output_tokens 40.0, cache_write_tokens 600.0, "
+        "cache_read_tokens 1000.0, $0.000125",
+        "300 actions at this rate: $0.04",
+    ]

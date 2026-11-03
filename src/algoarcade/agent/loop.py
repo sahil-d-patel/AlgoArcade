@@ -8,6 +8,7 @@ buttons.
 
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
@@ -19,6 +20,7 @@ from anthropic import AsyncAnthropic
 from anthropic.types import Message, MessageParam, ToolParam, ToolResultBlockParam, Usage
 from anthropic.types.tool_result_block_param import Content as ToolResultContent
 from mcp import Client, StdioServerParameters
+from mcp.client.stdio import get_default_environment
 from mcp_types import CallToolResult
 from pydantic_core import to_jsonable_python
 
@@ -38,17 +40,26 @@ TOOL_PROMPT_TOKENS = 1_000
 
 @dataclass(frozen=True)
 class Segment:
-    """What the model is told to do and how the attempt is graded. ENV-06's manifest adds FireRed."""
+    """What the model is told to do, the server that plays it, and how the attempt is graded."""
 
     task: str
     goal: Goal
+    server: tuple[str, ...]
 
 
 SEGMENTS = {
     "fake": Segment(
         task="Open the chest. The chest is on the top row of the first room.",
         goal=lambda state: bool(state["chest_opened"]),
-    )
+        server=("--game", "fake"),
+    ),
+    "seg_01_house": Segment(
+        task="You start in your bedroom, upstairs in your house in Pallet Town. Leave the house.",
+        # ENV-06's left_house: on MAP_PALLET_TOWN, group 3 number 0.
+        # TODO(#17): grade with the manifest's predicate once it merges.
+        goal=lambda state: (state["map_group"], state["map_num"]) == (3, 0),
+        server=("--game", "firered", "--state", "seg_01_house"),
+    ),
 }
 
 
@@ -109,6 +120,18 @@ class Attempt:
     actions: int
     dollars: float
     steps: list[Step]
+
+    def per_action(self) -> dict[str, float] | None:
+        """Mean tokens of each kind and dollars per button press; None if nothing was pressed."""
+        if not self.actions:
+            return None
+        totals = {
+            kind: sum(getattr(step, kind) for step in self.steps)
+            for kind in ("input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens")
+        }
+        return {kind: total / self.actions for kind, total in totals.items()} | {
+            "dollars": self.dollars / self.actions
+        }
 
 
 def json_bytes(value: object) -> int:
@@ -246,41 +269,62 @@ async def run_attempt(
         return Attempt(outcome=outcome, actions=actions, dollars=dollars, steps=steps)
 
 
+def server(args: tuple[str, ...]) -> StdioServerParameters:
+    """The MCP client passes the server only a few environment variables. On macOS the mGBA
+    binding also needs DYLD_FALLBACK_LIBRARY_PATH (docs/setup.md)."""
+    env = get_default_environment()
+    if "DYLD_FALLBACK_LIBRARY_PATH" in os.environ:
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = os.environ["DYLD_FALLBACK_LIBRARY_PATH"]
+    return StdioServerParameters(
+        command=sys.executable, args=["-m", "algoarcade.agent.server", *args], env=env
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class Run(AttemptConfig):
     """One attempt, logged under data/llm/<name>/ as steps.jsonl and attempt.json."""
 
     name: str
-    game: str = "fake"
+    segment: str = "fake"
     out: Path = Path("data/llm")
 
 
-async def run(settings: Run) -> Attempt:
+async def run(settings: Run, create: Create) -> Attempt:
+    segment = SEGMENTS[settings.segment]
     folder = settings.out / settings.name
     folder.mkdir(parents=True)
-    params = StdioServerParameters(
-        command=sys.executable, args=["-m", "algoarcade.agent.server", "--game", settings.game]
-    )
-    api = AsyncAnthropic()
     with (folder / "steps.jsonl").open("w") as log:
 
         def record(step: Step) -> None:
             log.write(json.dumps(asdict(step)) + "\n")
             log.flush()
 
-        async with Client(params, raise_exceptions=True) as client:
-            attempt = await run_attempt(
-                api.messages.create, client, settings, SEGMENTS[settings.game], record
-            )
-    summary = asdict(settings) | asdict(attempt)
+        async with Client(server(segment.server), raise_exceptions=True) as client:
+            attempt = await run_attempt(create, client, settings, segment, record)
+    summary = asdict(settings) | asdict(attempt) | {"per_action": attempt.per_action()}
     del summary["steps"]
     (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
     return attempt
 
 
+def report(attempt: Attempt) -> str:
+    lines = [
+        f"{attempt.outcome}: {attempt.actions} actions in {len(attempt.steps)} requests, "
+        f"${attempt.dollars:.4f}"
+    ]
+    per_action = attempt.per_action()
+    if per_action is not None:
+        dollars = per_action.pop("dollars")
+        tokens = ", ".join(f"{kind} {value:.1f}" for kind, value in per_action.items())
+        lines.append(f"per action: {tokens}, ${dollars:.6f}")
+        lines.append(f"300 actions at this rate: ${300 * dollars:.2f}")
+    return "\n".join(lines)
+
+
 def main() -> None:
-    attempt = asyncio.run(run(tyro.cli(Run)))
-    print(f"{attempt.outcome}: {attempt.actions} actions, ${attempt.dollars:.4f}")  # noqa: T201
+    settings = tyro.cli(Run)
+    attempt = asyncio.run(run(settings, AsyncAnthropic().messages.create))
+    print(report(attempt))  # noqa: T201
 
 
 if __name__ == "__main__":
