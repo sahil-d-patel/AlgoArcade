@@ -14,10 +14,17 @@ class MemoryBackend(FakeBackend):
         self.memory: dict[int, int] = {}
 
     def read(self, address: int, size: int) -> bytes:
-        return bytes(self.memory.get(address + offset, 0) for offset in range(size))
+        return bytes(self.memory[address + offset] for offset in range(size))
 
     def write(self, address: int, data: bytes) -> None:
         self.memory.update((address + offset, value) for offset, value in enumerate(data))
+
+
+def write_save_block1(
+    backend: MemoryBackend, address: int, position: bytes, badge_flags: int = 0
+) -> None:
+    backend.write(address, position)
+    backend.write(address + 0xFE4, bytes([badge_flags]))
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
@@ -29,7 +36,7 @@ def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
     base = addresses["gSaveBlock1"].address
     pointer_address = addresses["gSaveBlock1Ptr"].address
     backend.write(pointer_address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    write_save_block1(backend, base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
     first = reader.read(backend)
     assert first.location == (3, 4, 12, 19)
@@ -37,7 +44,7 @@ def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
     assert first.party_count == 0
 
     backend.write(pointer_address, (base + offset).to_bytes(4, "little"))
-    backend.write(base + offset, struct.pack("<hhbb", 27, 31, 5, 6))
+    write_save_block1(backend, base + offset, struct.pack("<hhbb", 27, 31, 5, 6))
     assert reader.read(backend).location == (5, 6, 27, 31)
     assert first.location == (3, 4, 12, 19)
 
@@ -60,7 +67,7 @@ def test_party_uses_live_entries_and_refreshes_each_read(sha1: str, count: int) 
     backend = MemoryBackend()
     base = addresses["gSaveBlock1"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    write_save_block1(backend, base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["gPlayerPartyCount"].address, bytes([count]))
     expected = []
     for index in range(count):
@@ -92,7 +99,7 @@ def test_invalid_party_count_is_not_ready(sha1: str, count: int) -> None:
     backend = MemoryBackend()
     base = addresses["gSaveBlock1"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    write_save_block1(backend, base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["gPlayerPartyCount"].address, bytes([count]))
     with pytest.raises(StateNotReady, match="gPlayerPartyCount"):
         FireRedReader(sha1).read(backend)
@@ -106,9 +113,10 @@ def test_badge_flags_follow_moving_pointer(sha1: str) -> None:
     base = addresses["gSaveBlock1"].address
     pointer_address = addresses["gSaveBlock1Ptr"].address
     backend.write(pointer_address, base.to_bytes(4, "little"))
-    backend.write(base + 0xFE4, b"\x01")
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    write_save_block1(backend, base, struct.pack("<hhbb", 6, 6, 4, 1), badge_flags=0x01)
     assert reader.read(backend).badge_flags == 0x01
 
     backend.write(pointer_address, (base + 0x40).to_bytes(4, "little"))
-    backend.write(base + 0x40 + 0xFE4, b"\x03")
+    write_save_block1(backend, base + 0x40, struct.pack("<hhbb", 6, 6, 4, 1), badge_flags=0x03)
     assert reader.read(backend).badge_flags == 0x03
