@@ -65,3 +65,4 @@ AGENTS.md treats names, dependencies and architecture as PM decisions. These wer
 - 2026-11-02: matplotlib is allowed as a dependency in the `train` group only, for learning-curve figures (#7, #14).
 - 2026-11-02: `StateNotReady` is the shared way a reader says memory is not ready. It is raised when the reader detects that; on the title screen and intro the FireRed v0 reader returns zeros instead, a known gap (#12).
 - 2026-11-02: The LLM attempt loop's dollar cap is hard. It stops before a request whose upper-bound cost would pass the cap (#16).
+- 2026-11-03: FireRed's `story_flags` counts seven flags from Pallet Town to Pewter: 0x2CF (visited Oak's Lab), 0x828 (starter), 0x258 (lab rival battle finished), 0x230 (Route 1 potion), 0x829 (Pokédex), 0x4B0 (Brock defeated), 0x254 (TM39). This list defines the frozen column (#19).

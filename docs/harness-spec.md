@@ -73,7 +73,9 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Party | party_level_sum, party_hp_frac | Totals across the party |
 | Context | money | Decrypted |
 | Context | in_battle | Whether a battle is active |
-| Context | text_active, script_active, controls_locked | What the game is waiting on |
+| Context | text_active | Field message text is printing. It turns false when printing ends, while the box stays up until A, and stays false in battle |
+| Context | text_progress | A value that changes whenever text in the message window advances, in the field and in battle |
+| Context | script_active, controls_locked | A script is running; the player cannot move |
 | Context | text_speed, battle_scene_off | Saved options; fast text is 2 and battle scenes must be off |
 | Battle | own and enemy HP, level, moves, PP | Only meaningful while in_battle is true |
 
@@ -99,6 +101,7 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 | sMessageBoxType | 0x0203709C | 0 hidden, 2 normal, 3 auto-scroll |
 | sGlobalScriptContextStatus | 0x03000EA8 | 0 running, 1 waiting, 2 shut down |
 | sLockFieldControls | 0x03000F9C | |
+| sTextPrinters | 0x02020034 | 32 TextPrinters of 0x24 bytes, indexed by window id |
 
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
@@ -112,12 +115,13 @@ the source commit used for the pinned symbol build:
 | money | `gSaveBlock1Ptr` + 0x290, XOR `gSaveBlock2Ptr` + 0xF20 | `include/global.h`, `src/money.c` |
 | badge_flags, badge_count | `gSaveBlock1Ptr` + 0xFE4; flags 0x820 through 0x827 | `include/constants/flags.h`, `src/event_data.c` |
 | trainers_defeated | `gSaveBlock1Ptr` + 0xEE0; flags 0x500 through 0x7FF | Same flag definitions and indexing |
-| story_flags | Six persistent flags listed below, indexed from `gSaveBlock1Ptr` +0xEE0 | `include/constants/flags.h`, `src/event_data.c` |
+| story_flags | Seven persistent flags listed below, indexed from `gSaveBlock1Ptr` +0xEE0 | `include/constants/flags.h`, `src/event_data.c` |
 | world_map_flags | `gSaveBlock1Ptr` +0xFF2; 51 bits for flags 0x890 through 0x8C2 | Same flag definitions and indexing |
 | text_speed, battle_scene_off | `gSaveBlock2Ptr` +0x14 bits 0–2; +0x15 bit 2 | `include/global.h` |
 | pokedex_owned, pokedex_seen | `gSaveBlock2Ptr` + 0x28 and +0x5C; seen copies at `gSaveBlock1Ptr` +0x5F8 and +0x3A18 | `include/global.h`, `src/pokedex_screen.c` |
 | in_battle | `gMain` +0x439, bit 1 | `include/main.h` |
-| text_active | `sMessageBoxType` is not hidden (0) | `src/field_message_box.c` |
+| text_active | `sMessageBoxType` is not hidden (0). `Task_DrawFieldMessageBox` sets it to hidden when printer 0 finishes, before the player closes the box | `src/field_message_box.c` |
+| text_progress | `sTextPrinters` +0x00, `currentChar` of printer 0: window 0, the field message box and `B_WIN_MSG` in battle. It is a position in the string buffer, so two finished messages of the same length read the same | `include/text.h`, `src/text_printer.c` |
 | script_active | `sGlobalScriptContextStatus` is running (0); waiting (1) and shut down (2) are false | `src/script.c`, `ScriptContext_IsEnabled` |
 | controls_locked | `sLockFieldControls` is nonzero | `src/script.c` |
 | party species, moves | `gPlayerParty`, 100-byte entries; XOR twelve words at +0x20 with personality (+0x00) XOR trainer id (+0x04), then check the 16-bit sum against +0x1C | `include/pokemon.h`, `src/pokemon.c` |
@@ -130,29 +134,32 @@ by total maximum party HP, or 0 when that total is zero. Species and move ids us
 internal ids. `FireRedReader.check_options(backend)` raises `ValueError` unless saved text
 speed is fast (2) and battle scenes are off. Call it at environment reset.
 
-The approved story whitelist counts each of these persistent events once:
+The story whitelist, approved in `docs/decisions.md` on 2026-11-03, counts each of these persistent events once:
 
 | Symbol | Flag id | Event |
 |---|---|---|
+| FLAG_VISITED_OAKS_LAB | 0x2CF | Entered Oak's Lab |
 | FLAG_SYS_POKEMON_GET | 0x828 | Starter received |
-| FLAG_BEAT_RIVAL_IN_OAKS_LAB | 0x258 | Lab rival defeated |
-| FLAG_SYS_POKEDEX_GET | 0x829 | Pokedex received |
+| FLAG_BEAT_RIVAL_IN_OAKS_LAB | 0x258 | Lab rival battle finished, won or lost; `trainers_defeated` counts a win |
 | FLAG_GOT_POTION_ON_ROUTE_1 | 0x230 | Route 1 gift potion received |
+| FLAG_SYS_POKEDEX_GET | 0x829 | Pokedex received |
 | FLAG_DEFEATED_BROCK | 0x4B0 | Brock defeated |
 | FLAG_GOT_TM39_FROM_BROCK | 0x254 | Brock's TM received |
 
-`tests/test_firered_fields.py` verifies hash-pinned local captures of the trainer card,
-party/summary screens, options, dialogue, battle and Pokedex. Money changes from 3000 to 3080
-after the lab rival win; the Pokedex screen shows Seen 4 and Owned 1. A 163-decision replay
-crosses the house warps and rival battle, checking map ids, money and nondecreasing progress.
-Capture tests carry the `rom` marker and skip when their local files are absent. Captures
-are FireRed USA rev 0 on macOS arm64; live nonzero status ailments and earned badges are
-not covered by these captures. No logged fields change.
+`tests/test_firered_fields.py` checks each field against hash-pinned local captures whose
+values were read off the screen: trainer card, party and summary screens, options, dialogue,
+battle and Pokedex. Each capture runs only on the revision it was made with. Rev 0 captures are
+Kumario1's. Rev 1 captures come from `scripts/capture_validation_states.py`, including a
+poisoned Squirtle (status 8), plus `brock_goal` from `scripts/capture_states.py` (Boulder Badge).
+On each revision a replay crosses a warp and the lab rival battle, checking map ids, money and
+that no progress count falls. Capture tests carry the `rom` marker and skip without the ROM or
+the capture.
 
 Rules:
 
 - The save blocks relocate on every warp and every return from a battle or full-screen menu. The offset is one of 32 values. Never keep a dereferenced address across steps.
 - Check that each pointer lands inside its expected range before using it. A null or out-of-range pointer means "not ready", not zero.
+- Both blocks move by the same offset (`SetSaveBlocksPointers`). Two different offsets mean "not ready".
 - Validate the party checksum before trusting species or moves.
 - File-local symbols carry a numeric suffix that differs between builds. Match on the base name.
 - No address enters the code without a symbol name and the commit it came from.
