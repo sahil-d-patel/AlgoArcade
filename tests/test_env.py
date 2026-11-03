@@ -102,7 +102,7 @@ def test_noop_action_holds_nothing() -> None:
 
 
 def test_info_components_sum_to_the_reward() -> None:
-    weights = {"events": 1.0, "explore": 1.0}
+    weights = {"events": 2.0, "explore": 0.1}
     backend = FakeBackend()
     env = AlgoArcadeEnv(
         backend,
@@ -119,7 +119,7 @@ def test_info_components_sum_to_the_reward() -> None:
         _, reward, _, _, info = env.step(rng.integers(6))
         components = {k: v for k, v in info.items() if k.startswith("reward/")}
         assert set(components) == {"reward/events", "reward/explore"}
-        assert reward == sum(components.values())
+        assert reward == sum(w * info[f"reward/{name}"] for name, w in weights.items())
         paid += reward
     assert paid > 1
 
