@@ -120,7 +120,7 @@ Rules:
 - Every component returns exactly zero on a step where nothing changed.
 - Every component returns exactly zero on the reset step.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
-- A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so a bad read at reset cannot set it.
+- A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
 - A pull request that adds or changes a component says how an agent would exploit it.
 

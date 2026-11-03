@@ -143,7 +143,7 @@ def test_a_count_above_its_maximum_is_ignored() -> None:
         # Above the maximum at reset.
         ("milestone", [200, 1, 1, 2], [0.0, 0.0, 1.0]),
         # 0xFF at reset reads as eight badges; the real count is one.
-        ("badge", [0xFF, 0x01, 0x03, 0x07], [0.0, 1.0, 1.0]),
+        ("badge", [0xFF, 0x01, 0x01, 0x03, 0x07], [0.0, 0.0, 1.0, 1.0]),
         # Too low at reset: the real counts are 3 badges and a level sum of 150, each more than
         # max_rise above the reset read.
         ("badge", [0x00, 0x07, 0x07, 0x0F], [0.0, 0.0, 1.0]),
@@ -154,6 +154,46 @@ def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
     name: str, byte_values: list[int], paid: list[float]
 ) -> None:
     assert raw_values(name, byte_values) == paid
+
+
+@pytest.mark.parametrize(
+    ("name", "byte_values", "paid"),
+    [
+        ("badge", [0x00, 0x01], [1.0]),
+        ("events", [0x00, 0x03], [2.0]),
+    ],
+)
+def test_the_first_step_pays_a_rise_from_the_reset_read(
+    name: str, byte_values: list[int], paid: list[float]
+) -> None:
+    assert raw_values(name, byte_values) == paid
+
+
+@pytest.mark.parametrize(
+    ("name", "byte_values", "paid"),
+    [
+        # A transient low read, then the real count again.
+        ("level", [30, 0, 30], [0.0, 0.0]),
+        # A transient high pair sets a high best, so the real 50 and 51 pay nothing.
+        ("level", [50, 200, 201, 50, 51], [0.0, 0.0, 0.0, 0.0]),
+        # Badge counts 3, 0, 1, 2, 3 and story-flag counts 5, 0, 3, 5. The pair of low reads
+        # becomes the best and pays nothing, but the climb back from it pays. A component cannot
+        # tell this from a bad reset read followed by real gains.
+        ("badge", [0x07, 0x00, 0x01, 0x03, 0x07], [0.0, 0.0, 1.0, 1.0]),
+        ("events", [0x1F, 0x00, 0x07, 0x1F], [0.0, 0.0, 2.0]),
+    ],
+)
+def test_re_establishing_the_best_pays_nothing(
+    name: str, byte_values: list[int], paid: list[float]
+) -> None:
+    assert raw_values(name, byte_values) == paid
+
+
+def test_a_misread_repeated_on_two_steps_becomes_the_best() -> None:
+    # Badge counts 1, 1, 8, 8, 1, 2, 3. Two agreeing reads are trusted, so the real second and
+    # third badges pay nothing. Only the reader can prevent this (ENV-05, ENV-08).
+    paid = raw_values("badge", [0x01, 0x01, 0xFF, 0xFF, 0x01, 0x03, 0x07])
+    assert paid == [0.0] * 6
 
 
 def test_a_misread_story_flag_count_neither_pays_nor_silences_later_flags() -> None:
