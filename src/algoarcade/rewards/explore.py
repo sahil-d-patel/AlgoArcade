@@ -7,7 +7,7 @@ from algoarcade.games.base import GameState
 from algoarcade.rewards.base import RewardComponent
 
 
-class Explore(RewardComponent):
+class Explore(RewardComponent[GameState]):
     name = "explore"
 
     def __init__(self) -> None:

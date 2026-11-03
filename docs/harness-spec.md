@@ -111,7 +111,7 @@ Rules:
 
 A reward component is a small object with a name, a reset step that runs at the start of an episode, and a scoring step. The scoring step looks at the previous GameState and the current one and returns a number. The protocol lives in `src/algoarcade/rewards/base.py`.
 
-Components are combined from a config that gives each a weight. The environment returns the weighted total as the reward and reports each component's raw value in the step info, so each can be logged on its own.
+Components are combined from a config that gives each a weight. Each game passes the registry its own table of components, so its GameState needs only the fields those components read. The environment returns the weighted total as the reward and reports each component's raw value in the step info, so each can be logged on its own.
 
 The components and their starting weights are in the technical plan, under Reward design. Five are on by default (events, explore, level, badge, milestone) and five are off (heal, blackout, anti_loop, anti_spam, time).
 
@@ -120,7 +120,7 @@ Rules:
 - Every component returns exactly zero on a step where nothing changed.
 - Every component returns exactly zero on the reset step.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
-- A component that reads a field validates it first. Garbage memory must not pay.
+- A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
 - A pull request that adds or changes a component says how an agent would exploit it.
 
@@ -227,7 +227,7 @@ Tests 1 to 3 live in `tests/conformance/` and run against every backend in the r
 
 ## Fake backend and fake logger
 
-The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
+The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It also has three count bytes (party level sum, badge byte, milestone count) that nothing in the game writes; tests set them directly. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
 
 The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids that sometimes earns a badge. It arrives with the logging pipeline in week 3 (OPS-03). In week 6 everyone builds their panel against it before pointing at real runs.
 
