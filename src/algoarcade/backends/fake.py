@@ -1,7 +1,8 @@
 """A toy console that needs no ROM: two rooms, a door, walls and one chest.
 
-RAM also holds a level sum, a badge byte and a milestone count. Nothing in the game writes them;
-tests set them directly to drive the reward components.
+RAM also holds a level sum, a badge byte, a milestone count, a party HP percentage and a text
+byte (0 when no text box is open, otherwise how far the text has advanced). Nothing in the game
+writes them; tests set them directly to drive the reward components.
 
 Tests and CI run on it. All game state lives in a small RAM block, so readers, rewards and
 the conformance suite exercise the same read path they use on a real emulator.
@@ -16,7 +17,7 @@ from numpy.typing import NDArray
 from algoarcade.backends.base import Button
 
 RAM_BASE = 0x0200_0000
-RAM_SIZE = 15
+RAM_SIZE = 17
 # Offsets from RAM_BASE. FRAME and RNG are little-endian u32, the rest are one byte.
 PLAYER_X = 0x00
 PLAYER_Y = 0x01
@@ -27,6 +28,8 @@ RNG = 0x08
 LEVEL_SUM = 0x0C
 BADGES = 0x0D
 MILESTONES = 0x0E
+HP_PERCENT = 0x0F
+TEXT = 0x10
 
 FLAG_CHEST_OPENED = 0x01
 TILE_PIXELS = 8
@@ -64,6 +67,7 @@ class FakeBackend:
         self._ram[PLAYER_X] = 1
         self._ram[PLAYER_Y] = 1
         self._ram[LEVEL_SUM] = 5
+        self._ram[HP_PERCENT] = 100
         struct.pack_into("<I", self._ram, RNG, 0x2545F491)
 
     def step(self, frames: int = 1) -> None:

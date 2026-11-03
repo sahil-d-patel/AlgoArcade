@@ -51,7 +51,7 @@ Settled on October 11, 2026.
 AGENTS.md treats names, dependencies and architecture as PM decisions. These were made to get the repo ready for kickoff.
 
 - Names: the package `algoarcade`; its subpackages `backends`, `games`, `rewards`, `envs`, `logs`, `training`, `runqueue`, `agent`, `viz`; the issue id prefixes OPS, ENV, TRN, AGT, VIZ, DOC.
-- Dependencies: numpy, gymnasium, pyboy, pyarrow, tyro, cffi; for training torch, stable-baselines3, wandb; for the agent mcp, anthropic; for development ruff, pyrefly, pytest, poethepoet, prek, typos.
+- Dependencies: numpy, gymnasium, pyboy, pyarrow, tyro, cffi; for training torch, stable-baselines3, wandb, matplotlib (added in TRN-03 for learning curves); for the agent mcp, anthropic; for development ruff, pyrefly, pytest, poethepoet, prek, typos.
 - Tooling: Python 3.12, uv with a committed lockfile.
 - Scope: the repo ships the backend protocol, the fake backend and the conformance suite already written, so week 1 has something to build against. They are drafts until the November 1 freeze, and the Environment pair owns them from here.
 
