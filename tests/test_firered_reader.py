@@ -90,6 +90,18 @@ def test_invalid_pointer_is_not_ready(sha1: str, offset: int | None) -> None:
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
+def test_empty_save_block_is_not_ready(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(base, bytes(6))
+    backend.write(addresses["gPlayerPartyCount"].address, bytes(1))
+    with pytest.raises(StateNotReady, match="empty"):
+        FireRedReader(sha1).read(backend)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
 @pytest.mark.parametrize("count", range(1, 7))
 def test_party_uses_live_entries_and_refreshes_each_read(sha1: str, count: int) -> None:
     addresses = ADDRESSES[sha1]
