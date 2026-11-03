@@ -28,6 +28,7 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateReader
 from algoarcade.games.fake import FakeReader
+from algoarcade.games.firered.reader import FireRedReader
 
 # Names, not the Button bit positions an IntEnum would put in the schema a model reads.
 ButtonName = Literal["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L"]
@@ -44,11 +45,6 @@ class Game:
 
 
 def firered() -> Game:
-    # FireRedReader arrives with ENV-05 (#57); until then `--game firered` fails at launch.
-    from algoarcade.games.firered.reader import (  # pyrefly: ignore[missing-import]
-        FireRedReader,
-    )
-
     backend = MgbaBackend(DATA / "roms" / "firered.gba")
     return Game(backend, FireRedReader(backend.rom.sha1))
 

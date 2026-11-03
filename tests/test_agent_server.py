@@ -155,7 +155,7 @@ def test_ten_tool_calls_over_stdio() -> None:
 @pytest.mark.rom
 @pytest.mark.parametrize("name", ["seg_01_house", "seg_02_pallet"])
 def test_firered_get_state_matches_the_reader_and_the_png_is_480x320(name: str) -> None:
-    """Runs once ENV-05 (#57) adds FireRedReader. Two states, so a constant location fails."""
+    """Two states, so a constant location fails."""
     state_file = STATES / f"{name}.state"
     if not ROM.is_file() or not state_file.is_file():
         pytest.skip(f"needs {ROM} and {state_file}")

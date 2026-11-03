@@ -2,7 +2,7 @@
 
 The MCP server that exposes the harness to a language model, and the loop that drives a model through it for evaluation.
 
-`server.py` serves one game on stdio, chosen by `--game`, with `get_state` and `press`. Both return the state as compact JSON and structured content, and a 2x PNG of the screen when asked. `--game firered` needs `data/roms/firered.gba`, the mGBA binding and ENV-05's reader (#57); `--state NAME` loads `data/states/NAME.state` first. `.mcp.json` at the repo root launches it.
+`server.py` serves one game on stdio, chosen by `--game`, with `get_state` and `press`. Both return the state as compact JSON and structured content, and a 2x PNG of the screen when asked. `--game firered` needs `data/roms/firered.gba` and the mGBA binding; `--state NAME` loads `data/states/NAME.state` first. `.mcp.json` at the repo root launches it.
 
 `loop.py` runs one attempt on a segment and prints the outcome, the presses, the dollars and the mean tokens of each kind and dollars per press. With `ANTHROPIC_API_KEY` set, on macOS with the `DYLD_FALLBACK_LIBRARY_PATH` export from `docs/setup.md`:
 
