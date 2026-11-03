@@ -113,11 +113,26 @@ A reward component is a small object with a name, a reset step that runs at the 
 
 Components are combined from a config that gives each a weight. Each game passes the registry its own table of components, so its GameState needs only the fields those components read. The environment returns the weighted total as the reward and reports each component's raw value in the step info, so each can be logged on its own.
 
-The components and their starting weights are in the technical plan, under Reward design. Five are on by default (events, explore, level, badge, milestone) and five are off (heal, blackout, anti_loop, anti_spam, time).
+FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENTS` builds them, `WEIGHTS` holds the starting weights from the technical plan (Reward design), and `DEFAULT_WEIGHTS` turns on the first five. The weights and the level cap are guesses until TRN-08 tunes them. Each raw value is zero or more; a penalty's sign is in its weight.
+
+| Component | Pays or charges | Weight | Default | Predicted exploit, and what stops it |
+|---|---|---|---|---|
+| events | Each new story-whitelist flag above the episode's best | +1.0 | on | Setting and clearing a flag: only a new best pays. |
+| explore | First visit to a location this episode | +0.02 | on | Two-tile oscillation: the visited set is permanent for the episode. |
+| level | Rise in party level sum, at most 1.0 a step, nothing past a sum of 20 | +0.5 | on | Grass camping: the cap holds an episode to 10.0, one badge. |
+| badge | A new badge | +10.0 | on | Misread badge byte: a read above 8 or a rise over 1 is ignored. |
+| milestone | A new entry on the Pallet-to-Brock list | +2.0 | on | Same as events. |
+| heal | Rise in party HP fraction | +0.3 | off | Fainting for a free heal: a whiteout or a party size change never pays. Damage then a Pokémon Center heal still pays; that is what E5 measures. |
+| blackout | The party goes from all fainted to healed | -5.0 | off | Fleeing or avoiding every battle to dodge it, as in RL-emerald. Nothing stops this; it is why the term is off. |
+| anti_loop | A move onto a tile stood on in the last 30 steps | -0.01 | off | Standing still is free, so the agent may stop moving, or walk loops longer than 30 steps. |
+| anti_spam | A press that left an open text box where it was | -0.02 | off | Avoiding NPCs and signs. It needs ENV-08 to provide `text_progress`. |
+| time | Every step | -0.001 | off | None while episodes end only on a step budget: every policy pays the same total. |
+
+The five scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 
 Rules:
 
-- Every component returns exactly zero on a step where nothing changed.
+- Every component returns exactly zero on a step where nothing changed. Two penalties are exceptions by definition: time charges every step, and anti_spam charges a step where nothing changed while a text box is open. Neither pays, so neither can be farmed.
 - Every component returns exactly zero on the reset step.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
@@ -227,7 +242,7 @@ Tests 1 to 3 live in `tests/conformance/` and run against every backend in the r
 
 ## Fake backend and fake logger
 
-The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It also has three count bytes (party level sum, badge byte, milestone count) that nothing in the game writes; tests set them directly. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
+The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It also has five bytes that nothing in the game writes (party level sum, badge byte, milestone count, party HP percentage, text box); tests set them directly. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
 
 The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids that sometimes earns a badge. It arrives with the logging pipeline in week 3 (OPS-03). In week 6 everyone builds their panel against it before pointing at real runs.
 
