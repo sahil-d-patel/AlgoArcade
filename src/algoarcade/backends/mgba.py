@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from algoarcade.backends.base import Button
 from algoarcade.rom import identify
 
+# GBA hardware map, equal to mGBA 0.10's BASE_/SIZE_WORKING_RAM and BASE_/SIZE_WORKING_IRAM.
 EWRAM_BASE = 0x02000000
 EWRAM_SIZE = 0x40000
 IWRAM_BASE = 0x03000000

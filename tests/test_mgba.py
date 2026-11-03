@@ -128,8 +128,6 @@ def test_restore_includes_screen_and_flash_without_advancing(mgba_backend: MgbaB
 
 @pytest.mark.rom
 def test_loading_headless_state_never_returns_stale_pixels(mgba_backend: MgbaBackend) -> None:
-    if not ROM.is_file():
-        pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
     headless = MgbaBackend(ROM, render=False)
     try:
         headless.step(100)
