@@ -51,11 +51,17 @@ Settled on October 11, 2026.
 AGENTS.md treats names, dependencies and architecture as PM decisions. These were made to get the repo ready for kickoff.
 
 - Names: the package `algoarcade`; its subpackages `backends`, `games`, `rewards`, `envs`, `logs`, `training`, `runqueue`, `agent`, `viz`; the issue id prefixes OPS, ENV, TRN, AGT, VIZ, DOC.
-- Dependencies: numpy, gymnasium, pyboy, pyarrow, tyro, cffi; for training torch, stable-baselines3, wandb; for the agent mcp, anthropic; for development ruff, pyrefly, pytest, poethepoet, prek, typos.
+- Dependencies: numpy, gymnasium, pyboy, pyarrow, tyro, cffi; for training torch, stable-baselines3, wandb, matplotlib (added in TRN-03 for learning curves); for the agent mcp, anthropic; for development ruff, pyrefly, pytest, poethepoet, prek, typos.
 - Tooling: Python 3.12, uv with a committed lockfile.
 - Scope: the repo ships the backend protocol, the fake backend and the conformance suite already written, so week 1 has something to build against. They are drafts until the November 1 freeze, and the Environment pair owns them from here.
 
 ## Log
 
 - 2026-10-11: Plan fine-tuned before kickoff.
-- 2026-11-02: Prince authorized an ENV-04 implementation on `issue-11/mgba-backend` to unblock FireRed reader validation, with no separate ENV-04 PR. Future PRs that use this backend must identify the branch/commit and note the macOS-only verification and pending binary mirror. The implementation reuses ENV-01's installer from PR #55; ENV-04 remains open until all acceptance criteria are met.
+- 2026-10-25: On macOS arm64, Homebrew's mgba links ffmpeg 8 but Homebrew ships ffmpeg 9. We pin `ffmpeg@8` and put `/opt/homebrew/lib:/opt/homebrew/opt/ffmpeg@8/lib` on `DYLD_FALLBACK_LIBRARY_PATH` until Homebrew rebuilds mgba. libretro.py stays the fallback (#4).
+- 2026-11-02: The schema freeze moves to Nov 8. ENV-08 was not validated on real memory by Nov 1, which is the rule's trigger (#20).
+- 2026-11-02: ENV-04 is built on Kumario1's `issue-11/mgba-backend` branch, with their commits kept, and opened from the team repo (#11).
+- 2026-11-02: The three libmgba-py 0.2.0-2 zips (MPL-2.0) are mirrored as a release on this repo, because upstream has had no push since December 2024 (#11).
+- 2026-11-02: matplotlib is allowed as a dependency in the `train` group only, for learning-curve figures (#7, #14).
+- 2026-11-02: `StateNotReady` is the shared way a reader says memory is not ready. It is raised when the reader detects that; on the title screen and intro the FireRed v0 reader returns zeros instead, a known gap (#12).
+- 2026-11-02: The LLM attempt loop's dollar cap is hard. It stops before a request whose upper-bound cost would pass the cap (#16).
