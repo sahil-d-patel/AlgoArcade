@@ -26,14 +26,12 @@ BUTTON_NAMES = {
 
 
 class PyBoyBackend:
-    def __init__(self, rom: Path, state: bytes | None = None, *, render: bool = True) -> None:
+    def __init__(self, rom: Path, *, render: bool = True) -> None:
         game = identify(rom).game
         if game != "super_mario_land":
             raise UnknownRomError(f"{rom}: PyBoyBackend runs Super Mario Land, not {game}")
         self._pyboy = PyBoy(str(rom), window="null", sound_emulated=False)
         self._render = render
-        if state is not None:
-            self.load_state(state)
 
     def step(self, frames: int = 1) -> None:
         self._pyboy.tick(frames, self._render)
