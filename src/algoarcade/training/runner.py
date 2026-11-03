@@ -208,13 +208,6 @@ def train(config: TrainConfig) -> Path:
             start,
             training=log,
         )
-        runs = RollingWriter(run_dir, "runs", "train")
-        fixed = run_row(config, run_id, backend, rom_sha1, git_info["commit"])
-        runs.write(
-            pa.Table.from_pylist(
-                [fixed | {"status": "running", "env_steps": 0, "wall_clock_s": 0.0}], schema=RUNS
-            )
-        )
     else:
         env = make_vec_env(config.env_id, n_envs=config.n_envs, seed=config.seed, **SPAWN)
         eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
@@ -237,6 +230,15 @@ def train(config: TrainConfig) -> Path:
     logger = Logger(str(run_dir), outputs)
     model.set_logger(logger)
 
+    runs = None
+    fixed = run_row(config, run_id, backend, rom_sha1, git_info["commit"])
+    if game:
+        runs = RollingWriter(run_dir, "runs", "train")
+        runs.write(
+            pa.Table.from_pylist(
+                [fixed | {"status": "running", "env_steps": 0, "wall_clock_s": 0.0}], schema=RUNS
+            )
+        )
     status = "crashed"
     try:
         model.learn(
@@ -245,9 +247,15 @@ def train(config: TrainConfig) -> Path:
         )
         status = "finished"
     except EOFError as error:
+        # close() would wait forever on the workers that already answered this step.
+        for vec in (env.unwrapped, eval_env.unwrapped):
+            if isinstance(vec, SubprocVecEnv):
+                for process in vec.processes:
+                    process.terminate()
+                vec.closed = True
         raise RuntimeError("A SubprocVecEnv worker died; its traceback is above") from error
     finally:
-        if game:
+        if runs is not None:
             runs.write(
                 pa.Table.from_pylist(
                     [

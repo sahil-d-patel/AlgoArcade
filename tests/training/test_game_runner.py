@@ -4,6 +4,7 @@ import dataclasses
 from functools import partial
 from pathlib import Path
 
+import gymnasium as gym
 import pyarrow.parquet as pq
 import pytest
 
@@ -14,6 +15,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from algoarcade.logs.schema import TABLES, validate
+from algoarcade.training import runner
 from algoarcade.training.config import PRESETS
 from algoarcade.training.games import FAKE_STEP_BUDGET, fake_env
 from algoarcade.training.runner import train
@@ -85,3 +87,37 @@ def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path
     env.training = False
     _, lengths = evaluate_policy(model, env, n_eval_episodes=1, return_episode_rewards=True)
     assert lengths == [FAKE_STEP_BUDGET]
+
+
+class CrashOnSecondWorker(gym.Wrapper):
+    def reset(self, *, seed=None, options=None):
+        if seed is not None:
+            self.rank = seed - FAKE.seed
+        self.steps = 0
+        return self.env.reset(seed=seed, options=options)
+
+    def step(self, action):
+        self.steps += 1
+        if getattr(self, "rank", 0) == 1 and self.steps == 10:
+            raise RuntimeError("worker 1 fails")
+        return self.env.step(action)
+
+
+def crashing_env(weights: dict[str, float]) -> gym.Env:
+    return CrashOnSecondWorker(fake_env(weights))
+
+
+def test_a_dead_worker_raises_and_marks_the_run_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def factory(_env_id: str, _start: str, weights: dict[str, float]) -> tuple:
+        return partial(crashing_env, dict(weights)), "fake", ""
+
+    monkeypatch.setattr(runner, "env_factory", factory)
+    with pytest.raises(RuntimeError, match="worker died"):
+        train(dataclasses.replace(FAKE, runs_dir=tmp_path))
+    (run_dir,) = tmp_path.iterdir()
+    assert [r["status"] for r in pq.read_table(run_dir / "runs").to_pylist()] == [
+        "running",
+        "crashed",
+    ]
