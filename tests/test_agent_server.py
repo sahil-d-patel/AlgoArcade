@@ -5,12 +5,15 @@ import struct
 import subprocess
 import sys
 import threading
+import zlib
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, get_args
 
+import numpy as np
 import pytest
 from mcp import Client, StdioServerParameters
+from numpy.typing import NDArray
 
 from algoarcade.agent.server import SCALE, ButtonName
 from algoarcade.backends.base import Button
@@ -74,10 +77,21 @@ async def state_and_png(params: StdioServerParameters) -> tuple[dict[str, Any] |
     return result.structured_content, base64.b64decode(image.data)
 
 
-def png_size(png: bytes) -> tuple[int, int]:
+def png_pixels(png: bytes) -> NDArray[np.uint8]:
+    """Decode the server's PNG: 8-bit RGB, every row unfiltered."""
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    width, height = struct.unpack(">II", png[16:24])
-    return width, height
+    chunks: dict[bytes, bytes] = {}
+    offset = 8
+    while offset < len(png):
+        (length,) = struct.unpack(">I", png[offset : offset + 4])
+        kind = png[offset + 4 : offset + 8]
+        chunks[kind] = chunks.get(kind, b"") + png[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+    width, height, depth, colour, *_ = struct.unpack(">IIBBBBB", chunks[b"IHDR"])
+    assert (depth, colour) == (8, 2)
+    rows = np.frombuffer(zlib.decompress(chunks[b"IDAT"]), np.uint8).reshape(height, -1)
+    assert not rows[:, 0].any()
+    return rows[:, 1:].reshape(height, width, 3)
 
 
 async def ten_calls() -> list[dict[str, Any] | None]:
@@ -123,10 +137,11 @@ def test_get_state_matches_a_fresh_read() -> None:
 
 
 def test_screenshot_is_the_screen_upscaled_twice() -> None:
-    height, width, _ = FakeBackend().screen().shape
+    screen = FakeBackend().screen()
     state, png = asyncio.run(state_and_png(PARAMS))
     assert state == asdict(FakeReader().read(FakeBackend()))
-    assert png_size(png) == (width * SCALE, height * SCALE)
+    assert SCALE == 2
+    assert np.array_equal(png_pixels(png), screen.repeat(2, 0).repeat(2, 1))
 
 
 def test_ten_tool_calls_over_stdio() -> None:
@@ -153,7 +168,7 @@ def test_firered_get_state_matches_the_reader_and_the_png_is_480x320() -> None:
     state, png = asyncio.run(state_and_png(params))
     assert state is not None
     assert (state["map_group"], state["map_num"], state["x"], state["y"]) == expected.location
-    assert png_size(png) == (480, 320)
+    assert png_pixels(png).shape == (320, 480, 3)
 
 
 def test_button_names_are_the_backend_enum() -> None:
