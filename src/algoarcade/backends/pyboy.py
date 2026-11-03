@@ -26,27 +26,30 @@ BUTTON_NAMES = {
 
 
 class PyBoyBackend:
-    def __init__(self, rom: Path, state: bytes | None = None) -> None:
+    def __init__(self, rom: Path, state: bytes | None = None, *, render: bool = True) -> None:
         game = identify(rom).game
         if game != "super_mario_land":
             raise UnknownRomError(f"{rom}: PyBoyBackend runs Super Mario Land, not {game}")
         self._pyboy = PyBoy(str(rom), window="null", sound_emulated=False)
+        self._render = render
         if state is not None:
             self.load_state(state)
 
     def step(self, frames: int = 1) -> None:
-        self._pyboy.tick(frames)
+        self._pyboy.tick(frames, self._render)
 
     def press(self, buttons: Iterable[Button], hold: int = 8, release: int = 16) -> None:
         names = [BUTTON_NAMES[button] for button in buttons if button in BUTTON_NAMES]
         for name in names:
             self._pyboy.button_press(name)
-        self._pyboy.tick(hold)
+        self._pyboy.tick(hold, self._render)
         for name in names:
             self._pyboy.button_release(name)
-        self._pyboy.tick(release)
+        self._pyboy.tick(release, self._render)
 
     def screen(self) -> NDArray[np.uint8]:
+        if not self._render:
+            raise RuntimeError("Rendering is disabled")
         return self._pyboy.screen.ndarray[:, :, :3].copy()
 
     def read(self, address: int, size: int) -> bytes:
