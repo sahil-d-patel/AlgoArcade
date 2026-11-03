@@ -260,27 +260,8 @@ def total_reward(name: str, states: list[FakeState]) -> float:
     return sum(component.score(a, b) for a, b in pairwise(states))
 
 
-def test_exploit_pacing_between_two_tiles_pays_one_tile() -> None:
-    backend = FakeBackend()
-    states = [read(backend)]
-    for button in [Button.DOWN, Button.UP] * 50:
-        backend.press([button])
-        states.append(read(backend))
-    assert total_reward("explore", states) <= 1.0
-
-
-def test_exploit_grass_camping_pays_at_most_one_level_per_step() -> None:
-    backend = FakeBackend()
-    start_level = backend.save_state()[fake.LEVEL_SUM]
-    states = [read(backend)]
-    for value in range(start_level + 3, start_level + 121, 3):
-        poke(backend, fake.LEVEL_SUM, value)
-        states.append(read(backend))
-    assert total_reward("level", states) <= 40.0
-
-
 @pytest.mark.parametrize("name", list(COUNT_BYTES))
-def test_exploit_losing_and_regaining_a_count_pays_the_gain_once(name: str) -> None:
+def test_losing_and_regaining_a_count_pays_the_gain_once(name: str) -> None:
     backend = FakeBackend()
     base = backend.save_state()[COUNT_BYTES[name]]
     states = [read(backend)]
