@@ -9,7 +9,7 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # headless; no display needed
+matplotlib.use("Agg")  # headless
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ ENV_ID = "CartPole-v1"
 TOTAL_TIMESTEPS = 100_000
 N_ENVS = 8
 TARGET_RETURN = 400.0
-RUNS_DIR = Path("data/runs")
+RUNS_DIR = Path(__file__).resolve().parents[1] / "data" / "runs"
 
 
 def linear_schedule(initial: float) -> Callable[[float], float]:
