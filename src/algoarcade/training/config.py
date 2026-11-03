@@ -115,6 +115,6 @@ ACROBOT = TrainConfig(
 
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
-    "cartpole": ("CartPole-v1, tuned for the control task.", CARTPOLE),
-    "acrobot": ("Acrobot-v1, tuned for the control task.", ACROBOT),
+    "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
+    "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),
 }

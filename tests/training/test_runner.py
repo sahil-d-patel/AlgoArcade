@@ -1,4 +1,4 @@
-"""Needs the train group. CI's main matrix installs without it, so a separate CI job runs these."""
+"""Skipped without the train group. CI installs it, so these run on all three OSes."""
 
 import csv
 import dataclasses
