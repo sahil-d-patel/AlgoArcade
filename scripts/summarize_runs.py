@@ -38,9 +38,9 @@ def main(out_dir: Path, runs_dir: Path = Path("data/runs")) -> None:
         fig, ax = plt.subplots(figsize=(6, 4))
         for seed, steps, returns in runs:
             ax.plot(steps, returns, label=f"seed {seed}")
-        ax.axhline(
-            gym.spec(env_id).reward_threshold, color="gray", linestyle="--", label="threshold"
-        )
+        threshold = gym.spec(env_id).reward_threshold
+        if threshold is not None:
+            ax.axhline(threshold, color="gray", linestyle="--", label="threshold")
         ax.set(title=env_id, xlabel="env steps", ylabel="mean eval return (deterministic)")
         ax.legend()
         fig.tight_layout()
