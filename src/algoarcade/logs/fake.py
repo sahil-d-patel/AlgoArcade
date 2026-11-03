@@ -1,7 +1,7 @@
 """Synthetic runs in the logged schema, for building panels before real runs exist.
 
 A seeded random walker drifts from the player's bedroom to Pewter Gym over real FireRed maps,
-fights random battles in the grass and sometimes earns the Boulder Badge. The same seed gives
+fights random battles in the grass and sometimes earns the Boulder Badge, the run's goal. The same seed gives
 identical tables. Contract: docs/harness-spec.md, Fake backend and fake logger.
 
 Write one run with: uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0
@@ -17,7 +17,7 @@ import numpy as np
 import pyarrow as pa
 
 from algoarcade.logs.schema import EPISODES, REWARD_COMPONENTS, RUNS, STEPS, VISITS
-from algoarcade.logs.writer import ROWS_PER_FILE, RollingWriter
+from algoarcade.logs.writer import ROWS_PER_FILE, RollingWriter, run_dir
 
 # (name, map_group, map_num, width, height) from pret/pokefirered at commit
 # ce6406d8c2eaf46d543c8a2606de0c3cb1951982: data/maps/map_groups.json gives the ids,
@@ -42,7 +42,8 @@ MOVES = ((0, -1), (0, 1), (-1, 0), (1, 0), (0, 0), (0, 0))
 WEIGHTS = {"events": 1.0, "explore": 0.02, "level": 0.5, "badge": 10.0, "milestone": 2.0}
 
 NUM_ENVS = 4
-SAMPLE_EVERY = 4
+STEP_LOG_EVERY = 4
+EVAL_EPISODES = 2
 EPISODE_STEPS = 2_048
 WINDOW_STEPS = 500_000
 STEPS_PER_SECOND = 500.0
@@ -77,6 +78,7 @@ class _Walker:
         self.badges = 0
         self.story_flags = 0
         self.furthest = 0
+        self.goal_step: int | None = None
         self.visited = {self.location}
         self.totals = dict.fromkeys(WEIGHTS, 0.0)
         self.episode_return = 0.0
@@ -107,6 +109,7 @@ class _Walker:
                 self.battle = int(rng.integers(5, 30))
         if self.map == GYM and not self.badges and rng.random() < BADGE_CHANCE:
             self.badges = 1
+            self.goal_step = self.episode_step
         self.furthest = max(self.furthest, self.map)
         new_milestones = self.milestone_count - milestones
         self.story_flags += new_milestones
@@ -131,10 +134,39 @@ def _rewards(columns: dict[str, list], raw: dict[str, float]) -> None:
         columns[f"reward_{c}"].append(raw.get(c))
 
 
-def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
-    """One synthetic run of `env_steps` decisions across NUM_ENVS walkers, as the four tables."""
+def _end_episode(episodes: dict[str, list], w: _Walker, rng: np.random.Generator, **keys) -> None:
+    row = {
+        **keys,
+        "episode_id": w.episode_id,
+        "episode_return": w.episode_return,
+        "episode_length": w.episode_step,
+        "badge_count": w.badges,
+        "party_level_sum": w.level_sum,
+        "story_flags": w.story_flags,
+        "unique_tiles": len(w.visited),
+        "milestone_count": w.milestone_count,
+        "start_state": "S0",
+        "archive_start": False,
+        "end_reason": "truncated",
+        "goal_reached": w.goal_step is not None,
+        "goal_step": w.goal_step,
+        **dict.fromkeys(n for n in EPISODES.names if n.startswith("llm_")),
+    }
+    for name, value in row.items():
+        episodes[name].append(value)
+    _rewards(episodes, w.totals)
+    w.reset(rng)
+
+
+def fake_run(
+    run_id: str, seed: int, env_steps: int, step_log_every: int = STEP_LOG_EVERY
+) -> dict[str, pa.Table]:
+    """One synthetic run of `env_steps` training decisions across NUM_ENVS walkers, as the four
+    tables. At every checkpoint, EVAL_EPISODES evaluation episodes run on a separate walker; they
+    write per-episode rows only."""
     rng = np.random.default_rng(seed)
     walkers = [_Walker(rng) for _ in range(NUM_ENVS)]
+    evaluator = _Walker(rng)
     steps: dict[str, list] = {name: [] for name in STEPS.names}
     episodes: dict[str, list] = {name: [] for name in EPISODES.names}
     visits: Counter[tuple[int, int, int, int, int]] = Counter()
@@ -143,17 +175,15 @@ def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
         total += NUM_ENVS
         clock = total / STEPS_PER_SECOND
         window = (total - 1) // WINDOW_STEPS * WINDOW_STEPS
+        keys = {"run_id": run_id, "seed": seed, "env_steps": total, "wall_clock_s": clock}
         for env_idx, w in enumerate(walkers):
             action, raw, reward = w.step(rng)
             visits[(window, *w.location)] += 1
-            if w.episode_step % SAMPLE_EVERY == 0:
+            if w.episode_step % step_log_every == 0:
                 group, num, x, y = w.location
                 row = {
-                    "run_id": run_id,
-                    "seed": seed,
+                    **keys,
                     "env_idx": env_idx,
-                    "env_steps": total,
-                    "wall_clock_s": clock,
                     "episode_id": w.episode_id,
                     "episode_step": w.episode_step,
                     "action": action,
@@ -169,32 +199,18 @@ def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
                     steps[name].append(value)
                 _rewards(steps, raw)
             if w.episode_step == EPISODE_STEPS:
-                row = {
-                    "run_id": run_id,
-                    "seed": seed,
-                    "env_idx": env_idx,
-                    "episode_id": w.episode_id,
-                    "env_steps": total,
-                    "wall_clock_s": clock,
-                    "episode_return": w.episode_return,
-                    "episode_length": w.episode_step,
-                    "badge_count": w.badges,
-                    "party_level_sum": w.level_sum,
-                    "story_flags": w.story_flags,
-                    "unique_tiles": len(w.visited),
-                    "milestone_count": w.milestone_count,
-                    "start_state": "S0",
-                    "archive_start": False,
-                    "end_reason": "truncated",
-                    **dict.fromkeys(n for n in EPISODES.names if n.startswith("llm_")),
-                }
-                for name, value in row.items():
-                    episodes[name].append(value)
-                _rewards(episodes, w.totals)
-                w.reset(rng)
+                train = {"env_idx": env_idx, "is_eval": False, "checkpoint_step": None}
+                _end_episode(episodes, w, rng, **keys, **train)
+        if total % WINDOW_STEPS == 0:
+            for _ in range(EVAL_EPISODES * EPISODE_STEPS):
+                evaluator.step(rng)
+                if evaluator.episode_step == EPISODE_STEPS:
+                    evaluation = {"env_idx": 0, "is_eval": True, "checkpoint_step": total}
+                    _end_episode(episodes, evaluator, rng, **keys, **evaluation)
     weights = json.dumps(WEIGHTS, sort_keys=True)
-    run = {
+    start = {
         "run_id": run_id,
+        "status": "running",
         "experiment_id": "fake",
         "arm": "fake",
         "algorithm": "random",
@@ -210,20 +226,28 @@ def fake_run(run_id: str, seed: int, env_steps: int) -> dict[str, pa.Table]:
         "reward_config_hash": hashlib.sha1(weights.encode()).hexdigest(),
         "git_commit": "none",
         "hyperparameters": json.dumps({"gamma": 0.997, "reward_weights": WEIGHTS}),
+        "step_log_every": step_log_every,
+        "machine": "fake",
+        "env_steps": 0,
+        "wall_clock_s": 0.0,
+    }
+    end = {
+        **start,
+        "status": "finished",
         "env_steps": total,
         "wall_clock_s": total / STEPS_PER_SECOND,
     }
-    keys = sorted(visits)
+    tiles = sorted(visits)
     visit_columns = {
-        "run_id": [run_id] * len(keys),
-        **{name: [k[i] for k in keys] for i, name in enumerate(VISITS.names[1:-1])},
-        "visits": [visits[k] for k in keys],
+        "run_id": [run_id] * len(tiles),
+        **{name: [k[i] for k in tiles] for i, name in enumerate(VISITS.names[1:-1])},
+        "visits": [visits[k] for k in tiles],
     }
     return {
         "steps": pa.table(steps, schema=STEPS),
         "visits": pa.table(visit_columns, schema=VISITS),
         "episodes": pa.table(episodes, schema=EPISODES),
-        "runs": pa.table({k: [v] for k, v in run.items()}, schema=RUNS),
+        "runs": pa.Table.from_pylist([start, end], schema=RUNS),
     }
 
 
@@ -232,11 +256,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--env-steps", type=int, default=2_000_000)
+    parser.add_argument("--step-log-every", type=int, default=STEP_LOG_EVERY)
     parser.add_argument("--root", type=Path, default=Path("data/runs"))
     args = parser.parse_args(argv)
-    for table, batch in fake_run(args.run_id, args.seed, args.env_steps).items():
-        writer = RollingWriter(args.run_id, table, "fake", root=args.root)
-        for chunk in batch.to_batches(max_chunksize=ROWS_PER_FILE):
+    run = fake_run(args.run_id, args.seed, args.env_steps, args.step_log_every)
+    for table, batch in run.items():
+        # One file per runs row: a real run writes its start row at launch, its end row at exit.
+        rows_per_file = 1 if table == "runs" else ROWS_PER_FILE
+        writer = RollingWriter(run_dir(args.run_id, args.root), table, "fake", rows_per_file)
+        for chunk in batch.to_batches(max_chunksize=rows_per_file):
             writer.write(pa.Table.from_batches([chunk]))
         writer.close()
 

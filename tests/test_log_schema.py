@@ -1,12 +1,16 @@
 import pyarrow as pa
 import pytest
 
-from algoarcade.logs.schema import REWARD_COMPONENTS, TABLES, SchemaError, validate
+from algoarcade.logs.schema import REWARD_COMPONENTS, TABLES, VALUES, SchemaError, validate
 
 
 def valid_row(schema: pa.Schema) -> dict[str, list]:
     examples = {pa.string(): "x", pa.bool_(): False, pa.float64(): 0.5}
-    return {f.name: [examples.get(f.type, 1)] for f in schema}
+    row = {f.name: [examples.get(f.type, 1)] for f in schema}
+    for (_, column), allowed in VALUES.items():
+        if column in row:
+            row[column] = [min(allowed)]
+    return row
 
 
 @pytest.mark.parametrize("table", sorted(TABLES))
@@ -82,3 +86,26 @@ def test_reward_components_match_the_technical_plan() -> None:
         "anti_spam",
         "time",
     )
+
+
+@pytest.mark.parametrize("table", sorted(TABLES))
+def test_a_duplicate_column_is_rejected(table: str) -> None:
+    batch = pa.table(valid_row(TABLES[table]), schema=TABLES[table])
+    with pytest.raises(SchemaError, match="duplicate"):
+        validate(batch.append_column(batch.schema.field(0), batch.column(0)), table)
+
+
+@pytest.mark.parametrize(("table", "column"), sorted(VALUES))
+def test_a_value_outside_the_listed_set_is_rejected(table: str, column: str) -> None:
+    schema = TABLES[table]
+    row = valid_row(schema)
+    row[column] = ["unknown" if schema.field(column).type == pa.string() else 7]
+    with pytest.raises(SchemaError, match=column):
+        validate(pa.table(row, schema=schema), table)
+
+
+def test_a_null_tool_level_passes_for_rl_runs() -> None:
+    schema = TABLES["episodes"]
+    row = valid_row(schema)
+    row["llm_tool_level"] = [None]
+    validate(pa.table(row, schema=schema), "episodes")

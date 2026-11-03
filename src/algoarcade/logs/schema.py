@@ -76,6 +76,10 @@ EPISODES = pa.schema(
         _required("start_state", pa.string()),
         _required("archive_start", pa.bool_()),
         _required("end_reason", pa.string()),
+        _required("goal_reached", pa.bool_()),
+        pa.field("goal_step", pa.int32()),
+        _required("is_eval", pa.bool_()),
+        pa.field("checkpoint_step", pa.int64()),
         # Null for RL runs.
         pa.field("llm_model", pa.string()),
         pa.field("llm_tool_level", pa.int16()),
@@ -88,6 +92,7 @@ EPISODES = pa.schema(
 RUNS = pa.schema(
     [
         _required("run_id", pa.string()),
+        _required("status", pa.string()),
         _required("experiment_id", pa.string()),
         _required("arm", pa.string()),
         _required("algorithm", pa.string()),
@@ -103,6 +108,8 @@ RUNS = pa.schema(
         _required("reward_config_hash", pa.string()),
         _required("git_commit", pa.string()),
         _required("hyperparameters", pa.string()),
+        _required("step_log_every", pa.int16()),
+        _required("machine", pa.string()),
         _required("env_steps", pa.int64()),
         _required("wall_clock_s", pa.float64()),
     ]
@@ -110,15 +117,26 @@ RUNS = pa.schema(
 
 TABLES = {"steps": STEPS, "visits": VISITS, "episodes": EPISODES, "runs": RUNS}
 
+# Columns limited to a listed set of values. A null passes when the column is nullable.
+VALUES = {
+    ("episodes", "end_reason"): {"truncated", "goal", "action_cap", "dollar_cap"},
+    ("episodes", "llm_tool_level"): {0, 1, 2},
+    ("runs", "status"): {"running", "finished", "crashed"},
+}
+
 
 class SchemaError(ValueError):
     pass
 
 
 def validate(batch: pa.Table, table: str) -> None:
-    """Raise SchemaError unless `batch` has exactly the columns of `table`, with their types,
-    and no null in a required column. Column order is free."""
+    """Raise SchemaError unless `batch` has exactly the columns of `table`, once each, with their
+    types, no null in a required column and only listed values where VALUES limits them. Column
+    order is free."""
     schema = TABLES[table]
+    duplicated = sorted({n for n in batch.column_names if batch.column_names.count(n) > 1})
+    if duplicated:
+        raise SchemaError(f"{table}: duplicate columns {duplicated}")
     missing = sorted(set(schema.names) - set(batch.column_names))
     extra = sorted(set(batch.column_names) - set(schema.names))
     if missing or extra:
@@ -131,3 +149,7 @@ def validate(batch: pa.Table, table: str) -> None:
             raise SchemaError(
                 f"{table}.{field.name}: {column.null_count} nulls in a required field"
             )
+        allowed = VALUES.get((table, field.name))
+        unlisted = allowed and set(column.drop_null().unique().to_pylist()) - allowed
+        if unlisted:
+            raise SchemaError(f"{table}.{field.name}: {sorted(unlisted)} not in {sorted(allowed)}")
