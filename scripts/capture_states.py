@@ -12,6 +12,7 @@ Inputs, separated by spaces; a suffix xN repeats one input N times:
     wN                wait N frames
     tU tD tL tR       walk one tile, then press A through any dialogue or battle it starts
     aa                press A until the player can walk again
+    gN                from the Viridian Pokemon Center door, fight on Route 1 until level N
     bb                press B until the player can walk again: it answers NO to a question
 """
 
@@ -49,6 +50,11 @@ class Stage:
     inputs: str
     location: tuple[int, int, int, int]
 
+
+# Route 1 grass at (16, 9) and the Viridian Pokemon Center door at (26, 27), both ways. The
+# second heals: walk in, talk to the nurse, walk out.
+CENTER_TO_GRASS = "tDx2 tLx4 tDx10 tRx2 tD tDx4 tRx4 tDx5"
+GRASS_TO_CENTER = "tUx7 tLx3 tUx2 tL tU tUx8 tLx2 tUx4 tRx4 tU tUx4 A aa tDx4 tD"
 
 # Names match the manifest. A source of None means power-on.
 STAGES = (
@@ -120,6 +126,26 @@ STAGES = (
         "tDx14 tRx4 tU tUx8 A w60 aa",
         location=(4, 3, 6, 4),
     ),
+    Stage(
+        saves=("seg_05_forest",),
+        source="s1",
+        # Back to Viridian, heal, grind Squirtle to level 13 (Water Gun) so the forest's wild
+        # Pokemon and trainers cannot knock it out, then north. The old man at (21, 8) blocks
+        # the road, so the path steps on his tutorial trigger at (20, 8).
+        inputs="tDx8 tD tLx4 tUx15 "
+        "tUx7 tLx4 tUx5 tRx4 tUx6 tLx2 tUx4 tRx6 tUx15 tLx3 tUx2 tL tU "
+        "tUx8 tLx2 tUx4 tRx4 tU tUx4 A aa tDx4 tD g13 "
+        "tLx3 tUx8 tL tUx7 tL tUx3 tL tU tUx8 tU "
+        "tUx8 tR tUx4 tLx4 tUx11 tRx6 tUx3 tLx4 tU tL tU tUx8 tU w60",
+        location=(1, 0, 29, 62),
+    ),
+    Stage(
+        saves=("seg_05_forest_goal",),
+        source="seg_05_forest",
+        inputs="tUx3 tR tU tR tUx3 tRx8 tUx36 tLx7 tDx4 tLx9 tUx13 tLx8 tDx17 tLx8 "
+        "tUx4 tL tUx10 tL tUx4",
+        location=(15, 3, 7, 10),
+    ),
 )
 
 
@@ -151,6 +177,9 @@ class Player:
         for _ in range(3000):
             if not self._busy(overworld):
                 return
+            party = self.reader.read(self.backend).party
+            if party and not any(pokemon.hp for pokemon in party):
+                raise RuntimeError(f"the party fainted at {self.location()}")
             if self._callback2() == overworld or read_u8(self.backend, self._main + 0x439) & 2:
                 self.backend.press([Button.A], hold=2, release=28)
             else:
@@ -183,6 +212,16 @@ class Player:
                 raise RuntimeError(f"walking {direction} from {start} ended at {now}")
         raise RuntimeError(f"could not walk {direction} from {start}")
 
+    def grind(self, level: int) -> None:
+        """From the Viridian Pokemon Center door, fight on Route 1 until the lead has `level`."""
+        self.run(CENTER_TO_GRASS)
+        while (lead := self.reader.read(self.backend).party[0]).level < level:
+            if lead.hp * 3 < lead.max_hp:
+                self.run(f"{GRASS_TO_CENTER} {CENTER_TO_GRASS}")
+            else:
+                self.run("tR tL")
+        self.run(GRASS_TO_CENTER)
+
     def run(self, inputs: str) -> None:
         for token in inputs.split():
             name, _, count = token.partition("x")
@@ -199,7 +238,9 @@ class Player:
                     return
                 self.backend.press([button], hold=2, release=28)
             raise RuntimeError(f"no control after 600 presses at {self.location()}")
-        if token[0] == "w":
+        if token[0] == "g":
+            self.grind(int(token[1:]))
+        elif token[0] == "w":
             self.backend.step(int(token[1:]))
         elif token[0] == "t":
             self.walk(token[1])
