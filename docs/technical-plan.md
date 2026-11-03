@@ -80,7 +80,7 @@ FireRed runs on mGBA through the prebuilt `hanzi/libmgba-py` binding, release 0.
 | OS | Extra step |
 |---|---|
 | Windows x64 | None |
-| macOS arm64 | `brew install mgba` |
+| macOS arm64 | `brew install mgba ffmpeg@8`, plus a library path (docs/setup.md) |
 | Ubuntu 24.04 or later | `sudo apt install libmgba0.10t64` |
 
 None of this has been run on our machines yet. Proving it starts in week 1 (ENV-01) and finishes in week 2 (ENV-04). The binding's repo has had no push since December 2024, so we mirror the three archives we use. If the binding fails on someone's machine, the fallback is `libretro.py` with a prebuilt mGBA core.

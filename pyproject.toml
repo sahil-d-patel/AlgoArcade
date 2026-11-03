@@ -15,7 +15,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ruff", "pyrefly", "pytest", "poethepoet", "prek", "typos"]
-train = ["torch", "stable-baselines3", "wandb"]
+train = ["torch", "stable-baselines3", "wandb", "matplotlib"]
 agent = ["mcp>=2.3,<3", "anthropic"]
 
 [build-system]
@@ -50,6 +50,8 @@ ignore = ["E501"]
 [tool.pyrefly]
 project-includes = ["src", "tests", "tools"]
 search-path = ["src", "tools", "tools/github", ".claude/hooks"]
+# The train group is optional; without it these resolve to Any instead of failing.
+ignore-missing-imports = ["stable_baselines3", "stable_baselines3.*", "wandb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
