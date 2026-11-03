@@ -19,7 +19,7 @@ from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games import fake
 from algoarcade.games.base import StateReader
 from algoarcade.games.firered.features import FEATURES as FIRERED_FEATURES
-from algoarcade.games.firered.manifest import MANIFEST, STATES
+from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1, STATES
 from algoarcade.games.firered.reader import FireRedReader, FireRedState
 from algoarcade.rewards.explore import Explore
 from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
@@ -101,4 +101,6 @@ def env_factory(
     if hashlib.sha256(state).hexdigest() != entry.sha256:
         raise ValueError(f"{path} does not match the manifest hash")
     rom = identify(FIRERED_ROM)
+    if rom.sha1 != ROM_SHA1:
+        raise ValueError(f"{FIRERED_ROM} is {rom.name}; the start states were captured on rev 1")
     return partial(firered_env, state, entry.name, dict(reward_weights)), "mgba", rom.sha1
