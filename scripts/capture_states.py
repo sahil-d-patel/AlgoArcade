@@ -13,11 +13,14 @@ Inputs, separated by spaces; a suffix xN repeats one input N times:
     tU tD tL tR       walk one tile, then press A through any dialogue or battle it starts
     aa                press A until the player can walk again
     gN                from the Viridian Pokemon Center door, fight on Route 1 until level N
+    ab                press A until a battle starts
+    ff                press A until the battle ends: the first move every turn
     bb                press B until the player can walk again: it answers NO to a question
 """
 
 import argparse
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -146,6 +149,29 @@ STAGES = (
         "tUx4 tL tUx10 tL tUx4",
         location=(15, 3, 7, 10),
     ),
+    Stage(
+        saves=("gym_door",),
+        source="seg_05_forest_goal",
+        # Out of the gate, up Route 2, heal at the Pewter Pokemon Center, stop below the gym door.
+        inputs="tUx9 tUx11 tRx3 tUx2 tR tU tUx10 tL tUx3 tLx3 tU tUx4 A aa tDx4 tD "
+        "tRx5 tUx14 tLx14 tDx5 tRx7",
+        location=(3, 2, 15, 17),
+    ),
+    Stage(
+        saves=("brock",),
+        source="gym_door",
+        # Column 9 and 8 stay outside the camper's four-tile sight line on row 8. The state is
+        # the first "What will SQUIRTLE do?" menu against Geodude.
+        inputs="tU tUx4 tRx3 tUx2 tL tUx2 tLx2 U ab w300 A w420",
+        location=(6, 2, 6, 6),
+    ),
+    Stage(
+        saves=("brock_goal",),
+        source="brock",
+        # Water Gun replaced Tackle in the first move slot at level 13.
+        inputs="ff",
+        location=(6, 2, 6, 6),
+    ),
 )
 
 
@@ -169,7 +195,7 @@ class Player:
         return bool(
             read_u8(self.backend, self._lock)
             or read_u8(self.backend, self._message)
-            or read_u8(self.backend, self._main + 0x439) & 2
+            or self._in_battle()
             or self._callback2() != overworld
         )
 
@@ -180,7 +206,7 @@ class Player:
             party = self.reader.read(self.backend).party
             if party and not any(pokemon.hp for pokemon in party):
                 raise RuntimeError(f"the party fainted at {self.location()}")
-            if self._callback2() == overworld or read_u8(self.backend, self._main + 0x439) & 2:
+            if self._callback2() == overworld or self._in_battle():
                 self.backend.press([Button.A], hold=2, release=28)
             else:
                 # A warp or a battle transition: wait it out.
@@ -228,17 +254,30 @@ class Player:
             for _ in range(int(count or 1)):
                 self._do(name)
 
+    def _in_battle(self) -> bool:
+        return bool(read_u8(self.backend, self._main + 0x439) & 2)
+
+    def _has_control(self) -> bool:
+        return not read_u8(self.backend, self._lock) and not read_u8(self.backend, self._message)
+
+    def _press_until(self, button: Button, done: Callable[[], bool]) -> None:
+        for _ in range(3000):
+            if done():
+                return
+            self.backend.press([button], hold=2, release=28)
+        raise RuntimeError(f"pressed {button.name} 3000 times at {self.location()}")
+
     def _do(self, token: str) -> None:
-        if token in ("aa", "bb"):
-            button = Button.A if token == "aa" else Button.B
-            for _ in range(600):
-                if not read_u8(self.backend, self._lock) and not read_u8(
-                    self.backend, self._message
-                ):
-                    return
-                self.backend.press([button], hold=2, release=28)
-            raise RuntimeError(f"no control after 600 presses at {self.location()}")
-        if token[0] == "g":
+        if token == "aa":
+            self._press_until(Button.A, self._has_control)
+        elif token == "bb":
+            self._press_until(Button.B, self._has_control)
+        elif token == "ab":
+            self._press_until(Button.A, self._in_battle)
+        elif token == "ff":
+            self._press_until(Button.A, lambda: not self._in_battle())
+            self._press_until(Button.A, self._has_control)
+        elif token[0] == "g":
             self.grind(int(token[1:]))
         elif token[0] == "w":
             self.backend.step(int(token[1:]))
