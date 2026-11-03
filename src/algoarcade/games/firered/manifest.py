@@ -3,7 +3,8 @@
 The files live in data/states/ as <name>.state. scripts/capture_states.py regenerates them from
 power-on. Check yours against the hashes with:
 
-    uv run python -m algoarcade.games.firered.manifest
+    uv run python -m algoarcade.games.firered.manifest            # data/states/
+    uv run python -m algoarcade.games.firered.manifest DIR        # e.g. a capture_states --out
 """
 
 import hashlib
@@ -134,7 +135,7 @@ def check(directory: Path = STATES) -> list[str]:
 
 
 def main() -> None:
-    lines = check()
+    lines = check(Path(sys.argv[1]) if len(sys.argv) > 1 else STATES)
     print("\n".join(lines))  # noqa: T201
     if not all(line.startswith("OK") for line in lines):
         sys.exit(1)

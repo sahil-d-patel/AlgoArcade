@@ -2,10 +2,13 @@
 
     uv run python scripts/capture_states.py                 # every stage, from power-on
     uv run python scripts/capture_states.py --from gym_door # that stage on, from saved states
+    uv run python scripts/capture_states.py --out DIR       # read and write DIR instead
+
+It writes data/states/ only with the ROM the manifest was captured on (rev 1).
 
 Each stage loads the state the previous stage saved, replays recorded inputs, checks the
-reader's location and the options, and saves. mGBA is deterministic, so the same inputs on the
-same ROM give the same bytes.
+reader's location and the options, and saves. On macOS arm64 with libmgba-py 0.2.0, two runs from
+power-on gave the same bytes for every state.
 
 Inputs, separated by spaces; a suffix xN repeats one input N times:
     A B S s U D L R   press A, B, START, SELECT or a direction (4 frames held, 20 released)
@@ -27,8 +30,9 @@ from pathlib import Path
 from algoarcade.backends.base import Button, GameBackend, read_u8, read_u32
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.firered.addresses import ADDRESSES
-from algoarcade.games.firered.manifest import STATES
+from algoarcade.games.firered.manifest import ROM_SHA1, STATES
 from algoarcade.games.firered.reader import FireRedReader
+from algoarcade.rom import identify
 
 ROM = Path(__file__).resolve().parents[1] / "data" / "roms" / "firered.gba"
 
@@ -292,17 +296,18 @@ def options_ok(backend: GameBackend, rom_sha1: str) -> bool:
     addresses = ADDRESSES[rom_sha1]
     pointer = read_u32(backend, addresses["gSaveBlock2Ptr"].address)
     base = addresses["gSaveBlock2"].address
-    # SetSaveBlocksPointers moves SaveBlock2 by the same 0 to 0x7C offset as SaveBlock1.
-    if not 0 <= pointer - base <= 0x7C:
+    # SetSaveBlocksPointers moves SaveBlock2 by the same 0 to 0x7C offset as SaveBlock1,
+    # in steps of 4.
+    if not 0 <= pointer - base <= 0x7C or (pointer - base) % 4:
         return False
     # struct SaveBlock2 in include/global.h: optionsTextSpeed is bits 0-2 of +0x14
     # (OPTIONS_TEXT_SPEED_FAST is 2) and optionsBattleSceneOff is bit 2 of +0x15.
     return read_u8(backend, pointer + 0x14) & 7 == 2 and bool(read_u8(backend, pointer + 0x15) & 4)
 
 
-def play(backend: MgbaBackend, stage: Stage) -> bytes:
+def play(backend: MgbaBackend, stage: Stage, directory: Path = STATES) -> bytes:
     if stage.source is not None:
-        backend.load_state((STATES / f"{stage.source}.state").read_bytes())
+        backend.load_state((directory / f"{stage.source}.state").read_bytes())
     player = Player(backend)
     player.run(stage.inputs)
     location = player.location()
@@ -313,24 +318,31 @@ def play(backend: MgbaBackend, stage: Stage) -> bytes:
     return backend.save_state()
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Regenerate the start states from power-on.")
-    parser.add_argument("--from", dest="start", help="first stage to play, by saved name")
-    args = parser.parse_args(argv)
+def main() -> None:
     names = [stage.saves[0] for stage in STAGES]
+    parser = argparse.ArgumentParser(description="Regenerate the start states from power-on.")
+    parser.add_argument("--from", dest="start", choices=names, help="first stage to play")
+    parser.add_argument(
+        "--out", type=Path, default=STATES, help="where stages read and write states"
+    )
+    args = parser.parse_args()
+    rom = identify(ROM)
+    if args.out.resolve() == STATES.resolve() and rom.sha1 != ROM_SHA1:
+        raise SystemExit(
+            f"The manifest states come from {ROM_SHA1} and this ROM is {rom.name}. "
+            "Use --out to write somewhere other than data/states/."
+        )
     first = names.index(args.start) if args.start else 0
-    STATES.mkdir(parents=True, exist_ok=True)
+    args.out.mkdir(parents=True, exist_ok=True)
     for stage in STAGES[first:]:
         backend = MgbaBackend(ROM)
         try:
-            state = play(backend, stage)
-            location = Player(backend).location()
+            state = play(backend, stage, args.out)
         finally:
             backend.close()
         for name in stage.saves:
-            (STATES / f"{name}.state").write_bytes(state)
-            digest = hashlib.sha256(state).hexdigest()
-            print(f"{name}  {digest}  {location}")
+            (args.out / f"{name}.state").write_bytes(state)
+            print(f"{name}  {hashlib.sha256(state).hexdigest()}  {stage.location}")
 
 
 if __name__ == "__main__":
