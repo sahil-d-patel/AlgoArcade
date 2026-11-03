@@ -4,9 +4,11 @@
     uv run python scripts/env_trace.py mgba --state data/states/s1.state
     uv run python scripts/env_trace.py pyboy
 
-Without --state, the episode starts from the backend's power-on state. The actions are drawn
-from random.Random(seed) and stored in the --out file, so the trace never depends on numpy's
-streams. Episodes are 128 steps, so 500 steps cross three resets.
+--seed seeds the resets only. The actions come from random.Random(--action-seed) and are stored
+in the --out file, so the trace never depends on numpy's streams, and changing --seed alone
+measures what reset noise does. Episodes are 128 steps, so 500 steps cross three resets.
+mgba needs --state: at power-on gSaveBlock1Ptr is 0 and the first reset raises StateNotReady.
+pyboy without --state starts from power-on.
 """
 
 import argparse
@@ -40,12 +42,11 @@ def fake_env() -> AlgoArcadeEnv:
     )
 
 
-def mgba_env(state: bytes | None) -> AlgoArcadeEnv:
+def mgba_env(state: bytes) -> AlgoArcadeEnv:
     backend = MgbaBackend(ROMS / "firered.gba", render=False)
     rewards = RewardRegistry({"explore": Explore}, {"explore": 1.0})
     reader = FireRedReader(backend.rom.sha1)
-    start = state or backend.save_state()
-    return AlgoArcadeEnv(backend, reader, rewards, start, BUDGET, FIRERED_FEATURES)
+    return AlgoArcadeEnv(backend, reader, rewards, state, BUDGET, FIRERED_FEATURES)
 
 
 def pyboy_env(state: bytes | None) -> AlgoArcadeEnv:
@@ -87,7 +88,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("backend", choices=("fake", "mgba", "pyboy"))
     parser.add_argument("--state", type=Path, help="start state file")
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=0, help="reset seed")
+    parser.add_argument("--action-seed", type=int, default=0)
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--out", type=Path, help="write the full trace here as JSON")
     args = parser.parse_args()
@@ -95,16 +97,20 @@ def main() -> None:
     match args.backend:
         case "fake":
             env = fake_env()
-        case "mgba":
+        case "mgba" if state:
             env = mgba_env(state)
+        case "mgba":
+            parser.error("mgba needs --state: the power-on state is not ready")
         case _:
             env = pyboy_env(state)
     assert isinstance(env.action_space, Discrete)
-    actions = random.Random(args.seed).choices(range(int(env.action_space.n)), k=args.steps)
+    actions = random.Random(args.action_seed).choices(range(int(env.action_space.n)), k=args.steps)
     rows = trace(env, args.seed, actions)
     end_state = hashlib.sha256(env.backend.save_state()).hexdigest()
     env.close()
-    text = json.dumps({"seed": args.seed, "actions": actions, "trace": rows})
+    text = json.dumps(
+        {"seed": args.seed, "action_seed": args.action_seed, "actions": actions, "trace": rows}
+    )
     if args.out:
         args.out.write_text(text + "\n")
     steps = [r for r in rows if r[0] is not None]
