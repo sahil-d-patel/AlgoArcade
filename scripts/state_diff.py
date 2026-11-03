@@ -13,18 +13,13 @@ ROM = Path(__file__).resolve().parents[1] / "data" / "roms" / "firered.gba"
 
 
 def compare_states(backend: GameBackend, state_a: bytes, state_b: bytes) -> None:
-    """Print changed memory bytes and restore the backend's original state."""
-    original = backend.save_state()
-    try:
-        backend.load_state(state_a)
-        before = backend.read(EWRAM_BASE, EWRAM_SIZE)
-        backend.load_state(state_b)
-        after = backend.read(EWRAM_BASE, EWRAM_SIZE)
-        for offset, (old, new) in enumerate(zip(before, after, strict=True)):
-            if old != new:
-                print(f"0x{EWRAM_BASE + offset:08x}: {old:02x} -> {new:02x}")
-    finally:
-        backend.load_state(original)
+    backend.load_state(state_a)
+    before = backend.read(EWRAM_BASE, EWRAM_SIZE)
+    backend.load_state(state_b)
+    after = backend.read(EWRAM_BASE, EWRAM_SIZE)
+    for offset, (old, new) in enumerate(zip(before, after, strict=True)):
+        if old != new:
+            print(f"0x{EWRAM_BASE + offset:08x}: {old:02x} -> {new:02x}")
 
 
 def main(argv: list[str] | None = None) -> None:
