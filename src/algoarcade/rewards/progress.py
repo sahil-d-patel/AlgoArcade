@@ -24,7 +24,8 @@ class Progress(GameState, Protocol):
 class NewMaximum(RewardComponent[Progress]):
     """Pays the amount a count rises above its best so far this episode, up to `cap` per step.
     A drop, or a climb back to the old best, pays nothing, so moving a count up and down cannot be
-    farmed. The excess of a rise above the cap is never paid.
+    farmed. The excess of a rise above the cap is never paid, nor is any part of a rise above
+    `ceiling`, so an episode pays at most `ceiling` in total.
 
     A read above `maximum`, or more than `max_rise` above the best, pays nothing and does not
     become the best. The best comes only from two consecutive reads that agree: the second is 0 to
@@ -34,19 +35,21 @@ class NewMaximum(RewardComponent[Progress]):
     reads agree. A bad read that repeats on two consecutive steps can therefore become the best
     and silence the term for the episode; only reader validation (ENV-05, ENV-08) prevents that."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 two bounds on reads and two on payment
         self,
         name: str,
         count: Callable[[Progress], int],
         maximum: int,
         max_rise: int,
         cap: float = float("inf"),
+        ceiling: float = float("inf"),
     ) -> None:
         self.name = name
         self._count = count
         self._maximum = maximum
         self._max_rise = max_rise
         self._cap = cap
+        self._ceiling = ceiling
         self._best: int | None = None
         self._first_step = True
 
@@ -62,11 +65,15 @@ class NewMaximum(RewardComponent[Progress]):
         if value > self._maximum:
             return 0.0
         if self._best is not None and value - self._best <= self._max_rise:
-            gain = max(0, value - self._best)
+            paid = self._paid(self._best, value)
             self._best = max(self._best, value)
-            return min(float(gain), self._cap)
-        rise = value - self._count(prev)
-        if 0 <= rise <= self._max_rise:
+            return paid
+        prev_value = self._count(prev)
+        if 0 <= value - prev_value <= self._max_rise:
             self._best = value
-            return min(float(rise), self._cap) if first_step else 0.0
+            return self._paid(prev_value, value) if first_step else 0.0
         return 0.0
+
+    def _paid(self, low: int, high: int) -> float:
+        rise = min(high, self._ceiling) - min(low, self._ceiling)
+        return min(float(max(0, rise)), self._cap)

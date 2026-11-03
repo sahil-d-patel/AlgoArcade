@@ -9,11 +9,16 @@ from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.fake import FakeReader, FakeState
 from algoarcade.rewards.explore import Explore
-from algoarcade.rewards.progress import Progress
-from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
+from algoarcade.rewards.registry import (
+    COMPONENTS,
+    DEFAULT_WEIGHTS,
+    LEVEL_CAP,
+    WEIGHTS,
+    FireRedFields,
+    RewardRegistry,
+)
 
 read = FakeReader().read
-WEIGHTS = {"events": 1.0, "explore": 0.02, "level": 0.5, "badge": 10.0, "milestone": 2.0}
 BUTTONS = [Button.UP, Button.DOWN, Button.LEFT, Button.RIGHT, Button.A, Button.B]
 # The fake game has no way to earn levels, badges or milestones, so tests write the byte directly.
 COUNT_BYTES = {
@@ -30,7 +35,7 @@ def poke(backend: GameBackend, offset: int, value: int) -> None:
     backend.load_state(bytes(ram))
 
 
-def start(weights: dict[str, float]) -> tuple[FakeBackend, RewardRegistry[Progress]]:
+def start(weights: dict[str, float]) -> tuple[FakeBackend, RewardRegistry[FireRedFields]]:
     backend = FakeBackend()
     registry = RewardRegistry(COMPONENTS, weights)
     registry.reset(read(backend))
@@ -48,6 +53,8 @@ def rollout(steps: int, seed: int) -> list[tuple[float, dict[str, float]]]:
             # Mostly up, one step at a time: NewMaximum treats a larger jump as a bad read.
             offset = rng.choice(list(COUNT_BYTES.values()))
             poke(backend, offset, max(0, backend.save_state()[offset] + rng.choice((-1, 1, 1))))
+        if rng.random() < 0.1:
+            poke(backend, rng.choice((fake.HP_PERCENT, fake.TEXT)), rng.choice((0, 50, 100)))
         results.append(registry.step(prev, read(backend)))
     return results
 
@@ -87,7 +94,14 @@ def test_info_has_only_configured_components() -> None:
     assert registry.step(prev, read(backend)) == (0.0, {"reward/badge": 0.0})
 
 
-@pytest.mark.parametrize("name", list(COMPONENTS))
+def test_default_config_enables_exactly_the_five_positive_terms() -> None:
+    assert set(DEFAULT_WEIGHTS) == {"events", "explore", "level", "badge", "milestone"}
+    assert all(DEFAULT_WEIGHTS[name] == WEIGHTS[name] for name in DEFAULT_WEIGHTS)
+    assert set(WEIGHTS) == set(COMPONENTS)
+
+
+# time charges every step by design; test_time_charges_every_step_even_a_no_op covers it.
+@pytest.mark.parametrize("name", [name for name in COMPONENTS if name != "time"])
 def test_zero_on_reset_and_on_a_no_op_step(name: str) -> None:
     backend = FakeBackend()
     component = COMPONENTS[name]()
@@ -99,6 +113,16 @@ def test_zero_on_reset_and_on_a_no_op_step(name: str) -> None:
     prev = read(backend)
     backend.press([Button.UP])  # into the wall above the start tile
     assert component.score(prev, read(backend)) == 0.0
+
+
+def test_time_charges_every_step_even_a_no_op() -> None:
+    backend = FakeBackend()
+    component = COMPONENTS["time"]()
+    component.reset(read(backend))
+    state = read(backend)
+    assert component.score(state, state) == 1.0
+    backend.press([Button.UP])
+    assert component.score(state, read(backend)) == 1.0
 
 
 def test_no_component_goes_negative() -> None:
@@ -133,6 +157,11 @@ def test_a_misread_badge_byte_neither_pays_nor_silences_later_badges() -> None:
     assert raw_values("badge", [0x00, 0x01, 0xFF, 0x01, 0x03, 0x07]) == [1.0, 0.0, 0.0, 1.0, 1.0]
 
 
+def test_level_pays_nothing_past_the_level_cap() -> None:
+    climb = list(range(LEVEL_CAP - 3, LEVEL_CAP + 4))
+    assert raw_values("level", climb) == [1.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+
+
 def test_a_count_above_its_maximum_is_ignored() -> None:
     assert raw_values("milestone", [0, 1, 200, 2]) == [1.0, 0.0, 1.0]
 
@@ -144,10 +173,12 @@ def test_a_count_above_its_maximum_is_ignored() -> None:
         ("milestone", [200, 1, 1, 2], [0.0, 0.0, 1.0]),
         # 0xFF at reset reads as eight badges; the real count is one.
         ("badge", [0xFF, 0x01, 0x01, 0x03, 0x07], [0.0, 0.0, 1.0, 1.0]),
-        # Too low at reset: the real counts are 3 badges and a level sum of 150, each more than
-        # max_rise above the reset read.
+        # Too low at reset: the real counts are 3 badges, 5 story flags and a level sum of 150,
+        # each more than max_rise above the reset read. 150 is past the level cap, so no level
+        # rise from it pays.
         ("badge", [0x00, 0x07, 0x07, 0x0F], [0.0, 0.0, 1.0]),
-        ("level", [0, 150, 150, 151], [0.0, 0.0, 1.0]),
+        ("events", [0x00, 0x1F, 0x1F, 0x3F], [0.0, 0.0, 1.0]),
+        ("level", [0, 150, 150, 151], [0.0, 0.0, 0.0]),
     ],
 )
 def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
