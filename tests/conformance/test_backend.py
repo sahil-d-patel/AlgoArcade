@@ -14,15 +14,25 @@ import pytest
 
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
+from algoarcade.backends.mgba import EWRAM_BASE, EWRAM_SIZE, MgbaBackend
 from algoarcade.backends.pyboy import ADDRESS_SPACE, PyBoyBackend
 
-SUPER_MARIO_LAND_ROM = Path(__file__).parents[2] / "data/roms/super_mario_land.gb"
+
+def make_mgba() -> GameBackend:
+    path = Path(__file__).resolve().parents[2] / "data" / "roms" / "firered.gba"
+    if not path.is_file():
+        pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    return MgbaBackend(path)
 
 
 def make_pyboy() -> GameBackend:
-    if not SUPER_MARIO_LAND_ROM.exists():
-        pytest.skip(f"no ROM at {SUPER_MARIO_LAND_ROM}")
-    backend = PyBoyBackend(SUPER_MARIO_LAND_ROM)
+    path = Path(__file__).resolve().parents[2] / "data" / "roms" / "super_mario_land.gb"
+    if not path.is_file():
+        pytest.skip("Place your Super Mario Land ROM in data/roms/super_mario_land.gb")
+    backend = PyBoyBackend(path)
     backend.step(120)  # WRAM stays zero until the game initialises it, about frame 96
     return backend
 
@@ -40,10 +50,12 @@ BACKENDS = {
         ram=(fake.RAM_BASE, fake.RAM_SIZE),
         unmapped=fake.RAM_BASE + fake.RAM_SIZE,
     ),
-    "pyboy": pytest.param(
-        BackendCase(make=make_pyboy, ram=(0xC000, 0x2000), unmapped=ADDRESS_SPACE),
-        marks=pytest.mark.rom,
+    "mgba": BackendCase(
+        make=make_mgba,
+        ram=(EWRAM_BASE, EWRAM_SIZE),
+        unmapped=EWRAM_BASE + EWRAM_SIZE,
     ),
+    "pyboy": BackendCase(make=make_pyboy, ram=(0xC000, 0x2000), unmapped=ADDRESS_SPACE),
 }
 
 INPUTS: list[list[Button]] = [
@@ -58,7 +70,12 @@ INPUTS: list[list[Button]] = [
 ]
 
 
-@pytest.fixture(params=list(BACKENDS.values()), ids=list(BACKENDS))
+@pytest.fixture(
+    params=[
+        pytest.param(value, id=name, marks=pytest.mark.rom if name != "fake" else ())
+        for name, value in BACKENDS.items()
+    ]
+)
 def case(request: pytest.FixtureRequest) -> BackendCase:
     return request.param
 

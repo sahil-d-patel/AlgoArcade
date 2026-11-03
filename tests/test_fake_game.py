@@ -11,7 +11,21 @@ def play(*buttons: Button) -> FakeState:
 
 
 def test_start_state() -> None:
-    assert play() == FakeState(room=0, x=1, y=1, chest_opened=False, frame=0)
+    assert play() == FakeState(
+        room=0,
+        x=1,
+        y=1,
+        chest_opened=False,
+        frame=0,
+        story_flags=0,
+        party_level_sum=5,
+        badge_count=0,
+        milestone_count=0,
+        party_count=1,
+        party_hp_frac=1.0,
+        text_active=False,
+        text_progress=0,
+    )
 
 
 def test_wall_blocks() -> None:
