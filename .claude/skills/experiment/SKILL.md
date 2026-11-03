@@ -38,7 +38,7 @@ uv run python -m algoarcade.training.runner acrobot --seed 0
 uv run python -m algoarcade.training.runner baseline --env-id <any registered env id> --seed 0
 ```
 
-Debug run: add `--total-timesteps 1000 --n-envs 1 --checkpoint-every 500 --runs-dir <scratch dir>`. `--track` sends SB3's scalars to Weights & Biases; it is off by default.
+Debug run on CartPole: add `--total-timesteps 1000 --n-envs 1 --checkpoint-every 500 --ppo.batch-size 32 --runs-dir <scratch dir>`. `--track` sends SB3's scalars to Weights & Biases; it is off by default.
 
 Each run writes one directory:
 
@@ -46,7 +46,7 @@ Each run writes one directory:
 data/runs/run_id=<env_id>-seed<seed>-<YYYYmmdd-HHMMSS>/
 ├── config.json               resolved config; load_config() reads it back
 ├── git.json                  {"commit": ..., "dirty": ...}
-├── checkpoints/step_<n>.zip  every checkpoint_every env steps, and at the end
+├── checkpoints/step_<n>.zip  every checkpoint_every env steps, and after the last update
 ├── eval.csv                  one row per checkpoint: step, mean_return, std_return, wall_time_s
 └── progress.csv              SB3's rollout and train scalars
 ```
