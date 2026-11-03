@@ -2,14 +2,14 @@ import asyncio
 import copy
 import itertools
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import pytest
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from mcp import Client, StdioServerParameters
 
-from algoarcade.agent.loop import SEGMENTS, Attempt, AttemptConfig, Prices, run_attempt
+from algoarcade.agent.loop import SEGMENTS, Attempt, AttemptConfig, Prices, Step, run_attempt
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 USAGE = Usage(
@@ -20,7 +20,7 @@ USAGE = Usage(
 )
 
 
-def press(buttons: list[str], **arguments: Any) -> Message:
+def press(buttons: object, **arguments: Any) -> Message:
     block = ToolUseBlock(
         type="tool_use", id="toolu_1", name="press", input={"buttons": buttons, **arguments}
     )
@@ -40,6 +40,9 @@ def reply(content: list[Any], stop_reason: str) -> Message:
     )
 
 
+END = reply([TextBlock(type="text", text="I give up.")], "end_turn")
+
+
 class StubModel:
     def __init__(self, replies: Iterable[Message]) -> None:
         self.replies = iter(replies)
@@ -50,12 +53,17 @@ class StubModel:
         return next(self.replies)
 
 
-def attempt(model: StubModel, max_actions: int = 100, max_dollars: float = 100.0) -> Attempt:
+def attempt(
+    model: StubModel,
+    max_actions: int = 100,
+    max_dollars: float = 100.0,
+    record: Callable[[Step], None] = lambda _: None,
+) -> Attempt:
     config = AttemptConfig(max_actions=max_actions, max_dollars=max_dollars)
 
     async def go() -> Attempt:
         async with Client(PARAMS, raise_exceptions=True) as client:
-            return await run_attempt(model, client, config, SEGMENTS["fake"])
+            return await run_attempt(model, client, config, SEGMENTS["fake"], record)
 
     return asyncio.run(go())
 
@@ -68,6 +76,20 @@ def test_stops_at_the_action_cap_and_presses_nothing_past_it() -> None:
     assert [step.buttons for step in result.steps] == [["RIGHT", "RIGHT"], ["RIGHT"]]
     assert result.steps[-1].state is not None
     assert result.steps[-1].state["x"] == 4
+
+
+@pytest.mark.parametrize("rejected", [["X"], "RIGHT"], ids=["unknown button", "string"])
+def test_a_rejected_press_is_not_counted_or_logged(rejected: object) -> None:
+    model = StubModel([press(rejected), press(["RIGHT"]), END])
+    logged: list[Step] = []
+    result = attempt(model, max_actions=3, record=logged.append)
+    assert result.outcome == "end_turn"
+    assert result.actions == 1
+    assert [step.buttons for step in logged] == [[], ["RIGHT"], []]
+    assert model.requests[1][-1]["content"][0]["is_error"]
+    # One step right from x=1: the rejected call moved nothing.
+    assert logged[1].state is not None
+    assert logged[1].state["x"] == 2
 
 
 def test_stops_at_the_dollar_cap() -> None:
@@ -87,7 +109,7 @@ def test_stops_at_the_goal() -> None:
 
 
 def test_stops_when_the_model_stops_pressing() -> None:
-    model = StubModel([reply([TextBlock(type="text", text="I give up.")], "end_turn")])
+    model = StubModel([END])
     result = attempt(model)
     assert result.outcome == "end_turn"
     assert result.actions == 0

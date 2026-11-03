@@ -130,12 +130,15 @@ async def call_tools(client: Client, response: Message, budget: int) -> ToolRoun
     for block in response.content:
         if block.type != "tool_use":
             continue
-        arguments: dict[str, Any] = dict(block.input) if isinstance(block.input, dict) else {}
-        if block.name == "press":
-            allowed: list[str] = list(arguments.get("buttons", []))[: budget - len(buttons)]
-            arguments["buttons"] = allowed
-            buttons += allowed
+        arguments = dict(block.input)
+        requested = arguments.get("buttons")
+        allowed: list[str] = []
+        # Anything but a list goes through untouched so the server rejects it.
+        if block.name == "press" and isinstance(requested, list):
+            allowed = arguments["buttons"] = requested[: budget - len(buttons)]
         result = await client.call_tool(block.name, arguments)
+        if not result.is_error:
+            buttons += allowed
         results.append(
             {
                 "type": "tool_result",
