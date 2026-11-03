@@ -1,6 +1,8 @@
 """State reader for Super Mario Land (World) rev A, SHA-1 418203621b887caa090215d97e3f509b79affd3e.
 
-Score and coins are left out on purpose: the game keeps them only as tiles on screen, not in RAM.
+Score and coins are left out because PyBoy's wrapper reads them from screen tiles, so there is
+no oracle to test them against. The disassembly has them in RAM: wScore at 0xC0A0 (3 bytes,
+wram.asm) and hCoins at 0xFFFA (hram.asm).
 """
 
 from dataclasses import dataclass
@@ -41,7 +43,9 @@ class SuperMarioLandReader:
         seconds, hundreds = backend.read(TIME_LEFT, 2)
         world_and_level = read_u8(backend, WORLD_AND_LEVEL)
         # The wrapper's formula. It takes the scroll from the line PyBoy drew, which lags hScrollX
-        # by one frame while the screen scrolls, so the two can differ on such a frame.
+        # by one frame while the screen scrolls, so the two can differ on such a frame. While
+        # scrolling, the result also drops by 15 for one frame at each 16-pixel block boundary,
+        # because LEVEL_BLOCK updates a frame after hScrollX. Pay progress on a running maximum.
         level_progress = (
             read_u8(backend, LEVEL_BLOCK) * 16
             + (read_u8(backend, SCROLL_X) - 7) % 16
