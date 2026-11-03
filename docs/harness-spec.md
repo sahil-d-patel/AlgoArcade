@@ -85,6 +85,7 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 
 | Symbol | Address (rev 0) | Notes |
 |---|---|---|
+| gSaveBlock1 | 0x0202552C | The block. gSaveBlock1Ptr points 0 to 0x7C bytes above it, in steps of 4. |
 | gSaveBlock1Ptr | 0x03005008 | Pointer. Dereference on every read. |
 | gSaveBlock2Ptr | 0x0300500C | Pointer. Dereference on every read. |
 | gPlayerPartyCount | 0x02024029 | |
