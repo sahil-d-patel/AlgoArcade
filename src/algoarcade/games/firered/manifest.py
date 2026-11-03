@@ -42,10 +42,13 @@ def entered_route1(state: FireRedState) -> bool:
 
 
 def won_rival_battle(state: FireRedState) -> bool:
-    # From seg_03_rival only: Squirtle is level 5 and reaches 6 only from the experience for
-    # knocking out the rival's Bulbasaur. A loss gives none. Use the trainer flag once ENV-08
-    # reads it.
-    return bool(state.party) and state.party[0].level >= 6
+    # No flag tells a win from a loss here: CB2_EndTrainerBattle sets the trainer flag on both
+    # outcomes of TRAINER_BATTLE_EARLY_RIVAL, and EndRivalBattle sets FLAG_BEAT_RIVAL_IN_OAKS_LAB
+    # unconditionally. From seg_03_rival, Squirtle is level 5 and reaches 6 only from the
+    # experience for knocking out the rival's Bulbasaur, and a loss gives none. The map check
+    # keeps the goal inside the lab (MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB).
+    # TODO(#66): also require in_battle to be False once ENV-08 reads it.
+    return state.location[:2] == (4, 3) and bool(state.party) and state.party[0].level >= 6
 
 
 def entered_viridian(state: FireRedState) -> bool:

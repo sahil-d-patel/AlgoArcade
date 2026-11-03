@@ -5,7 +5,15 @@ import pytest
 from capture_states import ROM, STAGES, Player, options_ok, play
 
 from algoarcade.backends.mgba import MgbaBackend
-from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1, STATES, StartState, check
+from algoarcade.games.firered.manifest import (
+    MANIFEST,
+    ROM_SHA1,
+    STATES,
+    StartState,
+    check,
+    won_rival_battle,
+)
+from algoarcade.games.firered.reader import FireRedState, PartyPokemon
 from algoarcade.rom import identify
 
 # docs/harness-spec.md, Start states and segments. None is "set per run".
@@ -37,6 +45,21 @@ def test_state_manifest_check_reports_missing_and_mismatched(tmp_path: Path) -> 
     assert len(lines) == 9
     assert lines[0].startswith("MISMATCH  s0")
     assert all(line.startswith("MISSING") for line in lines[1:])
+
+
+@pytest.mark.parametrize(
+    ("location", "level", "expected"),
+    [((4, 3, 6, 8), 6, True), ((4, 3, 6, 8), 5, False), ((3, 0, 16, 14), 6, False)],
+)
+def test_state_manifest_rival_goal_needs_the_lab_and_level_6(
+    location: tuple[int, int, int, int], level: int, expected: bool
+) -> None:
+    group, number, x, y = location
+    squirtle = PartyPokemon(level=level, hp=22, max_hp=22, status=0)
+    state = FireRedState(
+        map_group=group, map_num=number, x=x, y=y, party=(squirtle,), badge_flags=0
+    )
+    assert won_rival_battle(state) is expected
 
 
 @pytest.fixture
@@ -85,7 +108,17 @@ def test_state_manifest_badge_goal_true_after_brock(backend) -> None:
     load(backend, "brock_goal")
     state = Player(backend).reader.read(backend)
     assert state.badge_flags == 0x01
-    assert MANIFEST[-1].goal(state)
+    entries = {entry.name: entry for entry in MANIFEST}
+    assert entries["brock"].goal(state)
+    assert entries["gym_door"].goal(state)
+
+
+@pytest.mark.rom
+def test_state_manifest_rival_goal_false_outside_the_lab(backend) -> None:
+    load(backend, "seg_02_pallet")
+    state = Player(backend).reader.read(backend)
+    assert state.party[0].level >= 6
+    assert not won_rival_battle(state)
 
 
 @pytest.mark.rom
