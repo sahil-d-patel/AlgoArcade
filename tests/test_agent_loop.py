@@ -1,15 +1,26 @@
 import asyncio
+import base64
 import copy
 import itertools
 import sys
 from collections.abc import Callable, Iterable
 from typing import Any
 
+import numpy as np
 import pytest
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from mcp import Client, StdioServerParameters
 
-from algoarcade.agent.loop import SEGMENTS, Attempt, AttemptConfig, Prices, Step, run_attempt
+from algoarcade.agent.loop import (
+    SEGMENTS,
+    Attempt,
+    AttemptConfig,
+    Prices,
+    Step,
+    json_bytes,
+    run_attempt,
+)
+from algoarcade.agent.server import png
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 USAGE = Usage(
@@ -92,12 +103,24 @@ def test_a_rejected_press_is_not_counted_or_logged(rejected: object) -> None:
     assert logged[1].state["x"] == 2
 
 
-def test_stops_at_the_dollar_cap() -> None:
+def test_stops_before_a_request_that_could_pass_the_dollar_cap() -> None:
     model = StubModel(itertools.repeat(press(["DOWN"])))
-    result = attempt(model, max_dollars=0.25)  # $0.10 per request at the default prices
+    # Each request costs $0.10. After one, the next could cost $0.125 for its 1M-token prompt
+    # at the cache-write price plus $0.002 for a full reply: $0.20 + $0.127 is past $0.25.
+    result = attempt(model, max_dollars=0.25)
     assert result.outcome == "dollar_cap"
-    assert result.actions == 3
-    assert result.dollars == pytest.approx(0.30)
+    assert result.dollars <= 0.25
+    assert len(model.requests) == 2
+    assert result.actions == 2
+    assert result.dollars == pytest.approx(0.20)
+
+
+def test_sends_nothing_when_the_first_request_could_pass_the_dollar_cap() -> None:
+    model = StubModel(itertools.repeat(press(["DOWN"])))
+    result = attempt(model, max_dollars=0.002)  # a full 4,096-token reply alone is $0.002048
+    assert result.outcome == "dollar_cap"
+    assert model.requests == []
+    assert result.dollars == 0
 
 
 def test_stops_at_the_goal() -> None:
@@ -136,3 +159,14 @@ def test_dollars_follow_the_four_prices() -> None:
         cache_read_input_tokens=8_000_000,
     )
     assert Prices(input=1, output=2, cache_write=3, cache_read=4).dollars(usage) == 1 + 4 + 12 + 32
+
+
+def test_the_bound_prices_the_prompt_at_the_dearer_of_input_and_cache_write() -> None:
+    prices = Prices(input=1, output=2, cache_write=3, cache_read=0.5)
+    assert prices.most(prompt_tokens=1_000_000, max_tokens=1_000_000) == 3 + 2
+
+
+def test_a_blank_screenshot_counts_for_more_than_its_image_tokens() -> None:
+    # A blank screen compresses best, so its base64 PNG is the shortest a 480x320 one can be.
+    blank = base64.b64encode(png(np.zeros((320, 480, 3), np.uint8))).decode()
+    assert json_bytes(blank) > 480 * 320 / 750

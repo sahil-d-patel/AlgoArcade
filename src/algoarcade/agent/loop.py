@@ -2,7 +2,8 @@
 
 The history is append-only and the tool list is fetched once, so every request reuses the cached
 prefix. Each request's usage is priced and logged, and the attempt stops at the goal, at the
-action cap, at the dollar cap, or when the model stops pressing buttons.
+action cap, before a request that could pass the dollar cap, or when the model stops pressing
+buttons.
 """
 
 import asyncio
@@ -19,6 +20,7 @@ from anthropic.types import Message, MessageParam, ToolParam, ToolResultBlockPar
 from anthropic.types.tool_result_block_param import Content as ToolResultContent
 from mcp import Client, StdioServerParameters
 from mcp_types import CallToolResult
+from pydantic_core import to_jsonable_python
 
 Create = Callable[..., Awaitable[Message]]
 Goal = Callable[[dict[str, Any]], bool]
@@ -29,6 +31,9 @@ SYSTEM = (
     "button press counts against a fixed budget, so ask for the state, decide, and press. Keep "
     "going until you are told to stop; do not stop pressing to ask questions."
 )
+# The API wraps the tool definitions in a system prompt of its own. Its size for this model is
+# not published; 1,000 tokens is a guess above it.
+TOOL_PROMPT_TOKENS = 1_000
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,12 @@ class Prices:
             + (usage.cache_read_input_tokens or 0) * self.cache_read
         ) / 1_000_000
 
+    def most(self, prompt_tokens: int, max_tokens: int) -> float:
+        """The most a request can cost: each prompt token at the dearer of input and cache
+        write, and a reply of `max_tokens`."""
+        prompt_price = max(self.input, self.cache_write)
+        return (prompt_tokens * prompt_price + max_tokens * self.output) / 1_000_000
+
 
 @dataclass(frozen=True, kw_only=True)
 class AttemptConfig:
@@ -98,6 +109,12 @@ class Attempt:
     actions: int
     dollars: float
     steps: list[Step]
+
+
+def json_bytes(value: object) -> int:
+    """At least the token count of `value`. A token is at least one byte of text, and a base64
+    PNG is longer than the image's token count (about width x height / 750)."""
+    return len(json.dumps(to_jsonable_python(value)).encode())
 
 
 def tool_result_content(result: CallToolResult) -> list[ToolResultContent]:
@@ -172,7 +189,15 @@ async def run_attempt(
     steps: list[Step] = []
     actions = 0
     dollars = 0.0
+    prompt_tokens = TOOL_PROMPT_TOKENS + json_bytes([config.system, tools])
+    sent = 0
     while True:
+        # The prompt only grows by what was appended since the last request, whose size the API
+        # reported, so this bounds the next request before it is paid for.
+        prompt_tokens += json_bytes(messages[sent:])
+        if dollars + config.prices.most(prompt_tokens, config.max_tokens) > config.max_dollars:
+            return Attempt(outcome="dollar_cap", actions=actions, dollars=dollars, steps=steps)
+        sent = len(messages)
         response = await create(
             model=config.model,
             max_tokens=config.max_tokens,
@@ -189,6 +214,11 @@ async def run_attempt(
             messages.append({"role": "user", "content": tool_round.results})
         actions += len(tool_round.buttons)
         usage = response.usage
+        prompt_tokens = (
+            usage.input_tokens
+            + (usage.cache_creation_input_tokens or 0)
+            + (usage.cache_read_input_tokens or 0)
+        )
         step = Step(
             index=len(steps),
             input_tokens=usage.input_tokens,
@@ -209,8 +239,6 @@ async def run_attempt(
             outcome = "goal"
         elif actions >= config.max_actions:
             outcome = "action_cap"
-        elif dollars >= config.max_dollars:
-            outcome = "dollar_cap"
         elif response.stop_reason != "tool_use":
             outcome = response.stop_reason or "end_turn"
         else:
