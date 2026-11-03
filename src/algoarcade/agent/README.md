@@ -2,9 +2,18 @@
 
 The MCP server that exposes the harness to a language model, and the loop that drives a model through it for evaluation.
 
-`server.py` serves one game on stdio, chosen by `--game` (`fake` until ENV-04 and ENV-05 land), with `get_state` and `press`. Both return the state as compact JSON and structured content, and a 2x PNG of the screen when asked. `.mcp.json` at the repo root launches it.
+`server.py` serves one game on stdio, chosen by `--game`, with `get_state` and `press`. Both return the state as compact JSON and structured content, and a 2x PNG of the screen when asked. `--game firered` needs `data/roms/firered.gba`, the mGBA binding and ENV-05's reader (#57); `--state NAME` loads `data/states/NAME.state` first. `.mcp.json` at the repo root launches it.
 
-`loop.py` runs one attempt: `python -m algoarcade.agent.loop --name pilot --max-actions 20 --max-dollars 1`. The model id and the four prices per million tokens are config values; the defaults are Haiku 5.5's card for prompts up to 100K tokens, and the loop does not switch to the long-prompt card. The key comes from `ANTHROPIC_API_KEY`. Logs go to `data/llm/<name>/`.
+`loop.py` runs one attempt on a segment and prints the outcome, the presses, the dollars and the mean tokens of each kind and dollars per press. With `ANTHROPIC_API_KEY` set, on macOS with the `DYLD_FALLBACK_LIBRARY_PATH` export from `docs/setup.md`:
+
+```sh
+uv run python -m algoarcade.agent.loop --name pilot --segment seg_01_house --max-actions 20 --max-dollars 1
+uv run python -m algoarcade.agent.loop --name seg01 --segment seg_01_house --max-actions 300 --max-dollars 2
+```
+
+The first is the 20-action pilot, the second the full seg_01 attempt, graded by ENV-06's goal: the player is on the Pallet Town map. Logs go to `data/llm/<name>/`, which must not exist yet: `steps.jsonl` has one line per request, `attempt.json` the totals and the per-press means. `--segment fake` runs the fake game without a ROM.
+
+The dollar cap is hard: before each request the loop adds an upper bound on that request's cost to the spend so far, and stops if the sum would pass the cap. The model id and the four prices per million tokens are config values; the defaults are Haiku 5.5's card for prompts up to 100K tokens, and the loop does not switch to the long-prompt card, so above 100K tokens it underprices and the cap no longer holds.
 
 `navigate_to`, `advance_dialogue` and the level option follow in AGT-04 (Jayden).
 
