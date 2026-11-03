@@ -13,7 +13,7 @@ uv run python -m algoarcade.agent.loop --name seg01 --segment seg_01_house --max
 
 The first is the 20-action pilot, the second the full seg_01 attempt, graded by ENV-06's goal: the player is on the Pallet Town map. Logs go to `data/llm/<name>/`, which must not exist yet: `steps.jsonl` has one line per request, `attempt.json` the totals and the per-press means. `--segment fake` runs the fake game without a ROM.
 
-The dollar cap is hard: before each request the loop adds an upper bound on that request's cost to the spend so far, and stops if the sum would pass the cap. The model id and the four prices per million tokens are config values; the defaults are Haiku 5.5's card for prompts up to 100K tokens, and the loop does not switch to the long-prompt card, so above 100K tokens it underprices and the cap no longer holds.
+The dollar cap is hard: before each request the loop adds an upper bound on that request's cost to the spend so far, and stops if the sum would pass the cap. The model id and the prices per million tokens are config values. The defaults are Haiku 5.5's: one card for prompts up to 100K tokens and a dearer one beyond, which the loop uses for a request whose prompt, or the bound on it, is past 100K.
 
 `navigate_to`, `advance_dialogue` and the level option follow in AGT-04 (Jayden).
 

@@ -29,7 +29,7 @@ from algoarcade.agent.server import png
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 USAGE = Usage(
-    input_tokens=1_000_000,
+    input_tokens=10_000,
     output_tokens=0,
     cache_creation_input_tokens=0,
     cache_read_input_tokens=0,
@@ -56,6 +56,7 @@ def reply(content: list[Any], stop_reason: str, usage: Usage = USAGE) -> Message
     )
 
 
+DEFAULT_PRICES = Prices()
 END = reply([TextBlock(type="text", text="I give up.")], "end_turn")
 
 
@@ -74,8 +75,9 @@ def attempt(
     max_actions: int = 100,
     max_dollars: float = 100.0,
     record: Callable[[Step], None] = lambda _: None,
+    prices: Prices = DEFAULT_PRICES,
 ) -> Attempt:
-    config = AttemptConfig(max_actions=max_actions, max_dollars=max_dollars)
+    config = AttemptConfig(max_actions=max_actions, max_dollars=max_dollars, prices=prices)
 
     async def go() -> Attempt:
         async with Client(PARAMS, raise_exceptions=True) as client:
@@ -110,14 +112,50 @@ def test_a_rejected_press_is_not_counted_or_logged(rejected: object) -> None:
 
 def test_stops_before_a_request_that_could_pass_the_dollar_cap() -> None:
     model = StubModel(itertools.repeat(press(["DOWN"])))
-    # Each request costs $0.10. After one, the next could cost $0.125 for its 1M-token prompt
-    # at the cache-write price plus $0.002 for a full reply: $0.20 + $0.127 is past $0.25.
-    result = attempt(model, max_dollars=0.25)
+    # Each request costs $0.001 for 10K input tokens. The next could cost about $0.0014 for its
+    # prompt at the cache-write price plus $0.002 for a full reply: $0.002 + $0.0034 passes $0.005.
+    result = attempt(model, max_dollars=0.005)
     assert result.outcome == "dollar_cap"
-    assert result.dollars <= 0.25
+    assert result.dollars <= 0.005
     assert len(model.requests) == 2
     assert result.actions == 2
-    assert result.dollars == pytest.approx(0.20)
+    assert result.dollars == pytest.approx(0.002)
+
+
+def test_stops_before_a_request_whose_bound_crosses_100k_prompt_tokens() -> None:
+    usage = Usage(
+        input_tokens=99_990,
+        output_tokens=0,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+    )
+    # The first request costs $0.009999. The second prompt adds a turn, so its bound is past
+    # 100K tokens: about $0.073 on the long card, against $0.015 on the short one.
+    long_card = attempt(StubModel(itertools.repeat(press(["DOWN"], usage))), max_dollars=0.05)
+    assert long_card.outcome == "dollar_cap"
+    assert len(long_card.steps) == 1
+    assert long_card.dollars <= 0.05
+    no_long_card = Prices(long_input=0.10, long_output=0.50, long_cache_write=0.125)
+    short_only = attempt(
+        StubModel(itertools.repeat(press(["DOWN"], usage))), max_dollars=0.05, prices=no_long_card
+    )
+    assert len(short_only.steps) > 1
+
+
+def test_a_request_above_100k_prompt_tokens_is_priced_on_the_long_card() -> None:
+    def usage(cache_read: int) -> Usage:
+        return Usage(
+            input_tokens=1,
+            output_tokens=10,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=cache_read,
+        )
+
+    model = StubModel([press(["DOWN"], usage(99_999)), press(["DOWN"], usage(100_000)), END])
+    result = attempt(model)
+    # 100,000 prompt tokens is the short card's last size; 100,001 is the long card's first.
+    assert result.steps[0].dollars == pytest.approx((1 * 0.10 + 10 * 0.50 + 99_999 * 0.01) / 1e6)
+    assert result.steps[1].dollars == pytest.approx((1 * 0.50 + 10 * 2.50 + 100_000 * 0.05) / 1e6)
 
 
 def test_sends_nothing_when_the_first_request_could_pass_the_dollar_cap() -> None:
@@ -158,17 +196,21 @@ def test_never_changes_an_earlier_message() -> None:
 
 def test_dollars_follow_the_four_prices() -> None:
     usage = Usage(
-        input_tokens=1_000_000,
-        output_tokens=2_000_000,
-        cache_creation_input_tokens=4_000_000,
-        cache_read_input_tokens=8_000_000,
+        input_tokens=1_000,
+        output_tokens=2_000,
+        cache_creation_input_tokens=4_000,
+        cache_read_input_tokens=8_000,
     )
-    assert Prices(input=1, output=2, cache_write=3, cache_read=4).dollars(usage) == 1 + 4 + 12 + 32
+    prices = Prices(input=1, output=2, cache_write=3, cache_read=4)
+    assert prices.dollars(usage) == pytest.approx((1_000 + 4_000 + 12_000 + 32_000) / 1e6)
 
 
 def test_the_bound_prices_the_prompt_at_the_dearer_of_input_and_cache_write() -> None:
-    prices = Prices(input=1, output=2, cache_write=3, cache_read=0.5)
-    assert prices.most(prompt_tokens=1_000_000, max_tokens=1_000_000) == 3 + 2
+    prices = Prices(
+        input=1, output=2, cache_write=3, cache_read=0.5, long_input=5, long_cache_write=4
+    )
+    assert prices.most(prompt_tokens=100_000, max_tokens=1_000_000) == pytest.approx(0.3 + 2)
+    assert prices.most(prompt_tokens=100_001, max_tokens=0) == pytest.approx(100_001 * 5 / 1e6)
 
 
 def test_a_blank_screenshot_counts_for_more_than_its_image_tokens() -> None:

@@ -65,27 +65,41 @@ SEGMENTS = {
 
 @dataclass(frozen=True)
 class Prices:
-    """Dollars per million tokens. Defaults: claude-haiku-5-5 for prompts up to 100K tokens,
-    platform.claude.com/docs/en/about-claude/pricing on 2026-11-01."""
+    """Dollars per million tokens, on the short card up to `long_above` prompt tokens and the long
+    card beyond. Defaults: claude-haiku-5-5, Anthropic's model table on 2026-11-03. The table
+    lists no long-card cache rates; these assume the short card's multipliers, cache write 1.25x
+    input and cache read 0.1x input."""
 
     input: float = 0.10
     output: float = 0.50
     cache_write: float = 0.125
     cache_read: float = 0.01
+    long_input: float = 0.50
+    long_output: float = 2.50
+    long_cache_write: float = 0.625
+    long_cache_read: float = 0.05
+    long_above: int = 100_000
+
+    def card(self, prompt_tokens: int) -> tuple[float, float, float, float]:
+        """Input, output, cache-write and cache-read prices for a prompt of this size."""
+        if prompt_tokens > self.long_above:
+            return self.long_input, self.long_output, self.long_cache_write, self.long_cache_read
+        return self.input, self.output, self.cache_write, self.cache_read
 
     def dollars(self, usage: Usage) -> float:
-        return (
-            usage.input_tokens * self.input
-            + usage.output_tokens * self.output
-            + (usage.cache_creation_input_tokens or 0) * self.cache_write
-            + (usage.cache_read_input_tokens or 0) * self.cache_read
-        ) / 1_000_000
+        cache_write = usage.cache_creation_input_tokens or 0
+        cache_read = usage.cache_read_input_tokens or 0
+        prices = self.card(usage.input_tokens + cache_write + cache_read)
+        tokens = (usage.input_tokens, usage.output_tokens, cache_write, cache_read)
+        return sum(count * price for count, price in zip(tokens, prices, strict=True)) / 1_000_000
 
     def most(self, prompt_tokens: int, max_tokens: int) -> float:
-        """The most a request can cost: each prompt token at the dearer of input and cache
-        write, and a reply of `max_tokens`."""
-        prompt_price = max(self.input, self.cache_write)
-        return (prompt_tokens * prompt_price + max_tokens * self.output) / 1_000_000
+        """The most a request with at most `prompt_tokens` can cost: each prompt token at the
+        dearer of input and cache write, and a reply of `max_tokens`, all on the card that size
+        of prompt would use. The long card is dearer, so a smaller real prompt costs less."""
+        input_price, output_price, cache_write_price, _ = self.card(prompt_tokens)
+        prompt_price = max(input_price, cache_write_price)
+        return (prompt_tokens * prompt_price + max_tokens * output_price) / 1_000_000
 
 
 @dataclass(frozen=True, kw_only=True)
