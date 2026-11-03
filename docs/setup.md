@@ -25,23 +25,9 @@ Members work from a fork because only the PMs have write access. `origin` is you
 
 Run every project command through `uv run`. Do not activate the virtual environment and do not `pip install` into it.
 
-## ROMs
+### The mGBA binding
 
-We do not share ROMs. Each member supplies their own dumps and puts them in `data/roms/`, which git ignores. Create the folder if it is not there. Save states go in `data/states/` the same way.
-
-Check that yours is a revision the project supports:
-
-```sh
-uv run python -m algoarcade.rom data/roms/firered.gba
-```
-
-It prints the hash and the name, or exits with an error that lists the hashes we accept. FireRed (USA) rev 0 is the target and rev 1 also works. Super Mario Land joins the table when ENV-03 lands.
-
-The harness runs the same check every time it loads a ROM. A wrong revision would not crash. It would read the wrong addresses and produce believable, wrong rewards.
-
-## The mGBA binding
-
-The fetch script installs the pinned libmgba-py binding into the project environment. Run on macOS arm64; Windows and Linux are not run yet.
+Each OS needs one system package for the mGBA binding, then the fetch script installs the pinned binding into the project environment. Run on macOS arm64 and on Ubuntu 24.04 x64 (in a container); Windows is not run yet.
 
 | OS | First | Then |
 |---|---|---|
@@ -60,6 +46,20 @@ dyld reads it only at process start, and macOS strips it when a system binary su
 Ubuntu 22.04 only packages an older libmgba, so use 24.04 or later. Nobody compiles mGBA. If the binding fails on your machine, post the error on ENV-01 (or ENV-04 after week 1) instead of working around it.
 
 With the ROM at `data/roms/firered.gba`, check the backend with `uv run pytest tests/conformance -k mgba -q`; the FireRed tests skip when the file is absent. States are native mGBA bytes, with flash and RTC data and, when rendering is on, a screenshot. They are not battery saves. `MgbaBackend(..., render=False)` turns video off, and `screen()` then raises `RuntimeError`. After loading a state without a screenshot into a rendered backend, advance one frame before calling `screen()`.
+
+## ROMs
+
+We do not share ROMs. Each member supplies their own dumps and puts them in `data/roms/`, which git ignores. Create the folder if it is not there. Save states go in `data/states/` the same way.
+
+Check that yours is a revision the project supports:
+
+```sh
+uv run python -m algoarcade.rom data/roms/firered.gba
+```
+
+It prints the hash and the name, or exits with an error that lists the hashes we accept. FireRed (USA) rev 0 is the target and rev 1 also works. Super Mario Land joins the table when ENV-03 lands.
+
+The harness runs the same check every time it loads a ROM. A wrong revision would not crash. It would read the wrong addresses and produce believable, wrong rewards.
 
 ## Checks
 
