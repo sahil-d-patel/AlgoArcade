@@ -322,8 +322,7 @@ def report(attempt: Attempt) -> str:
 
 
 def main() -> None:
-    settings = tyro.cli(Run)
-    attempt = asyncio.run(run(settings, AsyncAnthropic().messages.create))
+    attempt = asyncio.run(run(tyro.cli(Run), AsyncAnthropic().messages.create))
     print(report(attempt))  # noqa: T201
 
 
