@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import matplotlib
@@ -17,6 +16,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.utils import LinearSchedule
 
 ENV_ID = "CartPole-v1"
 TOTAL_TIMESTEPS = 100_000
@@ -25,24 +25,10 @@ TARGET_RETURN = 400.0
 RUNS_DIR = Path(__file__).resolve().parents[1] / "data" / "runs"
 
 
-def linear_schedule(initial: float) -> Callable[[float], float]:
-    """SB3 passes progress_remaining: 1.0 at start, 0.0 at end."""
-
-    def schedule(progress_remaining: float) -> float:
-        return progress_remaining * initial
-
-    return schedule
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, required=True)
     return parser.parse_args()
-
-
-def first_crossing(timesteps: np.ndarray, means: np.ndarray, target: float) -> int | None:
-    hits = np.nonzero(means >= target)[0]
-    return int(timesteps[hits[0]]) if hits.size else None
 
 
 def save_curve(
@@ -75,13 +61,13 @@ def main() -> None:
     model = PPO(
         policy="MlpPolicy",
         env=train_env,
-        learning_rate=linear_schedule(1e-3),
+        learning_rate=LinearSchedule(1e-3, 0.0, 1.0),
         n_steps=32,  # per env -> 256 transitions per rollout
         batch_size=256,
         n_epochs=20,
         gamma=0.99,  # CartPole episodes are short (<=500 steps), so a ~100-step horizon is enough.
         gae_lambda=0.8,
-        clip_range=linear_schedule(0.2),
+        clip_range=LinearSchedule(0.2, 0.0, 1.0),
         clip_range_vf=None,
         normalize_advantage=True,
         ent_coef=0.0,
@@ -132,7 +118,8 @@ def main() -> None:
     means = log["results"].mean(axis=1)
     stds = log["results"].std(axis=1)
     save_curve(timesteps, means, stds, run_dir / "reward_curve.png", seed)
-    crossed_at = first_crossing(timesteps, means, TARGET_RETURN)
+    hits = np.nonzero(means >= TARGET_RETURN)[0]
+    crossed_at = int(timesteps[hits[0]]) if hits.size else None
 
     train_env.close()
     eval_env.close()
