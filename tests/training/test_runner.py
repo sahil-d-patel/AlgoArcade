@@ -5,16 +5,27 @@ import dataclasses
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 pytest.importorskip("stable_baselines3")
 
+from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 
 from algoarcade.training.config import PRESETS, PPOConfig, load_config
-from algoarcade.training.runner import build_model, train
+from algoarcade.training.runner import CheckpointEval, build_model, train
 
 CARTPOLE = PRESETS["cartpole"][1]
+# 2 envs x 250 steps: four rollouts end exactly on total_timesteps, the last on a checkpoint.
+SMOKE = dataclasses.replace(
+    CARTPOLE,
+    total_timesteps=2_000,
+    n_envs=2,
+    checkpoint_every=1_000,
+    eval_episodes=2,
+    ppo=dataclasses.replace(CARTPOLE.ppo, n_steps=250, batch_size=100),
+)
 
 
 def test_model_takes_every_ppo_value_from_config() -> None:
@@ -43,15 +54,7 @@ def test_model_takes_every_ppo_value_from_config() -> None:
 
 
 def test_smoke_run_writes_all_four_artifacts(tmp_path: Path) -> None:
-    config = dataclasses.replace(
-        CARTPOLE,
-        total_timesteps=2_000,
-        n_envs=2,
-        checkpoint_every=1_000,
-        eval_episodes=2,
-        runs_dir=tmp_path,
-        ppo=dataclasses.replace(CARTPOLE.ppo, n_steps=250, batch_size=100),
-    )
+    config = dataclasses.replace(SMOKE, runs_dir=tmp_path)
     run_dir = train(config)
 
     assert list(tmp_path.iterdir()) == [run_dir]
@@ -66,3 +69,19 @@ def test_smoke_run_writes_all_four_artifacts(tmp_path: Path) -> None:
     with (run_dir / "eval.csv").open() as f:
         rows = list(csv.DictReader(f))
     assert [int(row["step"]) for row in rows] == [1_000, 2_000]
+
+    with (run_dir / "progress.csv").open() as f:
+        progress = list(csv.DictReader(f))
+    assert progress[-1]["eval/mean_return"] == rows[-1]["mean_return"]
+
+
+def test_last_checkpoint_holds_the_trained_policy(tmp_path: Path) -> None:
+    model = build_model(SMOKE, make_vec_env(SMOKE.env_id, n_envs=SMOKE.n_envs, seed=SMOKE.seed))
+    (tmp_path / "checkpoints").mkdir()
+    callback = CheckpointEval(tmp_path, SMOKE, make_vec_env(SMOKE.env_id, n_envs=1))
+    model.learn(total_timesteps=SMOKE.total_timesteps, callback=callback)
+
+    last = max((tmp_path / "checkpoints").glob("*.zip"), key=lambda p: int(p.stem.split("_")[1]))
+    saved = PPO.load(last).policy.state_dict()
+    for name, value in model.policy.state_dict().items():
+        np.testing.assert_array_equal(saved[name].cpu().numpy(), value.cpu().numpy(), name)

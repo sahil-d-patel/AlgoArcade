@@ -39,39 +39,35 @@ class CheckpointEval(BaseCallback):
     """Every `every` env steps and at the end: save a checkpoint, evaluate it, append to eval.csv.
 
     The eval env is reseeded before each evaluation, so every checkpoint plays the same episodes.
+    _on_step runs during a rollout, before that rollout's update, so the final checkpoint waits
+    for _on_training_end; a periodic one in the last rollout would miss the last update.
     """
 
-    def __init__(
-        self, run_dir: Path, every: int, eval_env: VecEnv, eval_seed: int, episodes: int
-    ) -> None:
+    def __init__(self, run_dir: Path, config: TrainConfig, eval_env: VecEnv) -> None:
         super().__init__()
         self.run_dir = run_dir
-        self.every = every
+        self.config = config
         self.eval_env = eval_env
-        self.eval_seed = eval_seed
-        self.episodes = episodes
-        self.next_at = every
-        self.last_at = 0
+        self.next_at = config.checkpoint_every
         self.start = time.perf_counter()
 
     def _on_step(self) -> bool:
-        if self.num_timesteps >= self.next_at:
-            self.next_at += self.every
+        if self.next_at <= self.num_timesteps < self.config.total_timesteps:
+            self.next_at += self.config.checkpoint_every
             self.checkpoint()
         return True
 
     def _on_training_end(self) -> None:
-        if self.last_at != self.num_timesteps:
-            self.checkpoint()
+        self.checkpoint()
+        self.logger.dump(self.num_timesteps)
 
     def checkpoint(self) -> None:
-        self.last_at = self.num_timesteps
         self.model.save(self.run_dir / "checkpoints" / f"step_{self.num_timesteps}.zip")
-        self.eval_env.seed(self.eval_seed)
+        self.eval_env.seed(self.config.seed + EVAL_SEED_OFFSET)
         returns, _ = evaluate_policy(
             self.model,
             self.eval_env,
-            n_eval_episodes=self.episodes,
+            n_eval_episodes=self.config.eval_episodes,
             deterministic=True,
             return_episode_rewards=True,
         )
@@ -133,8 +129,7 @@ def train(config: TrainConfig) -> Path:
         vec_env_cls=SubprocVecEnv,
         vec_env_kwargs={"start_method": "spawn"},
     )
-    eval_seed = config.seed + EVAL_SEED_OFFSET
-    eval_env = make_vec_env(config.env_id, n_envs=1, seed=eval_seed)
+    eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
     model = build_model(config, env)
 
     outputs: list[KVWriter] = [CSVOutputFormat(str(run_dir / "progress.csv"))]
@@ -147,10 +142,9 @@ def train(config: TrainConfig) -> Path:
     logger = Logger(str(run_dir), outputs)
     model.set_logger(logger)
 
-    callback = CheckpointEval(
-        run_dir, config.checkpoint_every, eval_env, eval_seed, config.eval_episodes
+    model.learn(
+        total_timesteps=config.total_timesteps, callback=CheckpointEval(run_dir, config, eval_env)
     )
-    model.learn(total_timesteps=config.total_timesteps, callback=callback)
     logger.close()
     env.close()
     eval_env.close()
