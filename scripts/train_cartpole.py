@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import matplotlib
@@ -16,13 +17,21 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.utils import LinearSchedule
 
 ENV_ID = "CartPole-v1"
 TOTAL_TIMESTEPS = 100_000
 N_ENVS = 8
 TARGET_RETURN = 400.0
 RUNS_DIR = Path(__file__).resolve().parents[1] / "data" / "runs"
+
+
+def linear_schedule(initial: float) -> Callable[[float], float]:
+    """SB3 passes progress_remaining: 1.0 at start, 0.0 at end."""
+
+    def schedule(progress_remaining: float) -> float:
+        return progress_remaining * initial
+
+    return schedule
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,13 +70,13 @@ def main() -> None:
     model = PPO(
         policy="MlpPolicy",
         env=train_env,
-        learning_rate=LinearSchedule(1e-3, 0.0, 1.0),
+        learning_rate=linear_schedule(1e-3),
         n_steps=32,  # per env -> 256 transitions per rollout
         batch_size=256,
         n_epochs=20,
         gamma=0.99,  # CartPole episodes are short (<=500 steps), so a ~100-step horizon is enough.
         gae_lambda=0.8,
-        clip_range=LinearSchedule(0.2, 0.0, 1.0),
+        clip_range=linear_schedule(0.2),
         clip_range_vf=None,
         normalize_advantage=True,
         ent_coef=0.0,
