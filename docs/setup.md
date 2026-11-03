@@ -49,7 +49,7 @@ With the ROM at `data/roms/firered.gba`, check the backend with `uv run pytest t
 
 ## ROMs
 
-We do not share ROMs. Each member supplies their own dumps and puts them in `data/roms/`, which git ignores. Create the folder if it is not there. Save states go in `data/states/` the same way.
+We do not share ROMs. Each member supplies their own dumps and puts them in `data/roms/`, which git ignores. Create the folder if it is not there. Save states go in `data/states/` the same way; see [Save states](#save-states).
 
 Check that yours is a revision the project supports:
 
@@ -60,6 +60,24 @@ uv run python -m algoarcade.rom data/roms/firered.gba
 It prints the hash and the name, or exits with an error that lists the hashes we accept. FireRed (USA) rev 0 is the target and rev 1 also works. Super Mario Land joins the table when ENV-03 lands.
 
 The harness runs the same check every time it loads a ROM. A wrong revision would not crash. It would read the wrong addresses and produce believable, wrong rewards.
+
+## Save states
+
+The FireRed start states are not downloadable: save states hold game data and the repository is public. Sahil (PM) sends the files directly. Put them in `data/states/` and check them against the manifest:
+
+```sh
+uv run python -m algoarcade.games.firered.manifest
+```
+
+It prints one line per state, `OK` or `MISSING` or `MISMATCH`, and exits non-zero unless all nine are OK. Never post the files anywhere public.
+
+The states were captured on FireRed rev 1 and have not been tried on rev 0. With a rev 1 ROM you can regenerate them yourself instead; it takes about 90 seconds:
+
+```sh
+uv run python scripts/capture_states.py
+```
+
+The script replays recorded inputs from power-on, checks the location and the options after each stage, and writes the nine states plus the `_goal` states the tests use. mGBA is deterministic, so the output hashes match the manifest. `--from s1` resumes from a state you already have.
 
 ## Checks
 
