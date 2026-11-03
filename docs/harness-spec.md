@@ -1,6 +1,6 @@
 # AlgoArcade harness spec
 
-Fine-tuned October 11, 2026. This defines the interfaces every part of AlgoArcade builds against, and the logging schema. Interfaces can change until November 1. The logging schema freezes on November 1, and any change after that means rerunning training.
+Fine-tuned October 11, 2026. This defines the interfaces every part of AlgoArcade builds against, and the logging schema. Interfaces can change until November 1. The logging schema freezes on November 8, moved from November 1 (#20), and any change after that means rerunning training.
 
 The reasoning behind these choices is in [technical-plan.md](technical-plan.md). This file is the contract.
 
@@ -169,19 +169,21 @@ Evaluation always starts from the fixed state with the archive off, even when tr
 
 Freezes November 8 under the tag `schema-v1`. It moved from November 1 because ENV-08 was not validated on real memory by then (#20). Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section.
 
-Logs are Parquet files under `data/runs/run_id=<id>/<table>/`, one folder per table: `steps`, `visits`, `episodes`, `runs`. Each writing process owns its own files, named `<writer_id>-<n>.parquet`, and rolls to a new file every 100,000 rows by default, because a Parquet file cannot be read until it is closed. The open file ends in `.inprogress`, so a glob on `*.parquet` finds only closed files.
+Logs are Parquet files under `data/runs/run_id=<id>/<table>/`, one folder per table: `steps`, `visits`, `episodes`, `runs`. Each writing process owns its own files, named `<writer_id>-<n>.parquet`, and rolls to a new file every 100,000 rows by default, because a Parquet file cannot be read until it is closed. The open file is `_<writer_id>-<n>.parquet.inprogress`, so a glob on `*.parquet` and a pyarrow folder read (`pq.read_table`, `ds.dataset`) see only closed files.
 
-The writer validates every batch. A missing column, an extra column, a wrong type or a null in a required column raises `SchemaError`. Column order is free.
+A writer refuses a table folder that already holds files from its writer id, so reusing a run id cannot overwrite or mix data. A resumed run says so (`resume=True`), and its writer numbers on after its highest file, including one left open by a crash.
+
+The writer validates every batch. A missing, extra or duplicated column, a wrong type, a null in a required column, or a value outside a column's listed set (`end_reason`, `llm_tool_level`, `status`) raises `SchemaError`. Column order is free.
 
 Types: Text is `string`, Integer is `int32`, 64-bit integer is `int64`, Small integer is `int16`, Decimal is `float64`, Boolean is `bool`. A column is required unless its row says nullable.
 
 ### Reward columns
 
-Each of the ten components in the technical plan has a column `reward_<name>`: events, explore, level, badge, milestone, heal, blackout, anti_loop, anti_spam, time. It holds the raw value the registry reports, before the weight. It is null when the run's config leaves the component out. The weights are in the per-run `hyperparameters` under `reward_weights`, and `reward_total` is the sum of weight times raw value. A new component after the freeze adds a column, which is a PM decision.
+Each of the ten components in the technical plan has a column `reward_<name>`: events, explore, level, badge, milestone, heal, blackout, anti_loop, anti_spam, time. It holds the raw value the registry reports, before the weight. It is null when the run's config leaves the component out. The weights are in the per-run `hyperparameters` under `reward_weights`, and `reward_total` is the sum of weight times raw value. The registry's step-info key `reward/<name>` becomes the column `reward_<name>`. A new component after the freeze adds a column, which is a PM decision.
 
 ### Per-step table
 
-Written every Nth step. The default N is 4: each environment writes the row of a decision whose `episode_step` is a multiple of N.
+Written every Nth step: each environment writes the row of a decision whose `episode_step` is a multiple of N. N is `step_log_every` in the per-run table, at least 1. The default is 4; LLM runs use 1. Evaluation episodes write no per-step or visit rows.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -219,8 +221,8 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 | Field | Type | Notes |
 |---|---|---|
 | run_id, seed, env_idx | As in the per-step table | |
-| episode_id | Integer | With run_id and env_idx, names the episode |
-| env_steps | 64-bit integer | At the episode's last decision |
+| episode_id | Integer | Counts from 0 per environment, separately for evaluation. With run_id, is_eval and env_idx, names the episode |
+| env_steps | 64-bit integer | Training decisions so far, at the episode's last decision |
 | wall_clock_s | Decimal | At the episode's last decision |
 | episode_return | Decimal | Sum of `reward_total` over the episode |
 | episode_length | Integer | Decisions in the episode |
@@ -231,6 +233,10 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 | start_state | Text | The manifest name |
 | archive_start | Boolean | Whether the start came from the archive |
 | end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap` |
+| goal_reached | Boolean | Whether the start state's goal became true at any point in the episode. False when the start state has no goal |
+| goal_step | Integer, nullable | The `episode_step` at which the goal first became true. Null when it never did |
+| is_eval | Boolean | An evaluation episode: fixed start state, archive off |
+| checkpoint_step | 64-bit integer, nullable | The training `env_steps` of the checkpoint being evaluated. Null for training episodes and LLM attempts |
 | llm_model | Text, nullable | Null for RL runs, like the four below |
 | llm_tool_level | Small integer, nullable | 0, 1 or 2 for L0 to L2 |
 | llm_tokens_in, llm_tokens_out | 64-bit integer, nullable | |
@@ -238,18 +244,21 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 
 ### Per-run table
 
-One row per run, written when it ends.
+Two rows per run, because a Parquet file cannot be updated in place. The start row is written at launch with status `running` and `env_steps` and `wall_clock_s` at 0. The end row repeats every field with status `finished` or `crashed` and the final totals. A run's current row is its end row if one exists, else its start row. A run killed without a chance to write its end row stays `running`; a stale `wall_clock_s` against the clock says it died.
 
 | Field | Type | Notes |
 |---|---|---|
 | run_id | Text | What every other table joins on |
+| status | Text | `running`, `finished` or `crashed` |
 | experiment_id, arm, algorithm, trainer | Text | |
 | seed | Integer | |
 | env_id, backend, rom_sha1, start_state, obs_mode | Text | |
 | frames_per_decision, num_envs | Small integer | |
 | reward_config_hash, git_commit | Text | |
 | hyperparameters | Text | The resolved config as JSON, with gamma and `reward_weights` (name to weight) |
-| env_steps | 64-bit integer | Total decisions. The visit counts sum to it |
+| step_log_every | Small integer | N for the per-step table |
+| machine | Text | The machine name from config, or the hostname when none is set |
+| env_steps | 64-bit integer | Training decisions. The end row's visit counts sum to it |
 | wall_clock_s | Decimal | Total wall-clock time in seconds |
 
 ### Checkpoints
@@ -275,7 +284,7 @@ Tests 1 to 3 live in `tests/conformance/` and run against every backend in the r
 
 The fake backend is a small grid game written in Python with a memory map of its own: a player position, two rooms joined by a door, a chest that sets a flag, and an RNG that advances every frame. It exists so that the reward registry, the environment, the MCP server and the logging pipeline can all be built and tested without a ROM.
 
-The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids, from the player's bedroom to Pewter Gym, that earns the badge in about one episode in four. The same seed gives identical tables. `uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0` writes a 2,000,000-step run with four environments under `data/runs/`. In week 6 everyone builds their panel against it before pointing at real runs.
+The fake logger writes synthetic runs in the exact frozen schema: a random walker over real FireRed map ids, from the player's bedroom to Pewter Gym, that earns the badge, its goal, in about one episode in four. At each checkpoint it runs two evaluation episodes. The same seed gives identical tables, and a second run under the same run id is refused. `uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0` writes a 2,000,000-step run with four environments under `data/runs/`. In week 6 everyone builds their panel against it before pointing at real runs.
 
 ## MCP tool surface
 
