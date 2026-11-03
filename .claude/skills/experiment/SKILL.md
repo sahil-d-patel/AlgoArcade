@@ -28,4 +28,29 @@ Before you believe a curve, watch the agent. Check the per-component reward char
 
 A negative result is a result. Write down what you ran and what happened, including the arm that lost.
 
-The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill and updates it when the runner lands.
+## The runner
+
+`src/algoarcade/training/runner.py` trains Stable-Baselines3 PPO from a preset in `config.py`. Any field can be overridden on the command line; `--help` lists them.
+
+```
+uv run python -m algoarcade.training.runner cartpole --seed 0
+uv run python -m algoarcade.training.runner acrobot --seed 0
+uv run python -m algoarcade.training.runner baseline --env-id <any registered env id> --seed 0
+```
+
+Debug run: add `--total-timesteps 1000 --n-envs 1 --checkpoint-every 500 --runs-dir <scratch dir>`. `--track` sends SB3's scalars to Weights & Biases; it is off by default.
+
+Each run writes one directory:
+
+```
+data/runs/run_id=<env_id>-seed<seed>-<YYYYmmdd-HHMMSS>/
+├── config.json               resolved config; load_config() reads it back
+├── git.json                  {"commit": ..., "dirty": ...}
+├── checkpoints/step_<n>.zip  every checkpoint_every env steps, and at the end
+├── eval.csv                  one row per checkpoint: step, mean_return, std_return, wall_time_s
+└── progress.csv              SB3's rollout and train scalars
+```
+
+Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an env reseeded to `seed + 1000` first, so every checkpoint plays the same episodes. The last row is the final result. `uv run python scripts/summarize_runs.py --out-dir <dir>` prints the table of runs and saves one learning-curve PNG per env.
+
+The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.

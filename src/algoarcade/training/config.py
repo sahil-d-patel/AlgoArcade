@@ -73,10 +73,10 @@ BASELINE = TrainConfig(
     ),
 )
 
-# The control tasks pay every step and end at 500 steps, so their returns, not their horizons,
-# set gamma. At 0.997 the value target for CartPole is about 1 / (1 - gamma) = 333, which the
-# value head fits slowly. These values start from rl-baselines3-zoo's tuned PPO settings for
-# each env, with constant rates in place of the zoo's linear schedules.
+# The control tasks end within 500 steps, so they do not need the baseline's long horizon. These
+# are rl-baselines3-zoo's PPO values (hyperparams/ppo.yml at eec15dc), with constant rates in
+# place of CartPole's linear schedules. For Acrobot the zoo also normalizes observations and
+# trains for 1M steps; we do neither. Both step budgets are guesses checked on seed 0.
 CARTPOLE = TrainConfig(
     env_id="CartPole-v1",
     total_timesteps=100_000,
