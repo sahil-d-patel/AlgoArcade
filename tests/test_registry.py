@@ -45,7 +45,9 @@ def rollout(steps: int, seed: int) -> list[tuple[float, dict[str, float]]]:
         prev = read(backend)
         backend.press([rng.choice(BUTTONS)])
         if rng.random() < 0.2:
-            poke(backend, rng.choice(list(COUNT_BYTES.values())), rng.randrange(0, 16))
+            # Mostly up, one step at a time: NewMaximum treats a larger jump as a bad read.
+            offset = rng.choice(list(COUNT_BYTES.values()))
+            poke(backend, offset, max(0, backend.save_state()[offset] + rng.choice((-1, 1, 1))))
         results.append(registry.step(prev, read(backend)))
     return results
 
@@ -105,9 +107,13 @@ def test_no_component_goes_negative() -> None:
 
 
 def raw_values(name: str, byte_values: list[int]) -> list[float]:
-    backend, registry = start({name: 1.0})
+    """The first value is in the count byte at reset; each later one is one step."""
+    backend = FakeBackend()
+    poke(backend, COUNT_BYTES[name], byte_values[0])
+    registry = RewardRegistry(COMPONENTS, {name: 1.0})
+    registry.reset(read(backend))
     paid = []
-    for value in byte_values:
+    for value in byte_values[1:]:
         prev = read(backend)
         poke(backend, COUNT_BYTES[name], value)
         paid.append(registry.step(prev, read(backend))[1][f"reward/{name}"])
@@ -115,20 +121,39 @@ def raw_values(name: str, byte_values: list[int]) -> list[float]:
 
 
 def test_level_drop_and_return_to_the_old_maximum_pays_nothing() -> None:
-    assert raw_values("level", [6, 4, 6, 7]) == [1.0, 0.0, 0.0, 1.0]
+    assert raw_values("level", [5, 6, 4, 6, 7]) == [1.0, 0.0, 0.0, 1.0]
 
 
 def test_level_gain_is_capped_at_one_per_step_and_the_excess_is_lost() -> None:
-    assert raw_values("level", [9, 9, 10]) == [1.0, 0.0, 1.0]
+    assert raw_values("level", [5, 9, 9, 10]) == [1.0, 0.0, 1.0]
 
 
 def test_a_misread_badge_byte_neither_pays_nor_silences_later_badges() -> None:
     # 0xFF reads as eight badges one step after the first; a step earns at most one.
-    assert raw_values("badge", [0x01, 0xFF, 0x01, 0x03, 0x07]) == [1.0, 0.0, 0.0, 1.0, 1.0]
+    assert raw_values("badge", [0x00, 0x01, 0xFF, 0x01, 0x03, 0x07]) == [1.0, 0.0, 0.0, 1.0, 1.0]
 
 
 def test_a_count_above_its_maximum_is_ignored() -> None:
-    assert raw_values("milestone", [1, 200, 2]) == [1.0, 0.0, 1.0]
+    assert raw_values("milestone", [0, 1, 200, 2]) == [1.0, 0.0, 1.0]
+
+
+@pytest.mark.parametrize(
+    ("name", "byte_values", "paid"),
+    [
+        # Above the maximum at reset.
+        ("milestone", [200, 1, 1, 2], [0.0, 0.0, 1.0]),
+        # 0xFF at reset reads as eight badges; the real count is one.
+        ("badge", [0xFF, 0x01, 0x03, 0x07], [0.0, 1.0, 1.0]),
+        # Too low at reset: the real counts are 3 badges and a level sum of 150, each more than
+        # max_rise above the reset read.
+        ("badge", [0x00, 0x07, 0x07, 0x0F], [0.0, 0.0, 1.0]),
+        ("level", [0, 150, 150, 151], [0.0, 0.0, 1.0]),
+    ],
+)
+def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
+    name: str, byte_values: list[int], paid: list[float]
+) -> None:
+    assert raw_values(name, byte_values) == paid
 
 
 def test_chest_pays_events_once() -> None:

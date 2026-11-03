@@ -26,8 +26,11 @@ class NewMaximum(RewardComponent[Progress]):
     A drop, or a climb back to the old best, pays nothing, so moving a count up and down cannot be
     farmed. The excess of a rise above the cap is never paid.
 
-    A count above `maximum`, or more than `max_rise` above the best, is a bad read: it pays nothing
-    and does not become the best, so it cannot silence the real gains that follow."""
+    A read above `maximum`, or more than `max_rise` above the best, pays nothing and does not
+    become the best. The best comes only from two consecutive reads that agree: the second is 0 to
+    `max_rise` above the first. That sets it on the first step of an episode, so a bad reset read
+    is never trusted on its own, and replaces it whenever a read is too far above it, so a bad
+    best cannot freeze the term."""
 
     def __init__(
         self,
@@ -42,17 +45,23 @@ class NewMaximum(RewardComponent[Progress]):
         self._maximum = maximum
         self._max_rise = max_rise
         self._cap = cap
-        self._best = 0
+        self._best: int | None = None
 
     @override
     def reset(self, state: Progress) -> None:
-        self._best = self._count(state)
+        self._best = None
 
     @override
     def score(self, prev: Progress, curr: Progress) -> float:
         value = self._count(curr)
-        if value > self._maximum or value - self._best > self._max_rise:
+        if value > self._maximum:
             return 0.0
-        gain = max(0, value - self._best)
-        self._best = max(self._best, value)
-        return min(float(gain), self._cap)
+        if self._best is not None and value - self._best <= self._max_rise:
+            gain = max(0, value - self._best)
+            self._best = max(self._best, value)
+            return min(float(gain), self._cap)
+        rise = value - self._count(prev)
+        if 0 <= rise <= self._max_rise:
+            self._best = value
+            return min(float(rise), self._cap)
+        return 0.0
