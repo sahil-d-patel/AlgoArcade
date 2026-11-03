@@ -8,12 +8,14 @@ from algoarcade.games.firered.addresses import ADDRESSES
 
 # GetSubstruct in src/pokemon.c: physical order of growth, attacks, EVs and miscellaneous.
 SUBSTRUCT_ORDERS = tuple(permutations(range(4)))
-# include/constants/flags.h at source e93eb12a336fb97df420b0961753d8a3713c9fcc.
+# include/constants/flags.h at source e93eb12a336fb97df420b0961753d8a3713c9fcc. The list defines
+# the logged story_flags column: docs/decisions.md, 2026-11-03.
 STORY_FLAGS = {
+    "FLAG_VISITED_OAKS_LAB": 0x2CF,
     "FLAG_SYS_POKEMON_GET": 0x828,
     "FLAG_BEAT_RIVAL_IN_OAKS_LAB": 0x258,
-    "FLAG_SYS_POKEDEX_GET": 0x829,
     "FLAG_GOT_POTION_ON_ROUTE_1": 0x230,
+    "FLAG_SYS_POKEDEX_GET": 0x829,
     "FLAG_DEFEATED_BROCK": 0x4B0,
     "FLAG_GOT_TM39_FROM_BROCK": 0x254,
 }
@@ -43,6 +45,7 @@ class FireRedState:
     pokedex_seen: int
     in_battle: bool
     text_active: bool
+    text_progress: int
     script_active: bool
     controls_locked: bool
     story_flags: int
@@ -86,8 +89,12 @@ class FireRedReader:
         base2 = self._addresses["gSaveBlock2"].address
         if not (0 <= pointer2 - base2 <= 0x7C) or (pointer2 - base2) % 4:
             raise StateNotReady(f"Invalid gSaveBlock2Ptr: {pointer2:#010x}")
+        if pointer - base != pointer2 - base2:
+            raise StateNotReady("gSaveBlock1Ptr and gSaveBlock2Ptr are at different offsets")
         # SaveBlock1.money, SaveBlock2.encryptionKey and GetMoney at the same source commit.
         money = read_u32(backend, pointer + 0x290) ^ read_u32(backend, pointer2 + 0xF20)
+        # SaveBlock1.flags is at 0xEE0 and FLAG_BADGE01_GET is 0x820 (include/constants/flags.h),
+        # so the eight badges are the byte at 0xFE4, Boulder Badge in bit 0.
         badge_flags = read_u8(backend, pointer + 0xFE4)
         # flags.h trainer ids 0x500..0x7FF; FlagGet indexes SaveBlock1.flags at 0xEE0.
         trainers_defeated = sum(byte.bit_count() for byte in backend.read(pointer + 0xF80, 96))
@@ -108,6 +115,10 @@ class FireRedReader:
         # Main.inBattle, GetFieldMessageBoxType, ScriptContext_IsEnabled, IsPlayerFieldControlsLocked.
         in_battle = bool(read_u8(backend, self._addresses["gMain"].address + 0x439) & 2)
         text_active = read_u8(backend, self._addresses["sMessageBoxType"].address) != 0
+        # currentChar of TextPrinter 0, at offset 0 (include/text.h). AddTextPrinter in
+        # src/text_printer.c uses the window id as the printer index; window 0 is the field
+        # message box and B_WIN_MSG in battle.
+        text_progress = read_u32(backend, self._addresses["sTextPrinters"].address)
         script_active = read_u8(backend, self._addresses["sGlobalScriptContextStatus"].address) == 0
         controls_locked = bool(read_u8(backend, self._addresses["sLockFieldControls"].address))
         # SaveBlock1.pos/location: include/global.h at the same source commit.
@@ -150,6 +161,7 @@ class FireRedReader:
             pokedex_seen=seen.bit_count(),
             in_battle=in_battle,
             text_active=text_active,
+            text_progress=text_progress,
             script_active=script_active,
             controls_locked=controls_locked,
             story_flags=story_flags,

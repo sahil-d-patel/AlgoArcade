@@ -8,6 +8,7 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.addresses import ADDRESSES
 from algoarcade.games.firered.reader import STORY_FLAGS, FireRedReader, PartyPokemon
+from algoarcade.rewards.penalties import AntiSpam
 
 
 class MemoryBackend(FakeBackend):
@@ -25,6 +26,7 @@ class MemoryBackend(FakeBackend):
         self.write(addresses["sMessageBoxType"].address, b"\x00")
         self.write(addresses["sGlobalScriptContextStatus"].address, b"\x02")
         self.write(addresses["sLockFieldControls"].address, b"\x00")
+        self.write(addresses["sTextPrinters"].address, bytes(4))
 
     def read(self, address: int, size: int) -> bytes:
         return bytes(self.memory[address + offset] for offset in range(size))
@@ -51,9 +53,17 @@ def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
     assert first.party_hp_frac == 0
 
     backend.write(pointer_address, (base + offset).to_bytes(4, "little"))
+    backend.write(
+        addresses["gSaveBlock2Ptr"].address,
+        (addresses["gSaveBlock2"].address + offset).to_bytes(4, "little"),
+    )
     backend.write(base + offset, struct.pack("<hhbb", 27, 31, 5, 6))
-    assert reader.read(backend).location == (5, 6, 27, 31)
+    backend.write(base + offset + 0xFE4, b"\x03")
+    moved = reader.read(backend)
+    assert moved.location == (5, 6, 27, 31)
+    assert moved.badge_flags == 3
     assert first.location == (3, 4, 12, 19)
+    assert first.badge_flags == 0
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
@@ -149,6 +159,21 @@ def test_invalid_second_save_pointer_is_not_ready(sha1: str, offset: int | None)
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize(("offset1", "offset2"), [(0, 4), (4, 0), (0x40, 0x7C)])
+def test_save_blocks_at_different_offsets_are_not_ready(
+    sha1: str, offset1: int, offset2: int
+) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    block1 = addresses["gSaveBlock1"].address + offset1
+    block2 = addresses["gSaveBlock2"].address + offset2
+    backend.write(addresses["gSaveBlock1Ptr"].address, block1.to_bytes(4, "little"))
+    backend.write(addresses["gSaveBlock2Ptr"].address, block2.to_bytes(4, "little"))
+    with pytest.raises(StateNotReady, match="different offsets"):
+        FireRedReader(sha1).read(backend)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
 @pytest.mark.parametrize(("personality", "order"), list(enumerate(permutations(range(4)))))
 def test_party_decryption_and_checksum(sha1: str, personality: int, order: tuple[int, ...]) -> None:
     addresses = ADDRESSES[sha1]
@@ -234,14 +259,6 @@ def test_temporary_and_hide_flags_do_not_count_as_progress(sha1: str) -> None:
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
 def test_story_whitelist_isolated_from_other_flags(sha1: str) -> None:
-    assert STORY_FLAGS == {
-        "FLAG_SYS_POKEMON_GET": 0x828,
-        "FLAG_BEAT_RIVAL_IN_OAKS_LAB": 0x258,
-        "FLAG_SYS_POKEDEX_GET": 0x829,
-        "FLAG_GOT_POTION_ON_ROUTE_1": 0x230,
-        "FLAG_DEFEATED_BROCK": 0x4B0,
-        "FLAG_GOT_TM39_FROM_BROCK": 0x254,
-    }
     assert min(STORY_FLAGS.values()) >= 0x230
     addresses = ADDRESSES[sha1]
     backend = MemoryBackend()
@@ -249,14 +266,17 @@ def test_story_whitelist_isolated_from_other_flags(sha1: str) -> None:
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
     reader = FireRedReader(sha1)
-    for count, flag in enumerate([0x828, 0x258, 0x829, 0x230, 0x4B0, 0x254], start=1):
+    # The Pallet-to-Pewter list approved in docs/decisions.md, 2026-11-03.
+    approved = [0x2CF, 0x828, 0x258, 0x230, 0x829, 0x4B0, 0x254]
+    for count, flag in enumerate(approved, start=1):
         address = base + 0xEE0 + flag // 8
         backend.write(address, bytes([backend.read(address, 1)[0] | (1 << (flag % 8))]))
         assert reader.read(backend).story_flags == count
+    assert reader.read(backend).story_flags == len(STORY_FLAGS)
     backend.write(base + 0xEE0, bytes([0xFF] * (0x230 // 8)))
-    assert reader.read(backend).story_flags == 6
+    assert reader.read(backend).story_flags == 7
     backend.write(base + 0xEE0 + 0x231 // 8, b"\xff")
-    assert reader.read(backend).story_flags == 6
+    assert reader.read(backend).story_flags == 7
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
@@ -302,3 +322,28 @@ def test_party_hp_fraction_uses_total_hp() -> None:
         PartyPokemon(level=5, hp=0, max_hp=80, status=0, species=1, moves=(33, 45, 0, 0)),
     )
     assert replace(state, party=party).party_hp_frac == 0.1
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_text_progress_reads_printer_zero_and_drives_anti_spam(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    backend.write(
+        addresses["gSaveBlock1Ptr"].address, addresses["gSaveBlock1"].address.to_bytes(4, "little")
+    )
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(addresses["sMessageBoxType"].address, b"\x02")
+    reader = FireRedReader(sha1)
+    printer = addresses["sTextPrinters"].address
+    backend.write(printer, (0x02021D45).to_bytes(4, "little"))
+    first = reader.read(backend)
+    assert first.text_progress == 0x02021D45
+    backend.write(printer + 0x24, (0x02021D60).to_bytes(4, "little"))
+    same = reader.read(backend)
+    backend.write(printer, (0x02021D60).to_bytes(4, "little"))
+    advanced = reader.read(backend)
+    assert advanced.text_progress == 0x02021D60
+    anti_spam = AntiSpam()
+    anti_spam.reset(first)
+    assert anti_spam.score(first, same) == 1.0
+    assert anti_spam.score(first, advanced) == 0.0
