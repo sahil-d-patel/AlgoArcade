@@ -1,10 +1,15 @@
-"""Compare EWRAM through a supplied GameBackend; CLI wiring awaits ENV-04."""
+"""Print the EWRAM bytes that differ between two save states.
+
+uv run python scripts/state_diff.py A.state B.state
+"""
+
+import argparse
+from pathlib import Path
 
 from algoarcade.backends.base import GameBackend
+from algoarcade.backends.mgba import EWRAM_BASE, EWRAM_SIZE, MgbaBackend
 
-# GBA hardware memory map: https://mgba-emu.github.io/gbatek/#gbamemorymap
-EWRAM_BASE = 0x02000000
-EWRAM_SIZE = 0x40000
+ROM = Path(__file__).resolve().parents[1] / "data" / "roms" / "firered.gba"
 
 
 def compare_states(backend: GameBackend, state_a: bytes, state_b: bytes) -> None:
@@ -22,8 +27,19 @@ def compare_states(backend: GameBackend, state_a: bytes, state_b: bytes) -> None
         backend.load_state(original)
 
 
-if __name__ == "__main__":
-    raise SystemExit(
-        "Save-state file comparison awaits the ENV-04 mGBA backend. "
-        "Use compare_states(backend, state_a, state_b) with an existing GameBackend."
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    parser.add_argument("state_a", type=Path)
+    parser.add_argument("state_b", type=Path)
+    args = parser.parse_args(argv)
+    backend = MgbaBackend(ROM, render=False)
+    try:
+        compare_states(backend, args.state_a.read_bytes(), args.state_b.read_bytes())
+    finally:
+        backend.close()
+
+
+if __name__ == "__main__":
+    main()
