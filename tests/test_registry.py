@@ -100,7 +100,9 @@ def test_default_config_enables_exactly_the_five_positive_terms() -> None:
     assert set(WEIGHTS) == set(COMPONENTS)
 
 
-# time charges every step by design; test_time_charges_every_step_even_a_no_op covers it.
+# The two exceptions are the penalties time and anti_spam, which never pay and are off by
+# default. anti_spam passes here because the fake's text box is closed;
+# test_time_and_anti_spam_charge_the_reset_step pins both.
 @pytest.mark.parametrize("name", [name for name in COMPONENTS if name != "time"])
 def test_zero_on_reset_and_on_a_no_op_step(name: str) -> None:
     backend = FakeBackend()
@@ -123,6 +125,19 @@ def test_time_charges_every_step_even_a_no_op() -> None:
     assert component.score(state, state) == 1.0
     backend.press([Button.UP])
     assert component.score(state, read(backend)) == 1.0
+
+
+@pytest.mark.parametrize(("text", "anti_spam"), [(0, 0.0), (1, 1.0)])
+def test_time_and_anti_spam_charge_the_reset_step(text: int, anti_spam: float) -> None:
+    backend = FakeBackend()
+    poke(backend, fake.TEXT, text)
+    registry = RewardRegistry(COMPONENTS, WEIGHTS)
+    state = read(backend)
+    registry.reset(state)
+    _, info = registry.step(state, state)
+    assert info.pop("reward/time") == 1.0
+    assert info.pop("reward/anti_spam") == anti_spam
+    assert all(value == 0.0 for value in info.values())
 
 
 def test_no_component_goes_negative() -> None:
@@ -173,12 +188,11 @@ def test_a_count_above_its_maximum_is_ignored() -> None:
         ("milestone", [200, 1, 1, 2], [0.0, 0.0, 1.0]),
         # 0xFF at reset reads as eight badges; the real count is one.
         ("badge", [0xFF, 0x01, 0x01, 0x03, 0x07], [0.0, 0.0, 1.0, 1.0]),
-        # Too low at reset: the real counts are 3 badges, 5 story flags and a level sum of 150,
-        # each more than max_rise above the reset read. 150 is past the level cap, so no level
-        # rise from it pays.
+        # Too low at reset: the real counts are 3 badges and 5 story flags, each more than
+        # max_rise above the reset read. Level cannot show this: a sum more than max_rise above
+        # any reset read is past the level cap, where nothing pays.
         ("badge", [0x00, 0x07, 0x07, 0x0F], [0.0, 0.0, 1.0]),
         ("events", [0x00, 0x1F, 0x1F, 0x3F], [0.0, 0.0, 1.0]),
-        ("level", [0, 150, 150, 151], [0.0, 0.0, 0.0]),
     ],
 )
 def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
