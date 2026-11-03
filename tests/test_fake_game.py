@@ -21,6 +21,10 @@ def test_start_state() -> None:
         party_level_sum=5,
         badge_count=0,
         milestone_count=0,
+        party_count=1,
+        party_hp_frac=1.0,
+        text_active=False,
+        text_progress=0,
     )
 
 
