@@ -30,7 +30,7 @@ You get a GitHub issue number, a ticket id (for example `ENV-04`), or both. You 
 - Commit in small steps, each message saying why. Never `--no-verify`. If the pre-commit hook fails, fix the cause.
 - Update every doc and skill file the ticket's criteria name, in the same branch.
 - Do not add a dependency. If the ticket cannot be done without one, stop and report what is needed and why.
-- Do not change the logging schema after November 1, do not weaken or skip a test to make it pass, and never stage ROMs, save states, symbol files or anything under `data/`.
+- Do not change the logging schema after November 8, do not weaken or skip a test to make it pass, and never stage ROMs, save states, symbol files or anything under `data/`.
 
 ## 4. Verify
 

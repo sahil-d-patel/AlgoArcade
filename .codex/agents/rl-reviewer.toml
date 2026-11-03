@@ -17,7 +17,7 @@ Check for these, and only report one when you can point at the line:
 - A save block pointer dereferenced once and stored, or an address with no symbol name and commit beside it.
 - A read of an encrypted party field with no checksum validation.
 - A progress count that includes temporary or hide/show flags.
-- A change to a logged field, its type or its meaning after the schema freeze on November 1.
+- A change to a logged field, its type or its meaning after the schema freeze on November 8.
 - A claim in docs, a pull request or a notebook that rests on fewer than five seeds and is not labeled exploratory, or a comparison across different seed sets.
 - A ROM, save state, symbol file or anything under `data/` staged or referenced by a committed path.
 
