@@ -122,18 +122,19 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 | level | Rise in party level sum, at most 1.0 a step, nothing past a sum of 20 | +0.5 | on | Grass camping: the cap holds an episode to 10.0, one badge. |
 | badge | A new badge | +10.0 | on | Misread badge byte: a read above 8 or a rise over 1 is ignored. |
 | milestone | A new entry on the Pallet-to-Brock list | +2.0 | on | Same as events. |
-| heal | Rise in party HP fraction | +0.3 | off | Fainting for a free heal: a whiteout or a party size change never pays. Damage then a Pokémon Center heal still pays; that is what E5 measures. |
+| heal | Rise in party HP fraction between two reads that agree | +0.3 | off | Fainting for a free heal: a rise from a fainted party, a party size change or one bad read never pays. Damage then a Pokémon Center heal still pays; that is what E5 measures. A level-up raises a damaged Pokémon's HP fraction, so with heal on, grass camping keeps paying heal past the level cap. |
 | blackout | The party goes from all fainted to healed | -5.0 | off | Fleeing or avoiding every battle to dodge it, as in RL-emerald. Nothing stops this; it is why the term is off. |
 | anti_loop | A move onto a tile stood on in the last 30 steps | -0.01 | off | Standing still is free, so the agent may stop moving, or walk loops longer than 30 steps. |
-| anti_spam | A press that left an open text box where it was | -0.02 | off | Avoiding NPCs and signs. It needs ENV-08 to provide `text_progress`. |
+| anti_spam | A press that left an open text box where it was | -0.02 | off | Avoiding NPCs and signs. It needs ENV-08 to provide `text_progress`. If that tracks only the text, moving the cursor in a yes/no menu is charged too. |
 | time | Every step | -0.001 | off | None while episodes end only on a step budget: every policy pays the same total. |
+
+`heal` and `blackout` read `party_hp_frac`, which ENV-08 computes as party HP over party max HP. It must leave eggs out: an egg has no HP to heal.
 
 The five scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 
 Rules:
 
-- Every component returns exactly zero on a step where nothing changed. Two penalties are exceptions by definition: time charges every step, and anti_spam charges a step where nothing changed while a text box is open. Neither pays, so neither can be farmed.
-- Every component returns exactly zero on the reset step.
+- Every component returns exactly zero on a no-op step and on the reset step, except the penalties `time` and `anti_spam`, which never pay and are off by default. `time` charges every step; `anti_spam` charges a step where nothing changed while a text box is open, including a reset into one.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
