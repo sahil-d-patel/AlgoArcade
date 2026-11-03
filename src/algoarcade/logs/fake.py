@@ -1,8 +1,9 @@
 """Synthetic runs in the logged schema, for building panels before real runs exist.
 
 A seeded random walker drifts from the player's bedroom to Pewter Gym over real FireRed maps,
-fights random battles in the grass and sometimes earns the Boulder Badge, the run's goal. The same seed gives
-identical tables. Contract: docs/harness-spec.md, Fake backend and fake logger.
+fights random battles in the grass and sometimes earns the Boulder Badge, the run's goal. Two
+evaluation episodes run at each checkpoint. The same seed gives identical tables. Contract:
+docs/harness-spec.md, Fake backend and fake logger.
 
 Write one run with: uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0
 """
