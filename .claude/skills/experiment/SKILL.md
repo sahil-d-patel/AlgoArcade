@@ -53,4 +53,41 @@ data/runs/run_id=<env_id>-seed<seed>-<YYYYmmdd-HHMMSS>/
 
 Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an env reseeded to `seed + 1000` first, so every checkpoint plays the same episodes. The last row is the final result. `uv run python scripts/summarize_runs.py --out-dir <dir>` prints the table of runs and saves one learning-curve PNG per env.
 
+## FireRed and the fake game
+
+With `env_id` set to `firered` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset is the baseline at 1M steps with explore as the only reward (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers.
+
+The TRN-05 runs, launched one after another so a stop loses only the run in progress:
+
+```
+for state in seg_01_house seg_02_pallet; do
+  for seed in 0 1 2; do
+    WANDB_MODE=offline uv run python -m algoarcade.training.runner firered \
+      --start-state $state --seed $seed --track
+  done
+done
+```
+
+Debug first with `--n-envs 1 --total-timesteps 1024 --checkpoint-every 512 --ppo.n-steps 512 --ppo.batch-size 64 --eval-episodes 1 --runs-dir <scratch dir>`. On macOS, do not launch through `/usr/bin/time` or `nohup`: they drop `DYLD_FALLBACK_LIBRARY_PATH` (docs/setup.md), and every worker dies at start as an `EOFError`. A worker that dies prints its traceback to stderr; the parent only sees `EOFError`.
+
+Besides the files above, a game run writes:
+
+```
+├── checkpoints/step_<n>.pkl  VecNormalize statistics for step_<n>.zip
+├── steps/ visits/ episodes/ runs/   Parquet through algoarcade.logs.writer
+└── wandb/                    with --track; WANDB_MODE=offline keeps it local
+```
+
+To play a checkpoint, load both files and freeze the statistics:
+
+```python
+env = VecNormalize.load("step_<n>.pkl", DummyVecEnv([env_fn]))
+env.training = False
+model = PPO.load("step_<n>.zip")
+```
+
+where `env_fn` comes from `algoarcade.training.games.env_factory`. Until ENV-08 and ENV-13 land, FireRed logs `story_flags` and `milestone_count` as -1 and `in_battle` as False: the reader does not provide them.
+
+Super Mario Land is not wired in. It needs PyBoyBackend and its reader (ENV-03, #58), the ROM, a reward for `level_progress`, and a place to log `level_progress`: the steps table has no column for it.
+
 The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.
