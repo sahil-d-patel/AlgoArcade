@@ -159,40 +159,84 @@ def raw_values(name: str, byte_values: list[int]) -> list[float]:
     return paid
 
 
+@pytest.mark.parametrize(
+    ("name", "byte_values", "paid"),
+    [
+        # Badge counts 0, 0, 0, 1, 0, 0, 1, 1: one frame read high while a save block moved,
+        # then the real badge.
+        ("badge", [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01], [0.0] * 6 + [1.0]),
+        # Story-flag counts 3, 3, 3, 4, 3, 3, 4, 4.
+        ("events", [0x07, 0x07, 0x07, 0x0F, 0x07, 0x07, 0x0F, 0x0F], [0.0] * 6 + [1.0]),
+    ],
+)
+def test_a_one_frame_spike_pays_nothing_and_the_real_rise_pays_once(
+    name: str, byte_values: list[int], paid: list[float]
+) -> None:
+    assert raw_values(name, byte_values) == paid
+
+
+@pytest.mark.parametrize(
+    ("name", "byte_values", "paid"),
+    [
+        ("level", [5, 6, 7, 7], [0.0, 1.0, 1.0]),
+        # Story-flag counts 0, 2, 4, 4: the last read is more than max_rise above the best.
+        ("events", [0x00, 0x03, 0x0F, 0x0F], [0.0, 2.0, 2.0]),
+    ],
+)
+def test_a_climb_on_consecutive_steps_pays_each_rise_as_it_is_confirmed(
+    name: str, byte_values: list[int], paid: list[float]
+) -> None:
+    assert raw_values(name, byte_values) == paid
+
+
+@pytest.mark.parametrize(
+    ("name", "byte_values"),
+    [
+        ("badge", [0x01, 0x01, 0xFF, 0x01, 0x01]),
+        ("level", [5, 5, 200, 5, 5]),
+    ],
+)
+def test_a_one_frame_spike_above_max_rise_pays_nothing(name: str, byte_values: list[int]) -> None:
+    assert raw_values(name, byte_values) == [0.0] * 4
+
+
 def test_level_drop_and_return_to_the_old_maximum_pays_nothing() -> None:
-    assert raw_values("level", [5, 6, 4, 6, 7]) == [1.0, 0.0, 0.0, 1.0]
+    paid = raw_values("level", [5, 6, 6, 4, 4, 6, 6, 7, 7])
+    assert paid == [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
 
 def test_level_gain_is_capped_at_one_per_step_and_the_excess_is_lost() -> None:
-    assert raw_values("level", [5, 9, 9, 10]) == [1.0, 0.0, 1.0]
+    assert raw_values("level", [5, 9, 9, 10, 10]) == [0.0, 1.0, 0.0, 1.0]
 
 
 def test_a_misread_badge_byte_neither_pays_nor_silences_later_badges() -> None:
-    # 0xFF reads as eight badges one step after the first; a step earns at most one.
-    assert raw_values("badge", [0x00, 0x01, 0xFF, 0x01, 0x03, 0x07]) == [1.0, 0.0, 0.0, 1.0, 1.0]
+    # Badge counts 0, 1, 8, 1, 1, 2, 2: 0xFF reads as eight badges on the step after the first
+    # badge, so that badge pays once two later reads agree on it.
+    paid = raw_values("badge", [0x00, 0x01, 0xFF, 0x01, 0x01, 0x03, 0x03])
+    assert paid == [0.0, 0.0, 0.0, 1.0, 0.0, 1.0]
 
 
 def test_level_pays_nothing_past_the_level_cap() -> None:
     climb = list(range(LEVEL_CAP - 3, LEVEL_CAP + 4))
-    assert raw_values("level", climb) == [1.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+    assert raw_values("level", climb) == [0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
 
 
 def test_a_count_above_its_maximum_is_ignored() -> None:
-    assert raw_values("milestone", [0, 1, 200, 2]) == [1.0, 0.0, 1.0]
+    assert raw_values("milestone", [0, 1, 1, 200, 2, 2]) == [0.0, 1.0, 0.0, 0.0, 1.0]
 
 
 @pytest.mark.parametrize(
     ("name", "byte_values", "paid"),
     [
         # Above the maximum at reset.
-        ("milestone", [200, 1, 1, 2], [0.0, 0.0, 1.0]),
+        ("milestone", [200, 1, 1, 2, 2], [0.0, 0.0, 0.0, 1.0]),
         # 0xFF at reset reads as eight badges; the real count is one.
-        ("badge", [0xFF, 0x01, 0x01, 0x03, 0x07], [0.0, 0.0, 1.0, 1.0]),
+        ("badge", [0xFF, 0x01, 0x01, 0x03, 0x03], [0.0, 0.0, 0.0, 1.0]),
         # Too low at reset: the real counts are 3 badges and 5 story flags, each more than
         # max_rise above the reset read. Level cannot show this: a sum more than max_rise above
         # any reset read is past the level cap, where nothing pays.
-        ("badge", [0x00, 0x07, 0x07, 0x0F], [0.0, 0.0, 1.0]),
-        ("events", [0x00, 0x1F, 0x1F, 0x3F], [0.0, 0.0, 1.0]),
+        ("badge", [0x00, 0x07, 0x07, 0x0F, 0x0F], [0.0, 0.0, 0.0, 1.0]),
+        ("events", [0x00, 0x1F, 0x1F, 0x3F, 0x3F], [0.0, 0.0, 0.0, 1.0]),
     ],
 )
 def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
@@ -204,11 +248,11 @@ def test_a_bad_reset_read_neither_becomes_the_best_nor_freezes_the_term(
 @pytest.mark.parametrize(
     ("name", "byte_values", "paid"),
     [
-        ("badge", [0x00, 0x01], [1.0]),
-        ("events", [0x00, 0x03], [2.0]),
+        ("badge", [0x00, 0x01, 0x01], [0.0, 1.0]),
+        ("events", [0x00, 0x03, 0x03], [0.0, 2.0]),
     ],
 )
-def test_the_first_step_pays_a_rise_from_the_reset_read(
+def test_a_rise_on_the_first_step_pays_on_the_second(
     name: str, byte_values: list[int], paid: list[float]
 ) -> None:
     assert raw_values(name, byte_values) == paid
@@ -218,14 +262,14 @@ def test_the_first_step_pays_a_rise_from_the_reset_read(
     ("name", "byte_values", "paid"),
     [
         # A transient low read, then the real count again.
-        ("level", [30, 0, 30], [0.0, 0.0]),
+        ("level", [30, 0, 30, 30], [0.0, 0.0, 0.0]),
         # A transient high pair sets a high best, so the real 50 and 51 pay nothing.
-        ("level", [50, 200, 201, 50, 51], [0.0, 0.0, 0.0, 0.0]),
-        # Badge counts 3, 0, 1, 2, 3 and story-flag counts 5, 0, 3, 5. The pair of low reads
-        # becomes the best and pays nothing, but the climb back from it pays. A component cannot
-        # tell this from a bad reset read followed by real gains.
-        ("badge", [0x07, 0x00, 0x01, 0x03, 0x07], [0.0, 0.0, 1.0, 1.0]),
-        ("events", [0x1F, 0x00, 0x07, 0x1F], [0.0, 0.0, 2.0]),
+        ("level", [50, 200, 201, 50, 51, 51], [0.0] * 5),
+        # Badge counts 3, 0, 1, 2, 2, 3, 3 and story-flag counts 5, 0, 3, 5, 5. The pair of low
+        # reads becomes the best and pays nothing, but the climb back from it pays. A component
+        # cannot tell this from a bad reset read followed by real gains.
+        ("badge", [0x07, 0x00, 0x01, 0x03, 0x03, 0x07, 0x07], [0.0, 0.0, 0.0, 1.0, 0.0, 1.0]),
+        ("events", [0x1F, 0x00, 0x07, 0x1F, 0x1F], [0.0, 0.0, 0.0, 2.0]),
     ],
 )
 def test_re_establishing_the_best_pays_nothing(
@@ -242,18 +286,20 @@ def test_a_misread_repeated_on_two_steps_becomes_the_best() -> None:
 
 
 def test_a_misread_story_flag_count_neither_pays_nor_silences_later_flags() -> None:
-    # 0xFF reads as eight flags; no script sets more than three at once.
-    assert raw_values("events", [0x00, 0x01, 0xFF, 0x01, 0x03]) == [1.0, 0.0, 0.0, 1.0]
+    # Story-flag counts 0, 1, 8, 1, 2, 2. 0xFF reads as eight flags; no script sets more than
+    # three at once.
+    paid = raw_values("events", [0x00, 0x01, 0xFF, 0x01, 0x03, 0x03])
+    assert paid == [0.0, 0.0, 0.0, 1.0, 1.0]
 
 
 def test_chest_pays_events_once() -> None:
     backend, registry = start({"events": 1.0})
     rewards = []
-    for button in [Button.RIGHT, Button.RIGHT, Button.A, Button.A]:
+    for button in [Button.RIGHT, Button.RIGHT, Button.A, Button.A, Button.A]:
         prev = read(backend)
         backend.press([button])
         rewards.append(registry.step(prev, read(backend))[0])
-    assert rewards == [0.0, 0.0, 1.0, 0.0]
+    assert rewards == [0.0, 0.0, 0.0, 1.0, 0.0]
 
 
 def test_reset_clears_per_episode_state() -> None:
@@ -261,11 +307,16 @@ def test_reset_clears_per_episode_state() -> None:
     for _ in range(2):
         backend = FakeBackend()
         registry.reset(read(backend))
-        prev = read(backend)
-        backend.press([Button.DOWN])
-        poke(backend, fake.LEVEL_SUM, 6)
-        _, info = registry.step(prev, read(backend))
-        assert info == {"reward/explore": 1.0, "reward/level": 1.0}
+        infos = []
+        for button in [Button.DOWN, Button.UP]:
+            prev = read(backend)
+            backend.press([button])
+            poke(backend, fake.LEVEL_SUM, 6)
+            infos.append(registry.step(prev, read(backend))[1])
+        assert infos == [
+            {"reward/explore": 1.0, "reward/level": 0.0},
+            {"reward/explore": 0.0, "reward/level": 1.0},
+        ]
 
 
 def total_reward(name: str, states: list[FakeState]) -> float:

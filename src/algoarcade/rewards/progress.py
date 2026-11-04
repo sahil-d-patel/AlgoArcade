@@ -22,18 +22,26 @@ class Progress(GameState, Protocol):
 
 
 class NewMaximum(RewardComponent[Progress]):
-    """Pays the amount a count rises above its best so far this episode, up to `cap` per step.
-    A drop, or a climb back to the old best, pays nothing, so moving a count up and down cannot be
-    farmed. The excess of a rise above the cap is never paid, nor is any part of a rise above
-    `ceiling`, so an episode pays at most `ceiling` in total.
+    """Pays a rise in a count above its best so far this episode, once two consecutive reads
+    agree on it, up to `cap` per step.
 
-    A read above `maximum`, or more than `max_rise` above the best, pays nothing and does not
-    become the best. The best comes only from two consecutive reads that agree: the second is 0 to
-    `max_rise` above the first. On the first step the pair is the reset read and the next read,
-    and their rise pays. Any later pair, after a rejected read, only sets the best and pays
-    nothing. So a bad reset read is never trusted on its own, and a bad best is replaced once two
-    reads agree. A bad read that repeats on two consecutive steps can therefore become the best
-    and silence the term for the episode; only reader validation (ENV-05, ENV-08) prevents that."""
+    FireRed's save blocks move on warps, battles and menus, and for one frame a count can read
+    wrong, high or low. So a step looks at the pair of reads `prev` and `curr`. The pair is
+    ignored if either read is above `maximum` or `curr` is more than `max_rise` above `prev`. If
+    `prev` is at most `max_rise` above the best, the step pays the rise from the best to
+    `min(prev, curr)`, the count both reads agree on, and that becomes the best. A real rise pays
+    one step late, a one-frame spike above the true count never pays, and a count that climbs on
+    consecutive steps pays each rise as it is confirmed, so the cap does not swallow them. A drop,
+    or a climb back to the old best, pays nothing. The excess of a rise above the cap is never
+    paid, nor is any part of a rise above `ceiling`, so an episode pays at most `ceiling`.
+
+    Otherwise there is no best yet, or `prev` is more than `max_rise` above it, and the step pays
+    nothing. If `curr` is 0 to `max_rise` above `prev`, the best becomes `prev` on the first step
+    and `curr` on a later one. So a bad reset read is never trusted on its own, and a bad best is
+    replaced once two reads agree. A reset read up to `max_rise` too low does become the best, and
+    the climb back from it pays. A bad read that repeats on two consecutive steps can become the
+    best and silence the term for the episode; only reader validation (ENV-05, ENV-08) prevents
+    that."""
 
     def __init__(  # noqa: PLR0913 two bounds on reads and two on payment
         self,
@@ -60,18 +68,17 @@ class NewMaximum(RewardComponent[Progress]):
 
     @override
     def score(self, prev: Progress, curr: Progress) -> float:
-        value = self._count(curr)
+        prev_value, value = self._count(prev), self._count(curr)
         first_step, self._first_step = self._first_step, False
-        if value > self._maximum:
+        if max(prev_value, value) > self._maximum or value - prev_value > self._max_rise:
             return 0.0
-        if self._best is not None and value - self._best <= self._max_rise:
-            paid = self._paid(self._best, value)
-            self._best = max(self._best, value)
+        if self._best is not None and prev_value - self._best <= self._max_rise:
+            confirmed = min(prev_value, value)
+            paid = self._paid(self._best, confirmed)
+            self._best = max(self._best, confirmed)
             return paid
-        prev_value = self._count(prev)
-        if 0 <= value - prev_value <= self._max_rise:
-            self._best = value
-            return self._paid(prev_value, value) if first_step else 0.0
+        if value >= prev_value:
+            self._best = prev_value if first_step else value
         return 0.0
 
     def _paid(self, low: int, high: int) -> float:
