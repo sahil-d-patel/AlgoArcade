@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from mcp import Client, StdioServerParameters
+from mcp.server.mcpserver import MCPServer
 
 from algoarcade.agent.loop import (
     SEGMENTS,
@@ -25,7 +26,11 @@ from algoarcade.agent.loop import (
     run,
     run_attempt,
 )
-from algoarcade.agent.server import png
+from algoarcade.agent.server import Game, build, png
+from algoarcade.backends.base import GameBackend
+from algoarcade.backends.fake import FakeBackend
+from algoarcade.games.base import StateNotReady
+from algoarcade.games.fake import FakeState
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 USAGE = Usage(
@@ -56,7 +61,6 @@ def reply(content: list[Any], stop_reason: str, usage: Usage = USAGE) -> Message
     )
 
 
-DEFAULT_PRICES = Prices()
 END = reply([TextBlock(type="text", text="I give up.")], "end_turn")
 
 
@@ -72,15 +76,16 @@ class StubModel:
 
 def attempt(
     model: StubModel,
-    max_actions: int = 100,
-    max_dollars: float = 100.0,
     record: Callable[[Step], None] = lambda _: None,
-    prices: Prices = DEFAULT_PRICES,
+    server: StdioServerParameters | MCPServer[Game] = PARAMS,
+    **settings: Any,
 ) -> Attempt:
-    config = AttemptConfig(max_actions=max_actions, max_dollars=max_dollars, prices=prices)
+    """`settings` are AttemptConfig fields; the caps default to 100 actions and $100."""
+    caps: dict[str, Any] = {"max_actions": 100, "max_dollars": 100.0}
+    config = AttemptConfig(**(caps | settings))
 
     async def go() -> Attempt:
-        async with Client(PARAMS, raise_exceptions=True) as client:
+        async with Client(server, raise_exceptions=True) as client:
             return await run_attempt(model, client, config, SEGMENTS["fake"], record)
 
     return asyncio.run(go())
@@ -108,6 +113,21 @@ def test_a_rejected_press_is_not_counted_or_logged(rejected: object) -> None:
     # One step right from x=1: the rejected call moved nothing.
     assert logged[1].state is not None
     assert logged[1].state["x"] == 2
+
+
+class NeverReady:
+    def read(self, backend: GameBackend) -> FakeState:
+        raise StateNotReady("not yet")
+
+
+def test_presses_into_a_state_that_is_not_ready_still_count() -> None:
+    model = StubModel([press(["RIGHT", "DOWN"]), END])
+    logged: list[Step] = []
+    server = build(lambda: Game(FakeBackend(), NeverReady()))
+    result = attempt(model, record=logged.append, server=server)
+    assert result.actions == 2
+    assert [step.buttons for step in logged] == [["RIGHT", "DOWN"], []]
+    assert logged[0].state is None
 
 
 def test_stops_before_a_request_that_could_pass_the_dollar_cap() -> None:

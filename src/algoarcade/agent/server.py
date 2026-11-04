@@ -26,7 +26,7 @@ from pydantic_core import to_jsonable_python
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
-from algoarcade.games.base import StateReader
+from algoarcade.games.base import StateNotReady, StateReader
 from algoarcade.games.fake import FakeReader
 from algoarcade.games.firered.reader import FireRedReader
 
@@ -75,10 +75,14 @@ def png(rgb: NDArray[np.uint8]) -> bytes:
 
 
 def state_result(game: Game, screenshot: bool) -> CallToolResult:
-    state = to_jsonable_python(game.reader.read(game.backend))
-    content: list[TextContent | ImageContent] = [
-        TextContent(type="text", text=json.dumps(state, separators=(",", ":")))
-    ]
+    # Not an error: after a press the buttons were pressed, and a later read can succeed.
+    try:
+        state = to_jsonable_python(game.reader.read(game.backend))
+        text = json.dumps(state, separators=(",", ":"))
+    except StateNotReady as error:
+        state = None
+        text = f"State not ready: {error}"
+    content: list[TextContent | ImageContent] = [TextContent(type="text", text=text)]
     if screenshot:
         screen = game.backend.screen().repeat(SCALE, axis=0).repeat(SCALE, axis=1)
         content.append(Image(data=png(screen), format="png").to_image_content())

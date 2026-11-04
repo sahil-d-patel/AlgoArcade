@@ -13,14 +13,16 @@ from typing import Any, get_args
 import numpy as np
 import pytest
 from mcp import Client, StdioServerParameters
+from mcp_types import CallToolResult
 from numpy.typing import NDArray
 
 from algoarcade.agent.loop import server
-from algoarcade.agent.server import SCALE, ButtonName
-from algoarcade.backends.base import Button
+from algoarcade.agent.server import SCALE, ButtonName, Game, build
+from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
-from algoarcade.games.fake import FakeReader
+from algoarcade.games.base import StateNotReady
+from algoarcade.games.fake import FakeReader, FakeState
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 MCP_JSON = Path(__file__).parents[1] / ".mcp.json"
@@ -209,6 +211,34 @@ def test_only_protocol_frames_reach_stdout_and_the_log_reaches_stderr() -> None:
     assert [json.loads(line)["jsonrpc"] for line in replies] == ["2.0"] * 3
     assert rest == ""
     assert "press ['A']" in stderr
+
+
+class NotReadyPastX1:
+    """The fake reader, raising once the player leaves x=1, as FireRed's can mid-warp."""
+
+    def read(self, backend: GameBackend) -> FakeState:
+        state = FakeReader().read(backend)
+        if state.x > 1:
+            raise StateNotReady("the player left x=1")
+        return state
+
+
+async def press_into_a_state_that_is_not_ready() -> tuple[CallToolResult, CallToolResult]:
+    server = build(lambda: Game(FakeBackend(), NotReadyPastX1()))
+    async with Client(server, raise_exceptions=True) as client:
+        pressed = await client.call_tool("press", {"buttons": ["RIGHT"], "screenshot": True})
+        read_back = await client.call_tool("get_state")
+    return pressed, read_back
+
+
+def test_a_state_that_is_not_ready_is_reported_not_raised() -> None:
+    pressed, read_back = asyncio.run(press_into_a_state_that_is_not_ready())
+    for result in (pressed, read_back):
+        assert not result.is_error
+        assert result.structured_content is None
+        assert result.content[0].type == "text"
+        assert result.content[0].text == "State not ready: the player left x=1"
+    assert [block.type for block in pressed.content] == ["text", "image"]
 
 
 def test_two_servers_hold_independent_state() -> None:
