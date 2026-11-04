@@ -26,14 +26,14 @@ class NewMaximum(RewardComponent[Progress]):
     agree on it, up to `cap` per step.
 
     FireRed's save blocks move on warps, battles and menus, and for one frame a count can read
-    wrong, high or low. So a step looks at the pair of reads `prev` and `curr`. The pair is
-    ignored if either read is above `maximum` or `curr` is more than `max_rise` above `prev`. If
-    `prev` is at most `max_rise` above the best, the step pays the rise from the best to
-    `min(prev, curr)`, the count both reads agree on, and that becomes the best. A real rise pays
-    one step late, a one-frame spike above the true count never pays, and a count that climbs on
-    consecutive steps pays each rise as it is confirmed, so the cap does not swallow them. A drop,
-    or a climb back to the old best, pays nothing. The excess of a rise above the cap is never
-    paid, nor is any part of a rise above `ceiling`, so an episode pays at most `ceiling`.
+    wrong, high or low. A step ignores its pair of reads if either is above `maximum` or `curr`
+    is more than `max_rise` above `prev`. If `prev` is at most `max_rise` above the best, the step
+    pays the rise from the best to `min(prev, curr)`, the count both reads agree on, and that
+    becomes the best. A real rise pays one step late, a one-frame spike above the true count never
+    pays, and a count that climbs on consecutive steps pays each rise as it is confirmed, so the
+    cap does not swallow them. A drop, or a climb back to the old best, pays nothing. The excess
+    of a rise above the cap is never paid, nor is any part of a rise above `ceiling`, so an
+    episode pays at most `ceiling`.
 
     Otherwise there is no best yet, or `prev` is more than `max_rise` above it, and the step pays
     nothing. If `curr` is 0 to `max_rise` above `prev`, the best becomes `prev` on the first step
