@@ -29,8 +29,9 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady, StateReader
 from algoarcade.games.fake import FakeReader
-from algoarcade.games.firered.manifest import MANIFEST
+from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
 from algoarcade.games.firered.reader import FireRedReader
+from algoarcade.rom import identify
 
 # Names, not the Button bit positions an IntEnum would put in the schema a model reads.
 ButtonName = Literal["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L"]
@@ -58,11 +59,18 @@ GAMES: dict[str, Callable[[], Game]] = {
 
 
 def start_state(name: str) -> bytes:
-    """data/states/<name>.state, checked against the manifest hash when the manifest lists it."""
+    """data/states/<name>.state. When the manifest lists it, the ROM must be the one the states
+    were captured on and the file must match the manifest hash."""
     path = DATA / "states" / f"{name}.state"
     state = path.read_bytes()
     for entry in MANIFEST:
-        if entry.name == name and hashlib.sha256(state).hexdigest() != entry.sha256:
+        if entry.name != name:
+            continue
+        rom_path = DATA / "roms" / "firered.gba"
+        rom = identify(rom_path)
+        if rom.sha1 != ROM_SHA1:
+            raise ValueError(f"{rom_path} is {rom.name}; the start states were captured on rev 1")
+        if hashlib.sha256(state).hexdigest() != entry.sha256:
             raise ValueError(f"{path} does not match the manifest hash")
     return state
 

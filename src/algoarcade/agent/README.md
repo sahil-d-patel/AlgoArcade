@@ -2,7 +2,7 @@
 
 The MCP server that exposes the harness to a language model, and the loop that drives a model through it for evaluation.
 
-`server.py` serves one game on stdio, chosen by `--game`, with `get_state` and `press`. Both return the state as compact JSON and structured content, and a 2x PNG of the screen when asked. `--game firered` needs `data/roms/firered.gba` and the mGBA binding; `--state NAME` loads `data/states/NAME.state` first and refuses a manifest state whose SHA-256 differs from the manifest's. `.mcp.json` at the repo root launches it.
+`server.py` serves one game on stdio, chosen by `--game`, with `get_state` and `press`. Both return the state as compact JSON and structured content, and a 2x PNG of the screen when asked. `--game firered` needs `data/roms/firered.gba` and the mGBA binding; `--state NAME` loads `data/states/NAME.state` first and refuses a manifest state whose SHA-256 differs from the manifest's, or that would run on a ROM other than rev 1, the one the states were captured on. `.mcp.json` at the repo root launches it.
 
 `loop.py` runs one attempt on a segment and prints the outcome, the presses, the dollars, the mean tokens of each kind and dollars per press, and a projected cost for a 300-action attempt. Every request resends the whole history, so the projection does not scale the per-press cost. It takes 300 divided by the run's mean presses per request, rounded up, as the number of requests. It prices the first as measured and each later one with a prompt grown by the run's mean growth per request, on the short or long card by its size. With `ANTHROPIC_API_KEY` set, on macOS with the `DYLD_FALLBACK_LIBRARY_PATH` export from `docs/setup.md`:
 

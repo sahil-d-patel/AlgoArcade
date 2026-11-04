@@ -24,7 +24,9 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeReader, FakeState
+from algoarcade.games.firered.manifest import ROM_SHA1 as MANIFEST_ROM_SHA1
 from algoarcade.games.firered.reader import FireRedReader
+from algoarcade.rom import KNOWN_ROMS
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 MCP_JSON = Path(__file__).parents[1] / ".mcp.json"
@@ -258,13 +260,30 @@ def test_mcp_json_launches_a_server_that_lists_both_tools() -> None:
     assert sorted(asyncio.run(listed_tools(launched))) == ["get_state", "press"]
 
 
-def test_a_manifest_state_must_match_its_hash(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.fixture
+def states(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A data/ folder with no ROM, one manifest state with the wrong bytes and one of our own."""
     monkeypatch.setattr(agent_server, "DATA", tmp_path)
     (tmp_path / "states").mkdir()
     (tmp_path / "states" / "seg_01_house.state").write_bytes(b"not the captured state")
     (tmp_path / "states" / "mine.state").write_bytes(b"a state of my own")
+    return tmp_path
+
+
+def test_a_manifest_state_must_match_its_hash(
+    states: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_server, "identify", lambda _: KNOWN_ROMS[MANIFEST_ROM_SHA1])
     with pytest.raises(ValueError, match="does not match the manifest hash"):
+        agent_server.start_state("seg_01_house")
+    assert agent_server.start_state("mine") == b"a state of my own"
+
+
+def test_a_manifest_state_needs_the_rom_it_was_captured_on(
+    states: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (rev0,) = (rom for rom in KNOWN_ROMS.values() if rom.sha1 != MANIFEST_ROM_SHA1)
+    monkeypatch.setattr(agent_server, "identify", lambda _: rev0)
+    with pytest.raises(ValueError, match="captured on rev 1"):
         agent_server.start_state("seg_01_house")
     assert agent_server.start_state("mine") == b"a state of my own"
