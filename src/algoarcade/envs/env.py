@@ -8,7 +8,7 @@ import numpy as np
 from gymnasium import spaces
 
 from algoarcade.backends.base import Button, GameBackend
-from algoarcade.games.base import GameState, StateReader
+from algoarcade.games.base import GameState, StateNotReady, StateReader
 from algoarcade.rewards.registry import RewardRegistry
 
 ACTIONS: tuple[tuple[Button, ...], ...] = (
@@ -24,6 +24,11 @@ RELEASE = 16
 # A guess. A 24-frame step absorbs most of the offset, so it changes outcomes only through the
 # game's RNG; measured in docs/harness-spec.md, AlgoArcadeEnv.
 MAX_NOOP_FRAMES = 7
+# Frames a not-ready read is retried, one frame apart, before StateNotReady propagates. FireRed's
+# party checksum fails for one frame while the game rewrites an entry, never two in a row in the
+# per-frame reads measured in docs/harness-spec.md, AlgoArcadeEnv. Eight is margin over that; a
+# state that stays not ready, such as the title screen, still raises.
+NOT_READY_FRAMES = 8
 # Rows and columns of tiles around the player. A guess: FireRed shows 15 by 10 tiles.
 CROP = (9, 15)
 
@@ -31,8 +36,9 @@ CROP = (9, 15)
 class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     """`features` maps a name to a function of the GameState scaled into [0, 1]; the vector
     clips to that range. The location's last two elements are the tile x and y, and the rest name
-    the map. A StateNotReady from the reader propagates out of reset and step: the env never
-    stands in a state for one the game cannot provide."""
+    the map. A read that raises StateNotReady is retried one frame later, up to NOT_READY_FRAMES
+    times; then it propagates out of reset and step. The env never stands in a state for one the
+    game cannot provide."""
 
     def __init__(  # noqa: PLR0913 the inputs harness-spec lists for the env
         self,
@@ -69,7 +75,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         super().reset(seed=seed, options=options)
         self.backend.load_state(self._start_state)
         self.backend.step(int(self.np_random.integers(MAX_NOOP_FRAMES + 1)))
-        self._state = self._reader.read(self.backend)
+        self._state = self._read()
         self._rewards.reset(self._state)
         self._visited = {self._state.location}
         self._steps = 0
@@ -79,7 +85,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self, action: int | np.int64
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         self.backend.press(self._actions[int(action)], HOLD, RELEASE)
-        prev, self._state = self._state, self._reader.read(self.backend)
+        prev, self._state = self._state, self._read()
         reward, components = self._rewards.step(prev, self._state)
         self._visited.add(self._state.location)
         self._steps += 1
@@ -89,6 +95,14 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
 
     def close(self) -> None:
         self.backend.close()
+
+    def _read(self) -> GameState:
+        for _ in range(NOT_READY_FRAMES):
+            try:
+                return self._reader.read(self.backend)
+            except StateNotReady:
+                self.backend.step(1)
+        return self._reader.read(self.backend)
 
     def _observe(self, state: GameState) -> dict[str, Any]:
         vector = np.array([feature(state) for feature in self._features], dtype=np.float32)

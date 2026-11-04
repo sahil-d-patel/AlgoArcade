@@ -207,13 +207,13 @@ AlgoArcadeEnv is the Gymnasium environment, in `src/algoarcade/envs/env.py`. It 
 | Actions | `Discrete(6)`: 0 up, 1 down, 2 left, 3 right, 4 A, 5 B. `start=True` appends Start, then `noop=True` appends a no-op that holds nothing for 24 frames. |
 | Episode end | The step budget only. `truncated` is True on the budget's last step; `terminated` is always False. |
 | Reset | Loads the start state, then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
-| Not ready | A `StateNotReady` from the reader propagates out of `reset` and `step`. A start state that is not ready is a bad start state; the env never substitutes a state. A retry would hide reader bugs. |
+| Not ready | A read that raises `StateNotReady` is retried one frame later, up to `NOT_READY_FRAMES` (8) times, and then propagates out of `reset` or `step`. The env never substitutes a state. A retry adds frames only to that step, so the same seed and actions still replay the same episode. |
 
 Reset noise does little. A 24-frame step absorbs most of a 0 to 7 frame offset, so the offset changes outcomes only through the game's RNG, such as a wild encounter. With the actions fixed (`scripts/env_trace.py --action-seed 0`), 128 steps from reset seeds 0 to 9 gave one location trace and one return from `s1.state` (13.0) and from `seg_02_pallet.state` (11.0), and two location traces from `seg_04_route1.state`. On `s1.state` the ten runs still ended in 4 different EWRAM states. So a deterministic evaluation from a state with no encounters nearby, such as these two, replays the same episode; TRN-05 and ENV-09 should not count on reset noise for variety there.
 
 For TRN-05:
 
-- A `StateNotReady` raised from `step` under SubprocVecEnv kills that worker, and the main process sees only `EOFError`. It was never raised in 16,000 random mGBA steps from `s1`, `seg_02_pallet` and `seg_04_route1`. Log the worker's traceback so a reader bug is visible.
+- A `StateNotReady` that survives the retries kills a SubprocVecEnv worker, and the main process sees only `EOFError`. Log the worker's traceback so a reader bug is visible. Measured on rev 1: FireRed's party checksum failed for single frames while the game rewrote an entry, never on two frames in a row: 3 times in 26,186 per-frame reads replaying `scripts/capture_validation_states.py` from the new game to the Pokédex, and 4 times in 5,630 from `validate_starter` through the rival battle to Pallet Town. 18,000 random env steps, 6,000 each from `s1`, `seg_02_pallet` and `seg_04_route1`, read not ready 0 times.
 - The observation is a `Dict`, so SB3 needs `MultiInputPolicy`, not `MlpPolicy`.
 
 The observation is a `Dict` of two float32 boxes:
