@@ -25,7 +25,7 @@ Two tools every later result depends on. Footage: a reward exploit is easier to 
 - [ ] Two runs with the same checkpoint and seed print the same episode return and final (map_group, map_num, x, y).
 - [ ] A test on the fake backend renders 10 frames and asserts one bar per enabled reward component.
 - [ ] `--grid` with four seeds writes one mp4 with four panels per frame. One frame is pasted in the pull request.
-- [ ] docs/video-review.md has an entry for the week of Nov 8: run ids, at least five minutes watched, and what we saw. Each of the five exploit signatures is marked seen or not seen.
+- [ ] docs/video-review.md has an entry for the week of Nov 8: run ids, at least five minutes watched, and what we saw. Each of the six exploit signatures is marked seen or not seen.
 - [ ] `uv run pytest tests/test_stats.py` passes in CI, including: IQM of `[0, 1, 2, 3, 4, 5, 6, 100]` is 3.5; probability of improvement of `[1, 2]` over `[1, 0]` is 3.5/4 (a tie counts half); the interval of `[0.4] * 5` is exactly `(0.4, 0.4)`; the profile of `[0.1, 0.4, 0.6, 0.9]` at `[0.0, 0.5, 1.0]` is `[1.0, 0.5, 0.0]`.
 - [ ] A 3-seed IQM call warns that it equals the mean, and every printed estimate contains `n=`.
 - [ ] The `experiment` skill states the reporting rule: IQM, 95% interval, n, and five seeds for a headline.
