@@ -7,6 +7,7 @@ when asked for one.
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import struct
@@ -28,6 +29,7 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady, StateReader
 from algoarcade.games.fake import FakeReader
+from algoarcade.games.firered.manifest import MANIFEST
 from algoarcade.games.firered.reader import FireRedReader
 
 # Names, not the Button bit positions an IntEnum would put in the schema a model reads.
@@ -53,6 +55,16 @@ GAMES: dict[str, Callable[[], Game]] = {
     "fake": lambda: Game(FakeBackend(), FakeReader()),
     "firered": firered,
 }
+
+
+def start_state(name: str) -> bytes:
+    """data/states/<name>.state, checked against the manifest hash when the manifest lists it."""
+    path = DATA / "states" / f"{name}.state"
+    state = path.read_bytes()
+    for entry in MANIFEST:
+        if entry.name == name and hashlib.sha256(state).hexdigest() != entry.sha256:
+            raise ValueError(f"{path} does not match the manifest hash")
+    return state
 
 
 def png(rgb: NDArray[np.uint8]) -> bytes:
@@ -126,7 +138,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--game", choices=sorted(GAMES), default="fake")
     parser.add_argument("--state", help="load data/states/<STATE>.state before serving")
     args = parser.parse_args(argv)
-    state = (DATA / "states" / f"{args.state}.state").read_bytes() if args.state else None
+    state = start_state(args.state) if args.state else None
 
     def start() -> Game:
         game = GAMES[args.game]()

@@ -24,6 +24,9 @@ from mcp.client.stdio import get_default_environment
 from mcp_types import CallToolResult
 from pydantic_core import to_jsonable_python
 
+from algoarcade.games.firered.manifest import MANIFEST
+from algoarcade.games.firered.reader import FireRedState, PartyPokemon
+
 Create = Callable[..., Awaitable[Message]]
 Goal = Callable[[dict[str, Any]], bool]
 
@@ -36,6 +39,17 @@ SYSTEM = (
 # The API wraps the tool definitions in a system prompt of its own. Its size for this model is
 # not published; 1,000 tokens is a guess above it.
 TOOL_PROMPT_TOKENS = 1_000
+
+
+def firered_goal(name: str) -> Goal:
+    """The manifest's goal for this start state, applied to the server's state JSON."""
+    (entry,) = (entry for entry in MANIFEST if entry.name == name)
+
+    def goal(state: dict[str, Any]) -> bool:
+        party = tuple(PartyPokemon(**pokemon) for pokemon in state["party"])
+        return entry.goal(FireRedState(**state | {"party": party}))
+
+    return goal
 
 
 @dataclass(frozen=True)
@@ -55,9 +69,7 @@ SEGMENTS = {
     ),
     "seg_01_house": Segment(
         task="You start in your bedroom, upstairs in your house in Pallet Town. Leave the house.",
-        # ENV-06's left_house: on MAP_PALLET_TOWN, group 3 number 0.
-        # TODO(#17): grade with the manifest's predicate once it merges.
-        goal=lambda state: (state["map_group"], state["map_num"]) == (3, 0),
+        goal=firered_goal("seg_01_house"),
         server=("--game", "firered", "--state", "seg_01_house"),
     ),
 }

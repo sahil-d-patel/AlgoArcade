@@ -270,3 +270,11 @@ def test_a_run_logs_every_request_and_reports_per_action(tmp_path: Path) -> None
         "cache_read_tokens 1000.0, $0.000125",
         "300 actions at this rate: $0.04",
     ]
+
+
+def test_seg_01_is_graded_by_the_manifest_goal() -> None:
+    pokemon = {"level": 5, "hp": 20, "max_hp": 20, "status": 0}
+    bedroom = {"map_group": 4, "map_num": 1, "x": 6, "y": 6, "party": [pokemon], "badge_flags": 0}
+    pallet_town = bedroom | {"map_group": 3, "map_num": 0, "x": 6, "y": 8}
+    goal = SEGMENTS["seg_01_house"].goal
+    assert (goal(bedroom), goal(pallet_town)) == (False, True)

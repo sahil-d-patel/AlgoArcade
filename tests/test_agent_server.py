@@ -16,6 +16,7 @@ from mcp import Client, StdioServerParameters
 from mcp_types import CallToolResult
 from numpy.typing import NDArray
 
+from algoarcade.agent import server as agent_server
 from algoarcade.agent.loop import server
 from algoarcade.agent.server import SCALE, ButtonName, Game, build
 from algoarcade.backends.base import Button, GameBackend
@@ -23,6 +24,7 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeReader, FakeState
+from algoarcade.games.firered.reader import FireRedReader
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 MCP_JSON = Path(__file__).parents[1] / ".mcp.json"
@@ -164,11 +166,10 @@ def test_firered_get_state_matches_the_reader_and_the_png_is_480x320(name: str) 
     pytest.importorskip(
         "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
     )
-    firered = pytest.importorskip("algoarcade.games.firered.reader")
     backend = MgbaBackend(ROM)
     try:
         backend.load_state(state_file.read_bytes())
-        expected = firered.FireRedReader(backend.rom.sha1).read(backend)
+        expected = FireRedReader(backend.rom.sha1).read(backend)
     finally:
         backend.close()
     state, png = asyncio.run(state_and_png(server(("--game", "firered", "--state", name))))
@@ -255,3 +256,15 @@ def test_mcp_json_launches_a_server_that_lists_both_tools() -> None:
         command=entry["command"], args=entry["args"], cwd=MCP_JSON.parent
     )
     assert sorted(asyncio.run(listed_tools(launched))) == ["get_state", "press"]
+
+
+def test_a_manifest_state_must_match_its_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_server, "DATA", tmp_path)
+    (tmp_path / "states").mkdir()
+    (tmp_path / "states" / "seg_01_house.state").write_bytes(b"not the captured state")
+    (tmp_path / "states" / "mine.state").write_bytes(b"a state of my own")
+    with pytest.raises(ValueError, match="does not match the manifest hash"):
+        agent_server.start_state("seg_01_house")
+    assert agent_server.start_state("mine") == b"a state of my own"
