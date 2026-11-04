@@ -46,6 +46,7 @@ class FireRedState:
     pokedex_seen: int
     in_battle: bool
     text_active: bool
+    text_box_open: bool
     text_progress: int
     script_active: bool
     controls_locked: bool
@@ -81,7 +82,7 @@ class FireRedReader:
     def __init__(self, rom_sha1: str) -> None:
         self._addresses = ADDRESSES[rom_sha1]
 
-    def read(self, backend: GameBackend) -> FireRedState:
+    def read(self, backend: GameBackend) -> FireRedState:  # noqa: PLR0915 one read per field
         pointer = read_u32(backend, self._addresses["gSaveBlock1Ptr"].address)
         base = self._addresses["gSaveBlock1"].address
         # SetSaveBlocksPointers: src/load_save.c at e93eb12a336fb97df420b0961753d8a3713c9fcc.
@@ -117,10 +118,20 @@ class FireRedReader:
         # Main.inBattle, GetFieldMessageBoxType, ScriptContext_IsEnabled, IsPlayerFieldControlsLocked.
         in_battle = bool(read_u8(backend, self._addresses["gMain"].address + 0x439) & 2)
         text_active = read_u8(backend, self._addresses["sMessageBoxType"].address) != 0
-        # currentChar of TextPrinter 0, at offset 0 (include/text.h). AddTextPrinter in
-        # src/text_printer.c uses the window id as the printer index; window 0 is the field
-        # message box and B_WIN_MSG in battle.
-        text_progress = read_u32(backend, self._addresses["sTextPrinters"].address)
+        # struct TextPrinter (include/text.h) is 0x24 bytes: currentChar at 0, active at 0x1B.
+        # AddTextPrinter (src/text_printer.c) uses the window id as the printer index. Window 0 is
+        # the field message box and B_WIN_MSG in battle; 24 is B_WIN_OAK_OLD_MAN, the battle
+        # tutorial text. A printer stays active while it waits at a page arrow.
+        printers = backend.read(self._addresses["sTextPrinters"].address, 25 * 0x24)
+        tutorial = bool(printers[24 * 0x24 + 0x1B])
+        text_progress = struct.unpack_from("<I", printers, 24 * 0x24 if tutorial else 0)[0]
+        # struct ScriptContext (include/script.h): mode at 1, nativePtr at 4. A finished message
+        # stays up while waitbuttonpress (src/scrcmd.c) runs WaitForAorBPress natively (mode 2).
+        script = backend.read(self._addresses["sGlobalScriptContext"].address, 8)
+        waiting = script[1] == 2 and struct.unpack_from("<I", script, 4)[0] & ~1 == (
+            self._addresses["WaitForAorBPress"].address
+        )
+        text_box_open = bool(printers[0x1B]) or tutorial or waiting
         script_active = read_u8(backend, self._addresses["sGlobalScriptContextStatus"].address) == 0
         controls_locked = bool(read_u8(backend, self._addresses["sLockFieldControls"].address))
         # SaveBlock1.pos/location: include/global.h at the same source commit.
@@ -174,6 +185,7 @@ class FireRedReader:
             pokedex_seen=seen.bit_count(),
             in_battle=in_battle,
             text_active=text_active,
+            text_box_open=text_box_open,
             text_progress=text_progress,
             script_active=script_active,
             controls_locked=controls_locked,

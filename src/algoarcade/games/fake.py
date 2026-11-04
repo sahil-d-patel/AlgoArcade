@@ -20,7 +20,7 @@ class FakeState:
     milestone_count: int
     party_count: int
     party_hp_frac: float
-    text_active: bool
+    text_box_open: bool
     text_progress: int
 
     @property
@@ -45,7 +45,7 @@ class FakeReader:
             # The fake has a level sum but no party; it stands for one Pokemon.
             party_count=1,
             party_hp_frac=read_u8(backend, fake.RAM_BASE + fake.HP_PERCENT) / 100,
-            text_active=text != 0,
+            text_box_open=text != 0,
             text_progress=text,
         )
 

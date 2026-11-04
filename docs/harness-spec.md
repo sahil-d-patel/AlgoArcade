@@ -74,7 +74,8 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Context | money | Decrypted |
 | Context | in_battle | Whether a battle is active |
 | Context | text_active | Field message text is printing. It turns false when printing ends, while the box stays up until A, and stays false in battle |
-| Context | text_progress | A value that changes whenever text in the message window advances, in the field and in battle |
+| Context | text_box_open | A text box is printing, waiting at its arrow, or finished and waiting for A or B, in the field and in battle. `anti_spam` reads this |
+| Context | text_progress | A value that changes whenever text in the open box advances, in the field and in battle |
 | Context | script_active, controls_locked | A script is running; the player cannot move |
 | Context | text_speed, battle_scene_off | Saved options; fast text is 2 and battle scenes must be off |
 | Battle | own and enemy HP, level, moves, PP | Only meaningful while in_battle is true |
@@ -102,6 +103,8 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 | sGlobalScriptContextStatus | 0x03000EA8 | 0 running, 1 waiting, 2 shut down |
 | sLockFieldControls | 0x03000F9C | |
 | sTextPrinters | 0x02020034 | 32 TextPrinters of 0x24 bytes, indexed by window id |
+| sGlobalScriptContext | 0x03000EB0 | The overworld script's context: mode at +1, nativePtr at +4 |
+| WaitForAorBPress | 0x0806B898 (rev 1: 0x0806B8AC) | ROM function; the only address that differs between the revisions |
 
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
@@ -121,7 +124,8 @@ the source commit used for the pinned symbol build:
 | pokedex_owned, pokedex_seen | `gSaveBlock2Ptr` + 0x28 and +0x5C; seen copies at `gSaveBlock1Ptr` +0x5F8 and +0x3A18 | `include/global.h`, `src/pokedex_screen.c` |
 | in_battle | `gMain` +0x439, bit 1 | `include/main.h` |
 | text_active | `sMessageBoxType` is not hidden (0). `Task_DrawFieldMessageBox` sets it to hidden when printer 0 finishes, before the player closes the box | `src/field_message_box.c` |
-| text_progress | `sTextPrinters` +0x00, `currentChar` of printer 0: window 0, the field message box and `B_WIN_MSG` in battle. It is a position in the string buffer, so two finished messages of the same length read the same | `include/text.h`, `src/text_printer.c` |
+| text_box_open | Printer 0 or 24 active (+0x1B), or `sGlobalScriptContext` in native mode (2) with `nativePtr` at `WaitForAorBPress`, which `waitbuttonpress` runs while a finished message stays up. A stopped script can keep a stale `nativePtr`, so the mode is checked too. A yes/no menu reads false | `include/text.h`, `src/text_printer.c`, `include/script.h`, `src/scrcmd.c` |
+| text_progress | `currentChar` (+0x00) of printer 24 while it is active, else of printer 0. Printer 0 draws window 0, the field message box and `B_WIN_MSG` in battle; 24 is `B_WIN_OAK_OLD_MAN`, Oak's battle tutorial and the old man's catching demo. It is a position in the string buffer, so two finished messages of the same length read the same | `include/text.h`, `src/text_printer.c`, `include/constants/battle.h` |
 | script_active | `sGlobalScriptContextStatus` is running (0); waiting (1) and shut down (2) are false | `src/script.c`, `ScriptContext_IsEnabled` |
 | controls_locked | `sLockFieldControls` is nonzero | `src/script.c` |
 | party species, moves | `gPlayerParty`, 100-byte entries; XOR twelve words at +0x20 with personality (+0x00) XOR trainer id (+0x04), then check the 16-bit sum against +0x1C | `include/pokemon.h`, `src/pokemon.c` |
@@ -176,7 +180,7 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 | heal | Rise in party HP fraction between two reads that agree | +0.3 | off | Fainting for a free heal: a rise from a fainted party, a party size change or one bad read never pays. Damage then a Pokémon Center heal still pays; that is what E5 measures. A level-up raises a damaged Pokémon's HP fraction, so with heal on, grass camping keeps paying heal past the level cap. |
 | blackout | The party goes from all fainted to healed | -5.0 | off | Fleeing or avoiding every battle to dodge it, as in RL-emerald. Nothing stops this; it is why the term is off. |
 | anti_loop | A move onto a tile stood on in the last 30 steps | -0.01 | off | Standing still is free, so the agent may stop moving, or walk loops longer than 30 steps. |
-| anti_spam | A press that left an open text box where it was | -0.02 | off | Avoiding NPCs and signs. It needs ENV-08 to provide `text_progress`. If that tracks only the text, moving the cursor in a yes/no menu is charged too. |
+| anti_spam | A press that left an open text box where it was | -0.02 | off | Avoiding NPCs and signs. It reads ENV-08's `text_box_open` and `text_progress`, so it charges presses on a finished box that is still up and on battle text at its arrow. A yes/no menu reads as no box open, so moving its cursor is not charged. |
 | time | Every step | -0.001 | off | None while episodes end only on a step budget: every policy pays the same total. |
 
 `heal` and `blackout` read `party_hp_frac`, which ENV-08 computes as party HP over party max HP, leaving eggs out: an egg has no HP to heal.
@@ -185,7 +189,7 @@ The five scripted exploit policies are in `tests/test_exploits.py`, and `uv run 
 
 Rules:
 
-- Every component returns exactly zero on a no-op step and on the reset step, except the penalties `time` and `anti_spam`, which never pay and are off by default. `time` charges every step; `anti_spam` charges a step where nothing changed while a text box is open, including a reset into one.
+- Every component returns exactly zero on a no-op step and on the reset step, except the penalties `time` and `anti_spam`, which never pay and are off by default. `time` charges every step; `anti_spam` charges a step where `text_progress` did not change while `text_box_open` held, including a reset into one.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.

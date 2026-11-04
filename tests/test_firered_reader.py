@@ -51,7 +51,8 @@ class MemoryBackend(FakeBackend):
         self.write(addresses["sMessageBoxType"].address, b"\x00")
         self.write(addresses["sGlobalScriptContextStatus"].address, b"\x02")
         self.write(addresses["sLockFieldControls"].address, b"\x00")
-        self.write(addresses["sTextPrinters"].address, bytes(4))
+        self.write(addresses["sTextPrinters"].address, bytes(25 * 0x24))
+        self.write(addresses["sGlobalScriptContext"].address, bytes(8))
 
     def read(self, address: int, size: int) -> bytes:
         return bytes(self.memory[address + offset] for offset in range(size))
@@ -412,9 +413,9 @@ def test_text_progress_reads_printer_zero_and_drives_anti_spam(sha1: str) -> Non
     )
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
     backend.write(addresses["gSaveBlock1"].address, struct.pack("<hhbb", 12, 19, 3, 4))
-    backend.write(addresses["sMessageBoxType"].address, b"\x02")
-    reader = FireRedReader(sha1)
     printer = addresses["sTextPrinters"].address
+    backend.write(printer + 0x1B, b"\x01")
+    reader = FireRedReader(sha1)
     backend.write(printer, (0x02021D45).to_bytes(4, "little"))
     first = reader.read(backend)
     assert first.text_progress == 0x02021D45
@@ -450,3 +451,44 @@ def test_captured_state_matches_the_screen(name: str) -> None:
         assert (state.location, party) == SCREEN[name]
     finally:
         backend.close()
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_text_box_open_covers_printing_waiting_and_battle_windows(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    printers = addresses["sTextPrinters"].address
+    script = addresses["sGlobalScriptContext"].address
+    wait = addresses["WaitForAorBPress"].address | 1
+    backend.write(printers, (0x02021D45).to_bytes(4, "little"))
+    backend.write(printers + 24 * 0x24, (0x02021000).to_bytes(4, "little"))
+    backend.write(script, bytes(8))
+    reader = FireRedReader(sha1)
+    closed = reader.read(backend)
+    assert not closed.text_box_open
+    assert closed.text_progress == 0x02021D45
+
+    backend.write(printers + 0x1B, b"\x01")
+    assert reader.read(backend).text_box_open
+    backend.write(printers + 0x1B, b"\x00")
+    backend.write(printers + 24 * 0x24 + 0x1B, b"\x01")
+    oak = reader.read(backend)
+    assert oak.text_box_open
+    assert oak.text_progress == 0x02021000
+    backend.write(printers + 24 * 0x24 + 0x1B, b"\x00")
+
+    backend.write(script, struct.pack("<BBxxI", 0, 2, wait))
+    waiting = reader.read(backend)
+    assert waiting.text_box_open
+    assert not waiting.text_active
+    anti_spam = AntiSpam()
+    anti_spam.reset(waiting)
+    assert anti_spam.score(waiting, reader.read(backend)) == 1.0
+    backend.write(script, struct.pack("<BBxxI", 0, 0, wait))
+    assert not reader.read(backend).text_box_open
+    backend.write(script, struct.pack("<BBxxI", 0, 2, wait + 0x10))
+    assert not reader.read(backend).text_box_open
