@@ -83,6 +83,10 @@ def test_state_manifest_rival_goal_needs_the_lab_level_6_and_no_battle(
         world_map_flags=0,
         text_speed=2,
         battle_scene_off=True,
+        battle_own=None,
+        battle_enemy=None,
+        event_flags=frozenset({"FLAG_SYS_POKEMON_GET", "FLAG_BEAT_RIVAL_IN_OAKS_LAB"}),
+        parcel_delivered=False,
     )
     assert won_rival_battle(state) is expected
 

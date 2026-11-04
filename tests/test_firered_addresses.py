@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from algoarcade.games.firered.addresses import ADDRESSES, SOURCE_COMMIT
+from algoarcade.games.firered.addresses import ADDRESSES, IDS, SOURCE_COMMIT
 from algoarcade.rom import KNOWN_ROMS
 
 
@@ -29,8 +29,19 @@ def test_parse_symbol_line(line: str, expected: tuple[str, int]) -> None:
 def test_table_covers_supported_firered_roms() -> None:
     assert set(ADDRESSES) == {sha1 for sha1, rom in KNOWN_ROMS.items() if rom.game == "firered"}
     for entries in ADDRESSES.values():
-        assert len(entries) == 12
+        assert len(entries) == 14
         assert all(entry.source_commit == SOURCE_COMMIT for entry in entries.values())
+
+
+def test_ids_sit_in_their_ranges() -> None:
+    # FLAGS_COUNT (0x900) in flags.h; VARS_START and VARS_END in vars.h.
+    for name, entry in IDS.items():
+        kind = name.split("_")[0]
+        assert entry.source_file == f"include/constants/{kind.lower()}s.h"
+        if kind == "FLAG":
+            assert entry.value < 0x900
+        elif kind == "VAR":
+            assert 0x4000 <= entry.value <= 0x40FF
 
 
 @pytest.mark.parametrize(
