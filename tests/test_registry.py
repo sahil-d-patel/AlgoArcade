@@ -100,9 +100,11 @@ def test_default_config_enables_exactly_the_five_positive_terms() -> None:
     assert set(WEIGHTS) == set(COMPONENTS)
 
 
-# The two exceptions are the penalties time and anti_spam, which never pay and are off by
-# default. anti_spam passes here because the fake's text box is closed;
-# test_time_and_anti_spam_charge_the_reset_step pins both.
+# The exceptions are the penalties time and anti_spam, which never pay and are off by default,
+# and a progress term on the step after a rise, which pays when the second read confirms it.
+# anti_spam passes here because the fake's text box is closed, and no count rises here;
+# test_time_and_anti_spam_charge_the_reset_step and
+# test_a_no_op_step_pays_only_a_pending_rise_and_only_once pin those cases.
 @pytest.mark.parametrize("name", [name for name in COMPONENTS if name != "time"])
 def test_zero_on_reset_and_on_a_no_op_step(name: str) -> None:
     backend = FakeBackend()
@@ -115,6 +117,20 @@ def test_zero_on_reset_and_on_a_no_op_step(name: str) -> None:
     prev = read(backend)
     backend.press([Button.UP])  # into the wall above the start tile
     assert component.score(prev, read(backend)) == 0.0
+
+
+@pytest.mark.parametrize("name", list(COUNT_BYTES))
+def test_a_no_op_step_pays_only_a_pending_rise_and_only_once(name: str) -> None:
+    backend = FakeBackend()
+    component = COMPONENTS[name]()
+    component.reset(read(backend))
+    state = read(backend)
+    assert component.score(state, state) == 0.0
+    poke(backend, COUNT_BYTES[name], backend.save_state()[COUNT_BYTES[name]] + 1)
+    risen = read(backend)
+    assert component.score(state, risen) == 0.0
+    assert component.score(risen, risen) == 1.0
+    assert component.score(risen, risen) == 0.0
 
 
 def test_time_charges_every_step_even_a_no_op() -> None:
@@ -167,6 +183,10 @@ def raw_values(name: str, byte_values: list[int]) -> list[float]:
         ("badge", [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01], [0.0] * 6 + [1.0]),
         # Story-flag counts 3, 3, 3, 4, 3, 3, 4, 4.
         ("events", [0x07, 0x07, 0x07, 0x0F, 0x07, 0x07, 0x0F, 0x0F], [0.0] * 6 + [1.0]),
+        # A level sum 50 too high for one frame, within max_rise, then a real level.
+        ("level", [10, 10, 10, 60, 10, 10, 11, 11], [0.0] * 6 + [1.0]),
+        # Milestone counts 2, 2, 2, 4, 2, 2, 3, 3: the spike is max_rise high.
+        ("milestone", [2, 2, 2, 4, 2, 2, 3, 3], [0.0] * 6 + [1.0]),
     ],
 )
 def test_a_one_frame_spike_pays_nothing_and_the_real_rise_pays_once(
@@ -276,6 +296,13 @@ def test_re_establishing_the_best_pays_nothing(
     name: str, byte_values: list[int], paid: list[float]
 ) -> None:
     assert raw_values(name, byte_values) == paid
+
+
+def test_a_single_read_never_becomes_the_best() -> None:
+    # Badge counts 0, 3, 4, 3, 3, 3, 4, 4: the first pair is rejected, and the lone 4 that
+    # follows must not become the best, or the real fourth badge pays nothing.
+    paid = raw_values("badge", [0x00, 0x07, 0x0F, 0x07, 0x07, 0x07, 0x0F, 0x0F])
+    assert paid == [0.0] * 6 + [1.0]
 
 
 def test_a_misread_repeated_on_two_steps_becomes_the_best() -> None:
