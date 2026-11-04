@@ -520,7 +520,7 @@ def test_event_flags_and_parcel_follow_the_save_block(sha1: str, offset: int) ->
     backend.write(pointer, struct.pack("<hhbb", 12, 19, 3, 4))
     reader = FireRedReader(sha1)
     first = reader.read(backend)
-    assert first.event_flags == frozenset()
+    assert first.event_flags == ()
     assert not first.parcel_delivered
     for name in ("FLAG_SYS_POKEMON_GET", "FLAG_WORLD_MAP_PEWTER_CITY", "FLAG_BADGE01_GET"):
         flag = IDS[name].value
@@ -529,11 +529,12 @@ def test_event_flags_and_parcel_follow_the_save_block(sha1: str, offset: int) ->
     # A neighbour of FLAG_WORLD_MAP_PEWTER_CITY that is not a milestone.
     neighbour = pointer + 0xEE0 + 0x893 // 8
     backend.write(neighbour, bytes([backend.read(neighbour, 1)[0] | 1 << (0x893 % 8)]))
-    assert reader.read(backend).event_flags == {
+    # In milestones.FLAGS order, so the state JSON does not depend on PYTHONHASHSEED.
+    assert reader.read(backend).event_flags == (
         "FLAG_SYS_POKEMON_GET",
         "FLAG_WORLD_MAP_PEWTER_CITY",
         "FLAG_BADGE01_GET",
-    }
+    )
     mart = pointer + 0x1000 + 2 * (IDS["VAR_MAP_SCENE_VIRIDIAN_CITY_MART"].value - 0x4000)
     parcel = IDS["ITEM_OAKS_PARCEL"].value
     backend.write(mart, struct.pack("<H", 1))

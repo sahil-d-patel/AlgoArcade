@@ -71,8 +71,8 @@ class FireRedState:
     # The player's and the opponent's active Pokemon; None outside a single battle.
     battle_own: BattlePokemon | None
     battle_enemy: BattlePokemon | None
-    # Names of the set flags among milestones.FLAGS.
-    event_flags: frozenset[str]
+    # Names of the set flags among milestones.FLAGS, in that order, so the state JSON is stable.
+    event_flags: tuple[str, ...]
     parcel_delivered: bool
 
     @property
@@ -167,7 +167,7 @@ class FireRedReader:
         if (map_group, map_num, x, y) == (0, 0, 0, 0) and count == 0:
             raise StateNotReady("SaveBlock1 is empty: the game has not reached the overworld")
         flags = backend.read(pointer + 0xEE0, 0x120)  # NUM_FLAG_BYTES
-        event_flags = frozenset(
+        event_flags = tuple(
             name
             for name in milestones.FLAGS
             if flags[IDS[name].value // 8] & (1 << (IDS[name].value % 8))

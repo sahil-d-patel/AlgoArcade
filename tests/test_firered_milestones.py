@@ -42,7 +42,7 @@ BLANK = FireRedState(
     battle_scene_off=True,
     battle_own=None,
     battle_enemy=None,
-    event_flags=frozenset(),
+    event_flags=(),
     parcel_delivered=False,
 )
 # Manifest states, goal states from scripts/capture_states.py and two from
@@ -54,31 +54,27 @@ HASHES = {entry.name: entry.sha256 for entry in MANIFEST} | {
     "validate_parcel": "2695da9e2b59db8e2ea70481b8f39da74a990c765631eb8f4029c09998fb98e4",
     "validate_pokedex": "e6335f08f060340552b23d7eab9f4427567df6334184a324a78a503bec0672d3",
 }
-RIVAL_DONE = replace(BLANK, event_flags=frozenset({"FLAG_BEAT_RIVAL_IN_OAKS_LAB"}))
-
-
-def flags(*names: str) -> frozenset[str]:
-    return frozenset(names)
+RIVAL_DONE = replace(BLANK, event_flags=("FLAG_BEAT_RIVAL_IN_OAKS_LAB",))
 
 
 # Before and after for each milestone, in the order of the list.
 CASES = {
-    "starter_chosen": (BLANK, replace(BLANK, event_flags=flags("FLAG_SYS_POKEMON_GET"))),
+    "starter_chosen": (BLANK, replace(BLANK, event_flags=("FLAG_SYS_POKEMON_GET",))),
     # The battle is over either way; only a win levels the starter to 6.
     "rival_beaten": (RIVAL_DONE, replace(RIVAL_DONE, party=(replace(STARTER, level=6),))),
     "parcel_delivered": (BLANK, replace(BLANK, parcel_delivered=True)),
-    "pokedex_received": (BLANK, replace(BLANK, event_flags=flags("FLAG_SYS_POKEDEX_GET"))),
+    "pokedex_received": (BLANK, replace(BLANK, event_flags=("FLAG_SYS_POKEDEX_GET",))),
     "forest_exited": (
         replace(BLANK, map_group=1, map_num=0, x=29, y=62),
         replace(BLANK, map_group=15, map_num=3, x=7, y=10),
     ),
-    "pewter_reached": (BLANK, replace(BLANK, event_flags=flags("FLAG_WORLD_MAP_PEWTER_CITY"))),
+    "pewter_reached": (BLANK, replace(BLANK, event_flags=("FLAG_WORLD_MAP_PEWTER_CITY",))),
     "gym_entered": (
         replace(BLANK, map_group=3, map_num=2, x=15, y=17),
         replace(BLANK, map_group=6, map_num=2, x=6, y=14),
     ),
-    "brock_defeated": (BLANK, replace(BLANK, event_flags=flags("FLAG_DEFEATED_BROCK"))),
-    "boulder_badge": (BLANK, replace(BLANK, event_flags=flags("FLAG_BADGE01_GET"))),
+    "brock_defeated": (BLANK, replace(BLANK, event_flags=("FLAG_DEFEATED_BROCK",))),
+    "boulder_badge": (BLANK, replace(BLANK, event_flags=("FLAG_BADGE01_GET",))),
 }
 
 
@@ -98,7 +94,7 @@ def test_count_is_the_furthest_milestone_reached() -> None:
     assert count(BLANK) == 0
     lost_then_parcel = replace(
         RIVAL_DONE,
-        event_flags=flags("FLAG_SYS_POKEMON_GET", "FLAG_BEAT_RIVAL_IN_OAKS_LAB"),
+        event_flags=("FLAG_SYS_POKEMON_GET", "FLAG_BEAT_RIVAL_IN_OAKS_LAB"),
         parcel_delivered=True,
     )
     assert not MILESTONES["rival_beaten"](lost_then_parcel)

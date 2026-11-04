@@ -310,7 +310,7 @@ def test_seg_01_is_graded_by_the_manifest_goal() -> None:
         battle_scene_off=True,
         battle_own=None,
         battle_enemy=None,
-        event_flags=frozenset({"FLAG_SYS_POKEMON_GET"}),
+        event_flags=("FLAG_SYS_POKEMON_GET",),
         parcel_delivered=False,
     )
     # The state JSON the server sends, as get_state builds it.
