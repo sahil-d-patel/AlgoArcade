@@ -16,7 +16,7 @@ A wrong address does not crash. It returns a believable number, the reward funct
 
 4. Write the validation test. Capture a save state where you know the true value from the screen, and assert the reader returns exactly that. Mark the test `rom`, and skip inside the test when the ROM, the state file or the binding is missing, as `test_captured_state_matches_the_screen` does. Add a second state where the value differs, so a constant cannot pass.
 
-5. Check the blast radius. A field used by a reward needs that reward's isolation test rerun. A field that should be logged is a schema change: before November 1 add it to the schema, after November 1 stop and ask a PM.
+5. Check the blast radius. A field used by a reward needs that reward's isolation test rerun. A field that should be logged is a schema change: before November 8 add it to the schema, after November 8 stop and ask a PM.
 
 Locations are always `(map_group, map_num, x, y)`. Progress counts use only ranges that go up: the badge byte, trainer flags, world-map flags and the story whitelist. Temporary flags reset on every map load.
 

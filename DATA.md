@@ -61,4 +61,4 @@ This replaces the template's `raw/`, `interim/`, `processed/` layout. That layou
 - Checkpoints are saved every 500,000 steps and kept until the showcase, so we can render video without retraining.
 - Per-step logs are never deleted before the showcase. Visuals are built last, and anything we did not log is gone.
 
-The logging schema is in [`docs/harness-spec.md`](docs/harness-spec.md). It freezes on November 1.
+The logging schema is in [`docs/harness-spec.md`](docs/harness-spec.md). It freezes on November 8.
