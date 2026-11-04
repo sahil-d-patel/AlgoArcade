@@ -12,7 +12,7 @@ Check for these, and only report one when you can point at the line:
 - A seed that is accepted and not passed on to the environment, the policy or the reset noise.
 - Normalization statistics that are not saved with the checkpoint, or evaluation that updates them.
 - Evaluation that does not start from the fixed start state, or runs with archive resets on.
-- A reward component with no isolation test, one that can return non-zero on reset or on an unchanged state (except the penalties time and anti_spam, which never pay and are off by default), or one whose pull request has no exploit note.
+- A reward component with no isolation test, one that can return non-zero on reset or on an unchanged state (except the penalties time and anti_spam, which never pay and are off by default, and a progress term on the unchanged step that is the second read confirming the previous step's rise), or one whose pull request has no exploit note.
 - Novelty keyed on anything other than the full location tuple, or on a sliding window.
 - A save block pointer dereferenced once and stored, or an address with no symbol name and commit beside it.
 - A read of an encrypted party field with no checksum validation.
