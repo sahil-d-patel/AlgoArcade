@@ -29,7 +29,7 @@ def test_parse_symbol_line(line: str, expected: tuple[str, int]) -> None:
 def test_table_covers_supported_firered_roms() -> None:
     assert set(ADDRESSES) == {sha1 for sha1, rom in KNOWN_ROMS.items() if rom.game == "firered"}
     for entries in ADDRESSES.values():
-        assert len(entries) == 14
+        assert len(entries) == 16
         assert all(entry.source_commit == SOURCE_COMMIT for entry in entries.values())
 
 

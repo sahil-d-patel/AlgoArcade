@@ -10,6 +10,7 @@ from algoarcade.backends.base import Button
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
 from algoarcade.games.firered.reader import BattlePokemon, FireRedReader, FireRedState
+from algoarcade.rewards.penalties import AntiSpam
 
 ROOT = Path(__file__).resolve().parents[1]
 REV0 = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
@@ -117,6 +118,10 @@ CAPTURES = {
         REV1,
         "07541dde2d66f665d4a22d34a33c9986f3575c1b580fbe8a83bfcd4bb89f2cd3",
     ),
+    "validate_potion.state": (
+        REV1,
+        "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
+    ),
     "brock_goal.state": (
         REV1,
         "1c789cc028a8f7d3ed2b7aa4a52f920ba253f86b8d303ef3b12a5684551f0f0a",
@@ -196,8 +201,10 @@ def load_capture(backend: MgbaBackend, filename: str) -> FireRedState:
         # Rev 1. Trainer card: money and badge slots. Map name popups and the new-game spawn
         # (src/new_game.c) and lab door (PalletTown/map.json) for location. Party screen: level
         # and HP. Pokedex contents: Seen and Owned. Story events, each seen on screen: entering
-        # the lab, "A received the SQUIRTLE", the rival battle, the Pokedex, Brock's badge and
-        # TM39 in the TM case. Battle screen: "A got 80 for winning!" for trainers_defeated.
+        # the lab, "A received the SQUIRTLE", the rival battle, the Route 1 clerk's POTION in the
+        # bag, the Pokedex, Brock's badge and TM39 in the TM case. trainers_defeated rises after
+        # the rival battle, won ("A got 80 for winning!") or lost: the flag is set either way
+        # (CB2_EndTrainerBattle).
         ("validate_bedroom_default.state", "money", 3000),
         ("validate_after_battle.state", "money", 3080),
         ("brock_goal.state", "money", 4588),
@@ -220,6 +227,8 @@ def load_capture(backend: MgbaBackend, filename: str) -> FireRedState:
         ("validate_bedroom.state", "story_flags", 0),
         ("validate_starter.state", "story_flags", 2),
         ("validate_after_battle.state", "story_flags", 3),
+        ("validate_pallet.state", "story_flags", 3),
+        ("validate_potion.state", "story_flags", 4),
         ("validate_pokedex.state", "story_flags", 4),
         ("brock_goal.state", "story_flags", 6),
         ("validate_bedroom.state", "world_map_flags", 0),
@@ -233,6 +242,13 @@ def load_capture(backend: MgbaBackend, filename: str) -> FireRedState:
         ("validate_battle.state", "in_battle", True),
         ("validate_starter.state", "text_active", False),
         ("validate_rival_text.state", "text_active", True),
+        # Box on screen: the rival's page at its arrow, the battle's first message at its arrow.
+        # No box: the lab after the starter, and Brock's gym, where the script has stopped with
+        # a stale WaitForAorBPress pointer.
+        ("validate_rival_text.state", "text_box_open", True),
+        ("validate_battle.state", "text_box_open", True),
+        ("validate_starter.state", "text_box_open", False),
+        ("brock_goal.state", "text_box_open", False),
         ("validate_starter.state", "script_active", False),
         ("validate_rival_text.state", "script_active", True),
         ("validate_starter.state", "controls_locked", False),
@@ -458,6 +474,17 @@ def test_firered_fields_text_progress_field(firered_backend: MgbaBackend) -> Non
     firered_backend.step(30)
     done = reader.read(firered_backend)
     assert (done.text_active, done.script_active, done.controls_locked) == (False, True, True)
+    assert waiting.text_box_open
+    assert all(state.text_box_open for state in printing)
+    # The finished page stays up while the script waits for A or B, so a LEFT press is spam.
+    assert done.text_box_open
+    firered_backend.press([Button.LEFT], hold=8, release=16)
+    pressed = reader.read(firered_backend)
+    assert pressed.text_box_open
+    assert not pressed.text_active
+    anti_spam = AntiSpam()
+    anti_spam.reset(done)
+    assert anti_spam.score(done, pressed) == 1.0
 
 
 @pytest.mark.rom
@@ -476,6 +503,33 @@ def test_firered_fields_text_progress_battle(firered_backend: MgbaBackend) -> No
     progress = [state.text_progress for state in second]
     assert progress == sorted(set(progress))
     assert first.text_progress not in progress
+    assert first.text_box_open
+    assert all(state.text_box_open for state in second)
+
+
+@pytest.mark.rom
+def test_firered_fields_text_box_open_battle_tutorial(firered_backend: MgbaBackend) -> None:
+    # After "Go! SQUIRTLE!", "OAK: Oh, for Pete's sake..." prints in B_WIN_OAK_OLD_MAN, not in
+    # the battle message window, and text_progress follows it.
+    load_capture(firered_backend, "validate_battle.state")
+    reader = FireRedReader(firered_backend.rom.sha1)
+    firered_backend.step(100)
+    for wait in (149, 149, 20):
+        firered_backend.press([Button.A], hold=8, release=0)
+        firered_backend.step(wait)
+    tutorial = []
+    for _ in range(12):
+        firered_backend.step(1)
+        tutorial.append(reader.read(firered_backend))
+    assert all(state.in_battle and state.text_box_open for state in tutorial)
+    progress = [state.text_progress for state in tutorial]
+    assert progress == sorted(set(progress))
+    # The page ends at its arrow: still open, and now stuck.
+    firered_backend.step(120)
+    arrow = reader.read(firered_backend)
+    assert arrow.text_box_open
+    firered_backend.step(30)
+    assert reader.read(firered_backend).text_progress == arrow.text_progress
 
 
 def read_start_state(name: str, inputs: str = "") -> FireRedState:

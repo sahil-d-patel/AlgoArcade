@@ -1,10 +1,9 @@
 """Replay recorded input from power-on and write the ENV-08 validation states.
 
 Run `uv run python scripts/capture_validation_states.py` with the rev 1 ROM at
-data/roms/firered.gba. It writes data/states/validate_<name>.state, one per segment, and
-validate_poisoned.state when data/states/seg_05_forest.state (from scripts/capture_states.py, #69)
-is present. The expected values in tests/test_firered_fields.py were read off the screen at these
-states.
+data/roms/firered.gba. It writes data/states/validate_<name>.state, one per segment, then one per
+branch whose source state is in data/states/. seg_05_forest comes from scripts/capture_states.py.
+The expected values in tests/test_firered_fields.py were read off the screen at these states.
 """
 
 from pathlib import Path
@@ -76,12 +75,27 @@ SEGMENTS = (
     ),
 )
 
-# From seg_05_forest: into the grass, Tail Whip a wild Weedle until Poison Sting lands, then
-# Water Gun. The party screen shows SQUIRTLE PSN 30/37.
-POISONED = (
-    "UP UP LEFT*4 UP*3 LEFT LEFT "
-    + "RIGHT RIGHT LEFT LEFT " * 9
-    + "w240 B*6 w30 A w30 RIGHT w4 A A*37 B*15 A w30 LEFT A A*40 B*10 w60"
+# Each branch starts from a saved state instead of continuing the chain: (name, source, inputs).
+# A loaded state does not reset everything the next save writes, so a branch's bytes depend on
+# the ones before it. Append new branches; do not reorder.
+BRANCHES = (
+    # Into the forest grass, Tail Whip a wild Weedle until Poison Sting lands, then Water Gun.
+    # The party screen shows SQUIRTLE PSN 30/37.
+    (
+        "poisoned",
+        "seg_05_forest",
+        "UP UP LEFT*4 UP*3 LEFT LEFT "
+        + "RIGHT RIGHT LEFT LEFT " * 9
+        + "w240 B*6 w30 A w30 RIGHT w4 A A*37 B*15 A w30 LEFT A A*40 B*10 w60",
+    ),
+    # Up Route 1 to the Pokemon Mart clerk, who gives a Potion (FLAG_GOT_POTION_ON_ROUTE_1).
+    (
+        "potion",
+        "validate_pallet",
+        "LEFT*6 UP*15 w60 RIGHT RIGHT UP*12 w60 LEFT*5 UP*5 LEFT LEFT w20 A w60 A w60 "
+        + "A w30 " * 8
+        + "w60",
+    ),
 )
 
 
@@ -104,11 +118,14 @@ def main() -> None:
             path = STATES / f"validate_{name}.state"
             path.write_bytes(backend.save_state())
             print(path.relative_to(ROOT))
-        forest = STATES / "seg_05_forest.state"
-        if forest.is_file():
-            backend.load_state(forest.read_bytes())
-            play(backend, POISONED)
-            path = STATES / "validate_poisoned.state"
+        for name, source, tokens in BRANCHES:
+            start = STATES / f"{source}.state"
+            if not start.is_file():
+                print(f"skipped validate_{name}: needs {start.relative_to(ROOT)}")
+                continue
+            backend.load_state(start.read_bytes())
+            play(backend, tokens)
+            path = STATES / f"validate_{name}.state"
             path.write_bytes(backend.save_state())
             print(path.relative_to(ROOT))
     finally:

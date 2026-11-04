@@ -36,7 +36,7 @@ An isolation test: `score` returns exactly 0.0 on the reset step and on a step w
 
 An exploit test. `tests/test_exploits.py` has one scripted policy per known exploit: two-tile oscillation, menu spam, faint loop, instant reset and grass camping. Each feeds the registry a sequence of states and asserts the total reward stays under a bound written beside the assert. The rule for a new component: if one of the five already tries its obvious farm, add the component to that test's config and check the bound still holds; otherwise add a `test_exploit_<policy>` there with its own bound. Then remove the guard by hand, watch the test fail, and restore it; a bound that holds without the guard proves nothing. `uv run pytest -k exploit` must select only these policies, so no other test name contains "exploit".
 
-A log column. The frozen schema has one `reward_<name>` column for each of the ten (`docs/harness-spec.md`, Logging schema). An eleventh component adds a column after the November 1 freeze, which is a PM decision.
+A log column. The frozen schema has one `reward_<name>` column for each of the ten (`docs/harness-spec.md`, Logging schema). An eleventh component adds a column after the November 8 freeze, which is a PM decision.
 
 An exploit note in the pull request: one or two sentences on how an agent would game this component and what stops it.
 

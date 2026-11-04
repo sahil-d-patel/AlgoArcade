@@ -56,7 +56,8 @@ class MemoryBackend(FakeBackend):
         self.write(addresses["sMessageBoxType"].address, b"\x00")
         self.write(addresses["sGlobalScriptContextStatus"].address, b"\x02")
         self.write(addresses["sLockFieldControls"].address, b"\x00")
-        self.write(addresses["sTextPrinters"].address, bytes(4))
+        self.write(addresses["sTextPrinters"].address, bytes(25 * 0x24))
+        self.write(addresses["sGlobalScriptContext"].address, bytes(8))
         self.write(addresses["gBattleMons"].address, bytes(2 * 0x58))
         self.write(addresses["gBattlerPartyIndexes"].address, bytes(8))
         self.write(addresses["gEnemyParty"].address, bytes(600))
@@ -142,7 +143,13 @@ def test_party_uses_live_entries_and_refreshes_each_read(sha1: str, count: int) 
         backend.write(addresses["gPlayerParty"].address + index * 100, bytes(entry))
         expected.append(
             PartyPokemon(
-                level=level, hp=hp, max_hp=max_hp, status=status, species=0, moves=(0, 0, 0, 0)
+                level=level,
+                hp=hp,
+                max_hp=max_hp,
+                status=status,
+                species=0,
+                moves=(0, 0, 0, 0),
+                is_egg=False,
             )
         )
 
@@ -218,37 +225,64 @@ def test_save_blocks_at_different_offsets_are_not_ready(
         FireRedReader(sha1).read(backend)
 
 
-@pytest.mark.parametrize("sha1", ADDRESSES)
-@pytest.mark.parametrize(("personality", "order"), list(enumerate(permutations(range(4)))))
-def test_party_decryption_and_checksum(sha1: str, personality: int, order: tuple[int, ...]) -> None:
-    addresses = ADDRESSES[sha1]
-    backend = MemoryBackend()
-    base = addresses["gSaveBlock1"].address
-    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
-    backend.write(addresses["gPlayerPartyCount"].address, b"\x01")
-    growth = struct.pack("<HHIBBH", 7, 13, 125, 0, 70, 0)
+def party_entry(personality: int, species: int, level: int, hp: int, *, egg: bool = False) -> bytes:
+    """A gPlayerParty entry with growth, attacks, EVs and misc in the order personality % 24 picks."""
+    growth = struct.pack("<HHIBBH", species, 13, 125, 0, 70, 0)
     attacks = struct.pack("<4H4B", 33, 39, 55, 0, 35, 30, 25, 0)
-    blocks = (growth, attacks, bytes([5] * 12), bytes([11] * 12))
-    plain = b"".join(blocks[index] for index in order)
+    misc = struct.pack("<BBHII", 0, 0, 0, (1 << 30) * egg | 0x0B0B0B0B, 0)
+    blocks = (growth, attacks, bytes([5] * 12), misc)
+    plain = b"".join(blocks[index] for index in list(permutations(range(4)))[personality % 24])
     entry = bytearray(100)
     trainer_id = 0xFEDCBA98
     struct.pack_into("<II", entry, 0, personality, trainer_id)
     struct.pack_into("<H", entry, 0x1C, sum(struct.unpack("<24H", plain)) & 0xFFFF)
     key = personality ^ trainer_id
     struct.pack_into("<12I", entry, 0x20, *(word ^ key for word in struct.unpack("<12I", plain)))
-    struct.pack_into("<IBxHH", entry, 0x50, 0, 5, 19, 20)
+    struct.pack_into("<IBxHH", entry, 0x50, 0, level, hp, 20)
+    return bytes(entry)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize("personality", range(24))
+def test_party_decryption_and_checksum(sha1: str, personality: int) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x01")
+    entry = bytearray(party_entry(personality, 1 + personality, 5, 19))
     address = addresses["gPlayerParty"].address
     backend.write(address, bytes(entry))
     reader = FireRedReader(sha1)
     pokemon = reader.read(backend).party[0]
-    assert pokemon.species == 7
+    assert pokemon.species == 1 + personality
     assert pokemon.moves == (33, 39, 55, 0)
     assert pokemon.hp == 19
+    assert not pokemon.is_egg
     entry[0x25] ^= 1
     backend.write(address, bytes(entry))
     with pytest.raises(StateNotReady, match="checksum in slot 0"):
         reader.read(backend)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize("personality", range(24))
+def test_eggs_are_left_out_of_party_totals(sha1: str, personality: int) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x02")
+    party = addresses["gPlayerParty"].address
+    backend.write(party, party_entry(personality, 7, 5, 10))
+    backend.write(party + 100, party_entry(personality, 1, 5, 20, egg=True))
+    state = FireRedReader(sha1).read(backend)
+    assert [mon.is_egg for mon in state.party] == [False, True]
+    assert state.party_count == 2
+    assert state.party_level_sum == 5
+    assert state.party_hp_frac == 0.5
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)
@@ -368,8 +402,12 @@ def test_party_hp_fraction_uses_total_hp() -> None:
     backend.write(addresses["gSaveBlock1"].address, struct.pack("<hhbb", 12, 19, 3, 4))
     state = FireRedReader(next(iter(ADDRESSES))).read(backend)
     party = (
-        PartyPokemon(level=5, hp=10, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0)),
-        PartyPokemon(level=5, hp=0, max_hp=80, status=0, species=1, moves=(33, 45, 0, 0)),
+        PartyPokemon(
+            level=5, hp=10, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0), is_egg=False
+        ),
+        PartyPokemon(
+            level=5, hp=0, max_hp=80, status=0, species=1, moves=(33, 45, 0, 0), is_egg=False
+        ),
     )
     assert replace(state, party=party).party_hp_frac == 0.1
 
@@ -383,9 +421,9 @@ def test_text_progress_reads_printer_zero_and_drives_anti_spam(sha1: str) -> Non
     )
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
     backend.write(addresses["gSaveBlock1"].address, struct.pack("<hhbb", 12, 19, 3, 4))
-    backend.write(addresses["sMessageBoxType"].address, b"\x02")
-    reader = FireRedReader(sha1)
     printer = addresses["sTextPrinters"].address
+    backend.write(printer + 0x1B, b"\x01")
+    reader = FireRedReader(sha1)
     backend.write(printer, (0x02021D45).to_bytes(4, "little"))
     first = reader.read(backend)
     assert first.text_progress == 0x02021D45
@@ -506,3 +544,44 @@ def test_captured_state_matches_the_screen(name: str) -> None:
         assert (state.location, party) == SCREEN[name]
     finally:
         backend.close()
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_text_box_open_covers_printing_waiting_and_battle_windows(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    printers = addresses["sTextPrinters"].address
+    script = addresses["sGlobalScriptContext"].address
+    wait = addresses["WaitForAorBPress"].address | 1
+    backend.write(printers, (0x02021D45).to_bytes(4, "little"))
+    backend.write(printers + 24 * 0x24, (0x02021000).to_bytes(4, "little"))
+    backend.write(script, bytes(8))
+    reader = FireRedReader(sha1)
+    closed = reader.read(backend)
+    assert not closed.text_box_open
+    assert closed.text_progress == 0x02021D45
+
+    backend.write(printers + 0x1B, b"\x01")
+    assert reader.read(backend).text_box_open
+    backend.write(printers + 0x1B, b"\x00")
+    backend.write(printers + 24 * 0x24 + 0x1B, b"\x01")
+    oak = reader.read(backend)
+    assert oak.text_box_open
+    assert oak.text_progress == 0x02021000
+    backend.write(printers + 24 * 0x24 + 0x1B, b"\x00")
+
+    backend.write(script, struct.pack("<BBxxI", 0, 2, wait))
+    waiting = reader.read(backend)
+    assert waiting.text_box_open
+    assert not waiting.text_active
+    anti_spam = AntiSpam()
+    anti_spam.reset(waiting)
+    assert anti_spam.score(waiting, reader.read(backend)) == 1.0
+    backend.write(script, struct.pack("<BBxxI", 0, 0, wait))
+    assert not reader.read(backend).text_box_open
+    backend.write(script, struct.pack("<BBxxI", 0, 2, wait + 0x10))
+    assert not reader.read(backend).text_box_open

@@ -13,4 +13,4 @@ Closes #
 ## If this applies
 
 - Touches a reward component: how would an agent exploit it?
-- Touches the logging schema after Nov 1: which runs need re-running?
+- Touches the logging schema after Nov 8: which runs need re-running?

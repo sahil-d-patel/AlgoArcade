@@ -87,7 +87,7 @@ By Sunday an agent trains on the real environment, and the logging schema is fro
 
 This is the heaviest build week. ENV-07 and OPS-03 both have to land before TRN-05 can produce a curve, so Rishi and Sahil aim for Wednesday.
 
-Watch for: freezing a schema nobody has tested. If the StateReader is not validated on real memory by November 1, the freeze moves to November 8.
+Watch for: freezing a schema nobody has tested. If the StateReader is not validated on real memory by November 1, the freeze moves to November 8. It did: the freeze is November 8 (#20).
 
 ## Week 4, due November 8: reproduce and automate
 
@@ -157,7 +157,7 @@ Monday November 30: tag v1.0 and hold a short retro.
 
 | Date | What | Why |
 |---|---|---|
-| Nov 1 | Schema freeze | Every run logged before it is thrown away |
+| Nov 8 | Schema freeze (moved from Nov 1, #20) | Every run logged before it is thrown away |
 | Nov 8 | Run queue live; trainer parity decided | The experiment matrix does not fit without the queue |
 | Nov 15 | Feature freeze | Final runs need a week of machine time behind them |
 | Nov 22 | Results freeze | Week 7 has Thanksgiving in it and is for writing |

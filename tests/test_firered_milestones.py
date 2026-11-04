@@ -16,7 +16,9 @@ from algoarcade.games.firered.reader import FireRedReader, FireRedState, PartyPo
 from algoarcade.rewards.registry import COMPONENTS, DEFAULT_WEIGHTS, RewardRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
-STARTER = PartyPokemon(level=5, hp=20, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0))
+STARTER = PartyPokemon(
+    level=5, hp=20, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0), is_egg=False
+)
 BLANK = FireRedState(
     map_group=4,
     map_num=3,
@@ -30,6 +32,7 @@ BLANK = FireRedState(
     pokedex_seen=0,
     in_battle=False,
     text_active=False,
+    text_box_open=False,
     text_progress=0,
     script_active=False,
     controls_locked=False,

@@ -179,6 +179,10 @@ def test_level_pays_nothing_past_the_level_cap() -> None:
 
 def test_a_count_above_its_maximum_is_ignored() -> None:
     assert raw_values("milestone", [0, 1, 200, 2]) == [1.0, 0.0, 1.0]
+    # Eight story flags is one more than the FireRed whitelist holds, reached by rises max_rise
+    # allows.
+    climb = [0x00, 0x07, 0x07, 0x3F, 0x3F, 0xFF, 0xFF]
+    assert raw_values("events", climb) == [3.0, 0.0, 3.0, 0.0, 0.0, 0.0]
 
 
 @pytest.mark.parametrize(

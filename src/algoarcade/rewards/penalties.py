@@ -33,7 +33,9 @@ class AntiLoop(RewardComponent[GameState]):
 
 class Dialogue(GameState, Protocol):
     @property
-    def text_active(self) -> bool: ...
+    def text_box_open(self) -> bool:
+        """A text box is printing, waiting at its arrow, or finished and waiting for A or B."""
+        ...
 
     @property
     def text_progress(self) -> int:
@@ -42,7 +44,8 @@ class Dialogue(GameState, Protocol):
 
 
 class AntiSpam(RewardComponent[Dialogue]):
-    """Fires on a press that left an open text box where it was. A step where nothing changed
+    """Fires on a press that left an open text box where it was: printing, waiting at its arrow,
+    or finished and waiting for A or B, in the field or in battle. A step where nothing changed
     with a text box open is exactly what it charges, so it is not zero on every no-op step."""
 
     name = "anti_spam"
@@ -53,7 +56,9 @@ class AntiSpam(RewardComponent[Dialogue]):
 
     @override
     def score(self, prev: Dialogue, curr: Dialogue) -> float:
-        stuck = prev.text_active and curr.text_active and curr.text_progress == prev.text_progress
+        stuck = (
+            prev.text_box_open and curr.text_box_open and curr.text_progress == prev.text_progress
+        )
         return 1.0 if stuck else 0.0
 
 

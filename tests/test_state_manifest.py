@@ -61,7 +61,7 @@ def test_state_manifest_rival_goal_needs_the_lab_level_6_and_no_battle(
 ) -> None:
     group, number, x, y = location
     squirtle = PartyPokemon(
-        level=level, hp=22, max_hp=22, status=0, species=7, moves=(33, 39, 0, 0)
+        level=level, hp=22, max_hp=22, status=0, species=7, moves=(33, 39, 0, 0), is_egg=False
     )
     state = FireRedState(
         map_group=group,
@@ -76,6 +76,7 @@ def test_state_manifest_rival_goal_needs_the_lab_level_6_and_no_battle(
         pokedex_seen=0,
         in_battle=in_battle,
         text_active=False,
+        text_box_open=False,
         text_progress=0,
         script_active=False,
         controls_locked=False,
