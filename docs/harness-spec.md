@@ -131,7 +131,7 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 
 `heal` and `blackout` read `party_hp_frac`, which ENV-08 computes as party HP over party max HP. It must leave eggs out: an egg has no HP to heal.
 
-The five scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
+The six scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 
 Rules:
 

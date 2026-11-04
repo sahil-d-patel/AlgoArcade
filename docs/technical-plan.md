@@ -192,6 +192,7 @@ Anyone adding a component writes in the pull request how an agent would exploit 
 - Blackout farming: fainting to get a free heal. The heal component is off by default and never fires on a blackout transition.
 - Menu spam: opening and closing menus because the screen changes. Start is not in the default action set.
 - Reset farming: any reward paid on reset teaches the agent to die fast. Every component returns zero on the reset step.
+- Warp flicker: stepping on and off a warp so a progress count misreads high for a frame. A progress term pays only a rise two consecutive reads agree on.
 
 ### Catching what we did not predict
 
