@@ -6,6 +6,10 @@ from typing import Protocol
 from algoarcade.backends.base import GameBackend
 
 
+class StateNotReady(Exception):
+    pass
+
+
 class GameState(Protocol):
     """A frozen record of one moment in a game. Each game adds its own fields."""
 
@@ -16,4 +20,6 @@ class GameState(Protocol):
 
 
 class StateReader(Protocol):
-    def read(self, backend: GameBackend) -> GameState: ...
+    def read(self, backend: GameBackend) -> GameState:
+        """Raise StateNotReady when the reader detects memory is not ready."""
+        ...
