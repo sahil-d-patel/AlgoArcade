@@ -116,6 +116,10 @@ CAPTURES = {
         REV1,
         "07541dde2d66f665d4a22d34a33c9986f3575c1b580fbe8a83bfcd4bb89f2cd3",
     ),
+    "validate_potion.state": (
+        REV1,
+        "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
+    ),
     "brock_goal.state": (
         REV1,
         "1c789cc028a8f7d3ed2b7aa4a52f920ba253f86b8d303ef3b12a5684551f0f0a",
@@ -195,9 +199,10 @@ def load_capture(backend: MgbaBackend, filename: str) -> FireRedState:
         # Rev 1. Trainer card: money and badge slots. Map name popups and the new-game spawn
         # (src/new_game.c) and lab door (PalletTown/map.json) for location. Party screen: level
         # and HP. Pokedex contents: Seen and Owned. Story events, each seen on screen: entering
-        # the lab, "A received the SQUIRTLE", the rival battle, the Pokedex, Brock's badge and
-        # TM39 in the TM case. trainers_defeated rises after the rival battle, won ("A got 80 for
-        # winning!") or lost: the flag is set either way (CB2_EndTrainerBattle).
+        # the lab, "A received the SQUIRTLE", the rival battle, the Route 1 clerk's POTION in the
+        # bag, the Pokedex, Brock's badge and TM39 in the TM case. trainers_defeated rises after
+        # the rival battle, won ("A got 80 for winning!") or lost: the flag is set either way
+        # (CB2_EndTrainerBattle).
         ("validate_bedroom_default.state", "money", 3000),
         ("validate_after_battle.state", "money", 3080),
         ("brock_goal.state", "money", 4588),
@@ -220,6 +225,8 @@ def load_capture(backend: MgbaBackend, filename: str) -> FireRedState:
         ("validate_bedroom.state", "story_flags", 0),
         ("validate_starter.state", "story_flags", 2),
         ("validate_after_battle.state", "story_flags", 3),
+        ("validate_pallet.state", "story_flags", 3),
+        ("validate_potion.state", "story_flags", 4),
         ("validate_pokedex.state", "story_flags", 4),
         ("brock_goal.state", "story_flags", 6),
         ("validate_bedroom.state", "world_map_flags", 0),
