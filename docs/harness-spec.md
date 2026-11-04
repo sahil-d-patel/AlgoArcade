@@ -67,7 +67,8 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Progress | story_flags | Count of set flags on the story whitelist |
 | Progress | trainers_defeated | Popcount of the trainer flag range |
 | Progress | world_map_flags | Count of the visited-map flags, 0x890 through 0x8C2 |
-| Progress | milestone_count | How far down the ordered Pallet-to-Brock list |
+| Progress | milestone_count | How far down the ordered Pallet-to-Brock list: the position of the furthest milestone that holds, 0 to 9 |
+| Progress | event_flags, parcel_delivered | The milestone flags that are set, by name; whether Oak has taken the parcel |
 | Progress | pokedex_owned, pokedex_seen | Pokédex counts |
 | Party | party | Up to six Pokémon: species, level, HP, max HP, status, moves |
 | Party | party_level_sum, party_hp_frac | Totals across the party |
@@ -77,7 +78,7 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Context | text_progress | A value that changes whenever text in the message window advances, in the field and in battle |
 | Context | script_active, controls_locked | A script is running; the player cannot move |
 | Context | text_speed, battle_scene_off | Saved options; fast text is 2 and battle scenes must be off |
-| Battle | own and enemy HP, level, moves, PP | Only meaningful while in_battle is true |
+| Battle | battle_own, battle_enemy | The player's and the opponent's active Pokémon: HP, max HP, level, four move ids, four PP. None outside a battle and during its first frames |
 
 Fields arrive in stages: position and plaintext party fields in ENV-05; badges, encrypted party
 fields and the remaining context in ENV-08; detailed battle fields and milestones in ENV-13.
@@ -102,6 +103,8 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 | sGlobalScriptContextStatus | 0x03000EA8 | 0 running, 1 waiting, 2 shut down |
 | sLockFieldControls | 0x03000F9C | |
 | sTextPrinters | 0x02020034 | 32 TextPrinters of 0x24 bytes, indexed by window id |
+| gBattlerPartyIndexes | 0x02023BCE | Four u16 party slots, one per battler |
+| gEnemyParty | 0x0202402C | Six entries of 100 bytes |
 
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
@@ -125,6 +128,14 @@ the source commit used for the pinned symbol build:
 | script_active | `sGlobalScriptContextStatus` is running (0); waiting (1) and shut down (2) are false | `src/script.c`, `ScriptContext_IsEnabled` |
 | controls_locked | `sLockFieldControls` is nonzero | `src/script.c` |
 | party species, moves | `gPlayerParty`, 100-byte entries; XOR twelve words at +0x20 with personality (+0x00) XOR trainer id (+0x04), then check the 16-bit sum against +0x1C | `include/pokemon.h`, `src/pokemon.c` |
+| battle_own, battle_enemy | `gBattleMons`, 0x58-byte `struct BattlePokemon`, plaintext: moves at +0x0C, PP at +0x24, HP at +0x28, level at +0x2A, max HP at +0x2C, personality at +0x48. Battler 0 is the player and 1 the opponent | `include/pokemon.h`, `src/battle_controllers.c` (`InitSinglePlayerBtlControllers`) |
+| event_flags | `gSaveBlock1Ptr` +0xEE0, the flags named in `milestones.FLAGS` | `include/constants/flags.h` |
+| parcel_delivered | `VAR_MAP_SCENE_VIRIDIAN_CITY_MART` at `gSaveBlock1Ptr` +0x1000 + 2 × (0x4057 − 0x4000) is at least 1, and no slot of `bagPocket_KeyItems` (+0x3B8, 30 slots of item id and quantity) holds `ITEM_OAKS_PARCEL` | `include/global.h`, `data/maps/ViridianCity_Mart/scripts.inc`, `data/maps/PalletTown_ProfessorOaksLab/scripts.inc` |
+
+gBattleMons keeps the last battle's Pokémon after the battle ends, so the reader reads it only
+while `in_battle` is true. `in_battle` turns on about 30 frames before the battle intro copies
+the new Pokémon in; until then the opponent's personality differs from the one in
+`gEnemyParty` at its `gBattlerPartyIndexes` slot, and both battle fields are None.
 
 The Pokédex screen counts only the 386 national entries. Seen bits must agree in all three
 copies; an owned bit also needs that seen bit. Party substructures have 24 physical orders,
@@ -145,6 +156,27 @@ The story whitelist, approved in `docs/decisions.md` on 2026-11-03, counts each 
 | FLAG_SYS_POKEDEX_GET | 0x829 | Pokedex received |
 | FLAG_DEFEATED_BROCK | 0x4B0 | Brock defeated |
 | FLAG_GOT_TM39_FROM_BROCK | 0x254 | Brock's TM received |
+
+The milestones are named predicates over FireRedState in
+`src/algoarcade/games/firered/milestones.py`, in this order. Flag, var and item ids are in
+`addresses.IDS` with their source file; map ids come from `data/maps/map_groups.json`.
+
+| Position | Name | Holds when |
+|---|---|---|
+| 1 | starter_chosen | FLAG_SYS_POKEMON_GET (0x828) |
+| 2 | rival_beaten | FLAG_BEAT_RIVAL_IN_OAKS_LAB (0x258) and a party level of 6 or more. The flag and the trainer flag are set after a loss too (`CB2_EndTrainerBattle` in `src/battle_setup.c`); only a win lifts the level 5 starter to 6 |
+| 3 | parcel_delivered | parcel_delivered |
+| 4 | pokedex_received | FLAG_SYS_POKEDEX_GET (0x829) |
+| 5 | forest_exited | On MAP_ROUTE2_VIRIDIAN_FOREST_NORTH_ENTRANCE (15, 3) |
+| 6 | pewter_reached | FLAG_WORLD_MAP_PEWTER_CITY (0x892), set on entering Pewter City and never cleared |
+| 7 | gym_entered | On MAP_PEWTER_CITY_GYM (6, 2) |
+| 8 | brock_defeated | FLAG_DEFEATED_BROCK (0x4B0) |
+| 9 | boulder_badge | FLAG_BADGE01_GET (0x820) |
+
+`milestone_count` counts to the furthest one that holds, so a lost rival battle does not hold
+back the rest. A loss followed by training to level 6 on Route 1 passes `rival_beaten` wrongly.
+`forest_exited` and `gym_entered` stop holding when the player walks off the map;
+AlgoArcadeEnv latches them by reporting the episode's best count.
 
 `tests/test_firered_fields.py` checks each field against hash-pinned local captures whose
 values were read off the screen: trainer card, party and summary screens, options, dialogue,
@@ -229,7 +261,7 @@ The observation is a `Dict` of two float32 boxes:
 |---|---|
 | `reward/<name>` | Each configured component's raw value, before its weight. The logs store it as `reward_<name>`. The step's reward is the sum of weight times raw value. |
 | `location` | The GameState's location after the decision. For FireRed `(map_group, map_num, x, y)`. |
-| `milestone_count` | Present when the GameState has the field. FireRed gains it in ENV-13; Super Mario Land has none. |
+| `milestone_count` | The highest `milestone_count` of the GameState so far this episode. Present when the GameState has the field; Super Mario Land has none. |
 
 `reset` returns `location` and `milestone_count` only. ENV-09 adds a save state for the archive.
 
