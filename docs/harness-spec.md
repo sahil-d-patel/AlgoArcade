@@ -394,7 +394,7 @@ These are blocking. Nothing merges to `main` until they pass.
 7. Exploit bounds: each scripted exploit policy earns less than its stated bound.
 8. Schema validation: every logged row matches the frozen schema.
 
-Tests 1 to 3 live in `tests/conformance/` and run against every backend in the registry. A new backend adds one registry entry and must pass them. The ROM guard is tested in `tests/test_rom.py`. Tests that need a ROM are marked and skip when the ROM is absent, so CI runs the fake backend and members run the real ones.
+Tests 1 to 3 live in `tests/conformance/` and run against every backend in the registry. A new backend adds one registry entry and must pass them. The ROM guard is tested in `tests/test_rom.py`. Tests that need a ROM are marked and skip when the ROM is absent, so CI runs the fake backend and members run the real ones. CI also runs `PyBoyBackend` on `pyboy_probe`, a 15-byte Game Boy program of our own built at test time, which checks the backend but not Super Mario Land.
 
 ## Fake backend and fake logger
 
