@@ -1,5 +1,6 @@
 """State reader for the toy game in algoarcade.backends.fake."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from algoarcade.backends import fake
@@ -19,7 +20,7 @@ class FakeState:
     milestone_count: int
     party_count: int
     party_hp_frac: float
-    text_active: bool
+    text_box_open: bool
     text_progress: int
 
     @property
@@ -44,6 +45,15 @@ class FakeReader:
             # The fake has a level sum but no party; it stands for one Pokemon.
             party_count=1,
             party_hp_frac=read_u8(backend, fake.RAM_BASE + fake.HP_PERCENT) / 100,
-            text_active=text != 0,
+            text_box_open=text != 0,
             text_progress=text,
         )
+
+
+# The observation vector for AlgoArcadeEnv, each value scaled into [0, 1].
+FEATURES: dict[str, Callable[[FakeState], float]] = {
+    "room": lambda s: s.room,
+    "x": lambda s: s.x / (fake.WIDTH - 1),
+    "y": lambda s: s.y / (len(fake.ROOMS[0]) - 1),
+    "chest_opened": lambda s: s.chest_opened,
+}

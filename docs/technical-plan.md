@@ -177,6 +177,8 @@ Every component has a name, a weight in config, and its own column in the logs.
 | anti_spam | A press with no effect while a text box is open | -0.02 | off |
 | time | Every step | -0.001 | off |
 
+The four progress terms (events, level, badge, milestone) pay a rise one step late, once two consecutive reads agree on it. A count read while a save block moves can be wrong for one frame, and a one-frame spike must not pay. So the confirming step pays even if it changed nothing, and a rise on an episode's last step is never paid.
+
 The default set is positive only, and the evidence for that is consistent. Pleines et al. had their heal reward farmed. The best pure-RL entry in the PokéAgent Challenge used positive-only milestone rewards. An open Emerald project reports that every penalty it tried backfired. The penalty components stay in the registry, and whether they help on FireRed is experiment E5.
 
 Weights are starting points. The ratios matter most: badge above everything, events above level, and exploration over a full episode worth a few events.
@@ -190,6 +192,7 @@ Anyone adding a component writes in the pull request how an agent would exploit 
 - Blackout farming: fainting to get a free heal. The heal component is off by default and never fires on a blackout transition.
 - Menu spam: opening and closing menus because the screen changes. Start is not in the default action set.
 - Reset farming: any reward paid on reset teaches the agent to die fast. Every component returns zero on the reset step.
+- Warp flicker: stepping on and off a warp so a progress count misreads high for a frame. A progress term pays only a rise two consecutive reads agree on.
 
 ### Catching what we did not predict
 
@@ -359,7 +362,7 @@ The issues are sized at about five hours a week per member. That is more than th
 |---|---|---|
 | 1 | Oct 18 | Each person's starter task merged through a pull request |
 | 2 | Oct 25 | Emulators, memory reads, training runner and MCP server run on every machine |
-| 3 | Nov 1 | Logging schema frozen. First PPO curve on FireRed |
+| 3 | Nov 1 | First PPO curve on FireRed. The logging schema freeze moved to Nov 8 (#20) |
 | 4 | Nov 8 | Baseline clears the early segments across seeds. Run queue owns the box. Trainer parity decided |
 | 5 | Nov 15 | Feature freeze. Every experiment and the Brock runs queued. LLM arm evaluated. Second game trained |
 | 6 | Nov 22 | Everyone on analysis and visualization. Results frozen |
@@ -367,7 +370,7 @@ The issues are sized at about five hours a week per member. That is more than th
 
 Four dates cannot move.
 
-- Schema freeze, November 1. Runs logged before it are thrown away. If the StateReader is not validated on real memory by then, the freeze moves to November 8 instead of freezing a schema nobody has tested.
+- Schema freeze, November 8. Runs logged before it are thrown away. It was November 1, with the rule that it moves to November 8 if the StateReader is not validated on real memory by then; ENV-08 was not, so it moved (#20).
 - Run queue, November 8. Experiments do not fit without it.
 - Feature freeze, November 15. After it, only fixes and visualization merge.
 - Results freeze, November 22. Thanksgiving is the 26th, so week 7 is writing only.

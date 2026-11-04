@@ -34,7 +34,7 @@ def test_anti_loop_forgets_a_tile_after_the_window() -> None:
 
 
 def text(progress: int) -> FakeState:
-    return replace(START, text_active=progress != 0, text_progress=progress)
+    return replace(START, text_box_open=progress != 0, text_progress=progress)
 
 
 def test_anti_spam_fires_on_a_press_that_left_the_text_where_it_was() -> None:

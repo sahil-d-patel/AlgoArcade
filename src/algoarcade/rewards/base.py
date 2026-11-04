@@ -13,5 +13,6 @@ class RewardComponent[S: GameState](Protocol):
         ...
 
     def score(self, prev: S, curr: S) -> float:
-        """Reward for moving from prev to curr. Zero when nothing changed."""
+        """Reward for moving from prev to curr. Zero when nothing changed, except as
+        docs/harness-spec.md, Reward registry, allows."""
         ...
