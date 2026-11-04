@@ -138,6 +138,7 @@ Rules:
 - Every component returns exactly zero on a no-op step and on the reset step, except the penalties `time` and `anti_spam`, which never pay and are off by default. `time` charges every step; `anti_spam` charges a step where nothing changed while a text box is open, including a reset into one.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
+- The four progress terms (events, level, badge, milestone) pay a rise only once two consecutive reads agree on it: a step pays the rise from the best to the lower of its two reads. A real rise pays one step late, and a count that reads high for one frame while a save block moves pays nothing.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
 - A pull request that adds or changes a component says how an agent would exploit it.
 

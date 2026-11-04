@@ -177,6 +177,8 @@ Every component has a name, a weight in config, and its own column in the logs.
 | anti_spam | A press with no effect while a text box is open | -0.02 | off |
 | time | Every step | -0.001 | off |
 
+The four progress terms (events, level, badge, milestone) pay a rise one step late, once two consecutive reads agree on it. A count read while a save block moves can be wrong for one frame, and a one-frame spike must not pay.
+
 The default set is positive only, and the evidence for that is consistent. Pleines et al. had their heal reward farmed. The best pure-RL entry in the PokéAgent Challenge used positive-only milestone rewards. An open Emerald project reports that every penalty it tried backfired. The penalty components stay in the registry, and whether they help on FireRed is experiment E5.
 
 Weights are starting points. The ratios matter most: badge above everything, events above level, and exploration over a full episode worth a few events.
