@@ -3,15 +3,17 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
+import pytest
 from env_trace import fake_env, trace
 from gymnasium.spaces import Discrete
 from gymnasium.utils.env_checker import check_env
 
 from algoarcade.backends import fake
-from algoarcade.backends.base import Button
+from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
-from algoarcade.envs.env import CROP, AlgoArcadeEnv
-from algoarcade.games.fake import FEATURES, FakeReader
+from algoarcade.envs.env import CROP, NOT_READY_FRAMES, AlgoArcadeEnv
+from algoarcade.games.base import StateNotReady
+from algoarcade.games.fake import FEATURES, FakeReader, FakeState
 from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
 
 GOLDEN_TRACE = Path(__file__).parent / "fixtures" / "env_golden_trace.json"
@@ -185,3 +187,54 @@ def test_vector_is_scaled_into_the_unit_box() -> None:
     assert obs["vector"].min() >= 0.0
     assert obs["vector"].max() <= 1.0
     assert obs["vector"][list(FEATURES).index("x")] == np.float32(1 / (fake.WIDTH - 1))
+
+
+class FlakyReader(FakeReader):
+    """Raises StateNotReady on the reads listed in `fail`, counted from 0."""
+
+    def __init__(self, fail: Iterable[int]) -> None:
+        self.fail = set(fail)
+        self.reads = 0
+
+    def read(self, backend: GameBackend) -> FakeState:
+        self.reads += 1
+        if self.reads - 1 in self.fail:
+            raise StateNotReady("stub")
+        return super().read(backend)
+
+
+def flaky_env(reader: FlakyReader) -> AlgoArcadeEnv:
+    backend = FakeBackend()
+    return AlgoArcadeEnv(
+        backend,
+        reader,
+        RewardRegistry(COMPONENTS, {"events": 1.0, "explore": 0.1}),
+        backend.save_state(),
+        50,
+        FEATURES,
+    )
+
+
+def test_a_not_ready_read_is_retried_one_frame_later() -> None:
+    steady = make_env()
+    steady.reset(seed=0)
+    steady.step(0)
+    flaky = flaky_env(FlakyReader(fail={0, 2}))
+    flaky.reset(seed=0)
+    flaky.step(0)
+    assert frame(flaky) == frame(steady) + 2
+
+
+def test_a_read_not_ready_on_every_retry_raises() -> None:
+    env = flaky_env(FlakyReader(fail=range(1, 2 + NOT_READY_FRAMES)))
+    env.reset(seed=0)
+    with pytest.raises(StateNotReady):
+        env.step(0)
+
+
+def test_retries_stop_at_the_first_ready_frame() -> None:
+    reader = FlakyReader(fail=range(1, 1 + NOT_READY_FRAMES))
+    env = flaky_env(reader)
+    env.reset(seed=0)
+    env.step(0)
+    assert reader.reads == 2 + NOT_READY_FRAMES

@@ -69,7 +69,7 @@ class _Snapshot:
     milestone_count: int
     party_count: int = 1
     party_hp_frac: float = 1.0
-    text_active: bool = False
+    text_box_open: bool = False
     text_progress: int = 0
 
 

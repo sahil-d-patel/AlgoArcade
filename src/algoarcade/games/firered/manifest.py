@@ -48,8 +48,12 @@ def won_rival_battle(state: FireRedState) -> bool:
     # unconditionally. From seg_03_rival, Squirtle is level 5 and reaches 6 only from the
     # experience for knocking out the rival's Bulbasaur, and a loss gives none. The map check
     # keeps the goal inside the lab (MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB).
-    # TODO(#66): also require in_battle to be False once ENV-08 reads it.
-    return state.location[:2] == (4, 3) and bool(state.party) and state.party[0].level >= 6
+    return (
+        state.location[:2] == (4, 3)
+        and bool(state.party)
+        and state.party[0].level >= 6
+        and not state.in_battle
+    )
 
 
 def entered_viridian(state: FireRedState) -> bool:

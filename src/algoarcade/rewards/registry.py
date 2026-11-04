@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Protocol
 
 from algoarcade.games.base import GameState
+from algoarcade.games.firered.reader import STORY_FLAGS
 from algoarcade.rewards.base import RewardComponent
 from algoarcade.rewards.explore import Explore
 from algoarcade.rewards.party import Blackout, Heal, Party
@@ -24,7 +25,7 @@ class FireRedFields(Progress, Party, Dialogue, Protocol):
 # - events: no script sets more than three flags at or above 0x230 (hide and temp flags
 #   excluded) without waiting for the player; the most is Route25_SeaCottage's S.S. Ticket
 #   script. The whitelist is a subset, so a step adds at most three, worth 3.0 against a
-#   badge's 10.0. TODO(#19): lower the maximum from FLAGS_COUNT to the whitelist length.
+#   badge's 10.0. The maximum is the whitelist's length.
 # - level: at most PARTY_SIZE * MAX_LEVEL. One Pokemon joins the party per step, so the sum
 #   rises by at most MAX_LEVEL. LEVEL_CAP is a guess, not a game bound: a starter near Brock's
 #   Onix (level 14) plus one more Pokemon. Rises past it pay nothing, so grass camping earns at
@@ -38,7 +39,9 @@ class FireRedFields(Progress, Party, Dialogue, Protocol):
 LEVEL_CAP = 20
 
 COMPONENTS: dict[str, Callable[[], RewardComponent[FireRedFields]]] = {
-    "events": lambda: NewMaximum("events", lambda s: s.story_flags, maximum=0x900, max_rise=3),
+    "events": lambda: NewMaximum(
+        "events", lambda s: s.story_flags, maximum=len(STORY_FLAGS), max_rise=3
+    ),
     "explore": Explore,
     "level": lambda: NewMaximum(
         "level",
