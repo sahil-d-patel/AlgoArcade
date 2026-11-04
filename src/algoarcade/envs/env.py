@@ -62,6 +62,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         )
         self._visited: set[tuple[Any, ...]] = set()
         self._steps = 0
+        self._milestone_count = 0
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -73,6 +74,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._rewards.reset(self._state)
         self._visited = {self._state.location}
         self._steps = 0
+        self._milestone_count = 0
         return self._observe(self._state), self._info(self._state)
 
     def step(
@@ -102,11 +104,12 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
                 visited[0, row, col] = tile in self._visited
         return {"vector": np.clip(vector, 0.0, 1.0), "visited": visited}
 
-    @staticmethod
-    def _info(state: GameState) -> dict[str, Any]:
+    def _info(self, state: GameState) -> dict[str, Any]:
         info: dict[str, Any] = {"location": state.location}
-        # FireRed gains milestone_count in ENV-13; Super Mario Land has none.
+        # Super Mario Land has no milestones. FireRed's count drops when the player walks off a
+        # map-based milestone, so the episode keeps its best.
         milestone_count = getattr(state, "milestone_count", None)
         if milestone_count is not None:
-            info["milestone_count"] = milestone_count
+            self._milestone_count = max(self._milestone_count, milestone_count)
+            info["milestone_count"] = self._milestone_count
         return info
