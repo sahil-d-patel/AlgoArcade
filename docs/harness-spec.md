@@ -135,10 +135,10 @@ The five scripted exploit policies are in `tests/test_exploits.py`, and `uv run 
 
 Rules:
 
-- Every component returns exactly zero on a no-op step and on the reset step, except the penalties `time` and `anti_spam`, which never pay and are off by default. `time` charges every step; `anti_spam` charges a step where nothing changed while a text box is open, including a reset into one.
+- Every component returns exactly zero on the reset step and on a no-op step, with two exceptions. A progress term (events, level, badge, milestone) pays on a no-op step that is the second of the two reads confirming the previous step's rise, and on no other no-op step; its episode total never exceeds the rise from its first best to its highest confirmed count. The penalties `time` and `anti_spam` never pay and are off by default. `time` charges every step; `anti_spam` charges a step where nothing changed while a text box is open, including a reset into one.
 - Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
-- The four progress terms (events, level, badge, milestone) pay a rise only once two consecutive reads agree on it: a step pays the rise from the best to the lower of its two reads. A real rise pays one step late, and a count that reads high for one frame while a save block moves pays nothing.
+- The four progress terms (events, level, badge, milestone) pay a rise only once two consecutive reads agree on it: a step pays the rise from the best to the lower of its two reads. A real rise pays one step late, on the confirming read, even if that step changed nothing. A count that reads high for one frame while a save block moves pays nothing. A rise on the step budget's last step is never confirmed, so an episode loses at most one step's pay of each term: `max_rise`, or `cap` if lower.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
 - A pull request that adds or changes a component says how an agent would exploit it.
 
@@ -320,7 +320,7 @@ These are blocking. Nothing merges to `main` until they pass.
 3. Screen: the frame has the right shape and type, and is a copy.
 4. ROM guard: a ROM with an unknown hash raises an error.
 5. Reader sanity: a captured state with a known situation reads back exactly those values.
-6. Component isolation: on a step where nothing changes, every reward component returns zero. Same on the reset step.
+6. Component isolation: on the reset step and on a step where nothing changes, every reward component returns zero, except as Reward registry allows.
 7. Exploit bounds: each scripted exploit policy earns less than its stated bound.
 8. Schema validation: every logged row matches the frozen schema.
 
