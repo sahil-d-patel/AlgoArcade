@@ -14,6 +14,7 @@ import pytest
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from mcp import Client, StdioServerParameters
 from mcp.server.mcpserver import MCPServer
+from pydantic_core import to_jsonable_python
 
 from algoarcade.agent.loop import (
     SEGMENTS,
@@ -33,6 +34,7 @@ from algoarcade.backends.base import GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeState
+from algoarcade.games.firered.reader import FireRedState, PartyPokemon
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 USAGE = Usage(
@@ -282,8 +284,37 @@ def test_a_run_logs_every_request_and_reports_per_action(tmp_path: Path) -> None
 
 
 def test_seg_01_is_graded_by_the_manifest_goal() -> None:
-    pokemon = {"level": 5, "hp": 20, "max_hp": 20, "status": 0}
-    bedroom = {"map_group": 4, "map_num": 1, "x": 6, "y": 6, "party": [pokemon], "badge_flags": 0}
+    pokemon = PartyPokemon(
+        level=5, hp=20, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0), is_egg=False
+    )
+    state = FireRedState(
+        map_group=4,
+        map_num=1,
+        x=6,
+        y=6,
+        party=(pokemon,),
+        money=3000,
+        badge_flags=0,
+        trainers_defeated=0,
+        pokedex_owned=0,
+        pokedex_seen=0,
+        in_battle=False,
+        text_active=False,
+        text_box_open=False,
+        text_progress=0,
+        script_active=False,
+        controls_locked=False,
+        story_flags=2,
+        world_map_flags=0,
+        text_speed=2,
+        battle_scene_off=True,
+        battle_own=None,
+        battle_enemy=None,
+        event_flags=("FLAG_SYS_POKEMON_GET",),
+        parcel_delivered=False,
+    )
+    # The state JSON the server sends, as get_state builds it.
+    bedroom = to_jsonable_python(state)
     pallet_town = bedroom | {"map_group": 3, "map_num": 0, "x": 6, "y": 8}
     goal = SEGMENTS["seg_01_house"].goal
     assert (goal(bedroom), goal(pallet_town)) == (False, True)

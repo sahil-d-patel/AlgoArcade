@@ -76,6 +76,38 @@ def test_goal_step_is_set_exactly_when_the_goal_is_reached(run: dict) -> None:
         assert step is None or 1 <= step <= length
 
 
+def test_a_badge_pays_on_the_step_after_it_is_earned_as_in_real_runs() -> None:
+    run = fake_run("n1", seed=0, env_steps=ENV_STEPS, step_log_every=1)
+    e = run["episodes"].to_pydict()
+    goals = {
+        (env, episode): (goal, length)
+        for env, episode, goal, length, is_eval in zip(
+            e["env_idx"],
+            e["episode_id"],
+            e["goal_step"],
+            e["episode_length"],
+            e["is_eval"],
+            strict=True,
+        )
+        if not is_eval
+    }
+    s = run["steps"].to_pydict()
+    paid = {
+        (env, episode): step
+        for env, episode, step, badge in zip(
+            s["env_idx"], s["episode_id"], s["episode_step"], s["reward_badge"], strict=True
+        )
+        if badge
+    }
+    assert paid
+    assert all(step == goals[key][0] + 1 for key, step in paid.items())
+    # A badge earned on an episode's last step is never confirmed.
+    assert all(
+        (key in paid) == (goal is not None and goal < length)
+        for key, (goal, length) in goals.items()
+    )
+
+
 def test_evaluation_episodes_run_at_each_checkpoint_and_add_no_steps() -> None:
     run = fake_run("eval", seed=0, env_steps=1_000_000)
     e = run["episodes"].to_pydict()

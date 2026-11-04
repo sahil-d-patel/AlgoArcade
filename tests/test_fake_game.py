@@ -23,7 +23,7 @@ def test_start_state() -> None:
         milestone_count=0,
         party_count=1,
         party_hp_frac=1.0,
-        text_active=False,
+        text_box_open=False,
         text_progress=0,
     )
 

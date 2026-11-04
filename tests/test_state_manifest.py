@@ -48,16 +48,46 @@ def test_state_manifest_check_reports_missing_and_mismatched(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
-    ("location", "level", "expected"),
-    [((4, 3, 6, 8), 6, True), ((4, 3, 6, 8), 5, False), ((3, 0, 16, 14), 6, False)],
+    ("location", "level", "in_battle", "expected"),
+    [
+        ((4, 3, 6, 8), 6, False, True),
+        ((4, 3, 6, 8), 5, False, False),
+        ((3, 0, 16, 14), 6, False, False),
+        ((4, 3, 6, 8), 6, True, False),
+    ],
 )
-def test_state_manifest_rival_goal_needs_the_lab_and_level_6(
-    location: tuple[int, int, int, int], level: int, expected: bool
+def test_state_manifest_rival_goal_needs_the_lab_level_6_and_no_battle(
+    location: tuple[int, int, int, int], level: int, in_battle: bool, expected: bool
 ) -> None:
     group, number, x, y = location
-    squirtle = PartyPokemon(level=level, hp=22, max_hp=22, status=0)
+    squirtle = PartyPokemon(
+        level=level, hp=22, max_hp=22, status=0, species=7, moves=(33, 39, 0, 0), is_egg=False
+    )
     state = FireRedState(
-        map_group=group, map_num=number, x=x, y=y, party=(squirtle,), badge_flags=0
+        map_group=group,
+        map_num=number,
+        x=x,
+        y=y,
+        party=(squirtle,),
+        money=3080,
+        badge_flags=0,
+        trainers_defeated=1,
+        pokedex_owned=0,
+        pokedex_seen=0,
+        in_battle=in_battle,
+        text_active=False,
+        text_box_open=False,
+        text_progress=0,
+        script_active=False,
+        controls_locked=False,
+        story_flags=3,
+        world_map_flags=0,
+        text_speed=2,
+        battle_scene_off=True,
+        battle_own=None,
+        battle_enemy=None,
+        event_flags=("FLAG_SYS_POKEMON_GET", "FLAG_BEAT_RIVAL_IN_OAKS_LAB"),
+        parcel_delivered=False,
     )
     assert won_rival_battle(state) is expected
 

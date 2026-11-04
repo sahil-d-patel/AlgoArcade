@@ -22,18 +22,21 @@ class Progress(GameState, Protocol):
 
 
 class NewMaximum(RewardComponent[Progress]):
-    """Pays the amount a count rises above its best so far this episode, up to `cap` per step.
-    A drop, or a climb back to the old best, pays nothing, so moving a count up and down cannot be
-    farmed. The excess of a rise above the cap is never paid, nor is any part of a rise above
-    `ceiling`, so an episode pays at most `ceiling` in total.
+    """Pays a rise in a count above its best so far this episode, up to `cap` per step and
+    nothing past `ceiling`. The rules are in docs/harness-spec.md, Reward registry.
 
-    A read above `maximum`, or more than `max_rise` above the best, pays nothing and does not
-    become the best. The best comes only from two consecutive reads that agree: the second is 0 to
-    `max_rise` above the first. On the first step the pair is the reset read and the next read,
-    and their rise pays. Any later pair, after a rejected read, only sets the best and pays
-    nothing. So a bad reset read is never trusted on its own, and a bad best is replaced once two
-    reads agree. A bad read that repeats on two consecutive steps can therefore become the best
-    and silence the term for the episode; only reader validation (ENV-05, ENV-08) prevents that."""
+    A rise pays one step late, on the read that confirms it: a step pays up to `min(prev, curr)`.
+    FireRed's save blocks move on warps, battles and menus, and for one frame a count can read
+    high, so a single read must never pay. The confirming step therefore pays even when nothing
+    changed on it, and a rise on an episode's last step is never paid.
+
+    On the first step the best becomes the reset read if the first read agrees with it, so a rise
+    on the first step pays on the second; a reset read up to `max_rise` too low becomes the best
+    too. With no best, or `prev` more than `max_rise` above it, an agreeing pair sets the best to
+    `prev` and the next step pays nothing, so re-establishing the best never pays; a real rise
+    inside that pair is lost with it, at most `max_rise`. A bad read
+    repeated on two consecutive steps becomes the best this way and can silence the term for the
+    episode; only reader validation (ENV-05, ENV-08) prevents that."""
 
     def __init__(  # noqa: PLR0913 two bounds on reads and two on payment
         self,
@@ -52,26 +55,29 @@ class NewMaximum(RewardComponent[Progress]):
         self._ceiling = ceiling
         self._best: int | None = None
         self._first_step = True
+        self._settling = False
 
     @override
     def reset(self, state: Progress) -> None:
         self._best = None
         self._first_step = True
+        self._settling = False
 
     @override
     def score(self, prev: Progress, curr: Progress) -> float:
-        value = self._count(curr)
+        prev_value, value = self._count(prev), self._count(curr)
         first_step, self._first_step = self._first_step, False
-        if value > self._maximum:
+        settling, self._settling = self._settling, False
+        if max(prev_value, value) > self._maximum or value - prev_value > self._max_rise:
             return 0.0
-        if self._best is not None and value - self._best <= self._max_rise:
-            paid = self._paid(self._best, value)
-            self._best = max(self._best, value)
+        if self._best is not None and prev_value - self._best <= self._max_rise:
+            confirmed = min(prev_value, value)
+            paid = 0.0 if settling else self._paid(self._best, confirmed)
+            self._best = max(self._best, confirmed)
             return paid
-        prev_value = self._count(prev)
-        if 0 <= value - prev_value <= self._max_rise:
-            self._best = value
-            return self._paid(prev_value, value) if first_step else 0.0
+        if value >= prev_value:
+            self._best = prev_value
+            self._settling = not first_step
         return 0.0
 
     def _paid(self, low: int, high: int) -> float:
