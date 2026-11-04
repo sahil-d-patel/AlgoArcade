@@ -8,14 +8,13 @@
 in the --out file, so the trace never depends on numpy's streams, and changing --seed alone
 measures what reset noise does. Episodes are 128 steps, so 500 steps cross three resets.
 mgba needs --state: at power-on gSaveBlock1Ptr is 0 and the first reset raises StateNotReady.
-pyboy without --state starts from power-on.
+pyboy without --state starts 120 frames after power-on, once the game's Init has run.
 """
 
 import argparse
 import hashlib
 import json
 import random
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +22,12 @@ from gymnasium.spaces import Discrete
 
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.pyboy import PyBoyBackend
 from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games import fake
 from algoarcade.games.firered.features import FEATURES as FIRERED_FEATURES
 from algoarcade.games.firered.reader import FireRedReader
+from algoarcade.games.super_mario_land.reader import SuperMarioLandReader
 from algoarcade.rewards.explore import Explore
 from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
 
@@ -50,9 +51,8 @@ def mgba_env(state: bytes) -> AlgoArcadeEnv:
 
 
 def pyboy_env(state: bytes | None) -> AlgoArcadeEnv:
-    # ENV-03 (#58) adds these modules.
-    backend = import_module("algoarcade.backends.pyboy").PyBoyBackend(ROMS / "super_mario_land.gb")
-    reader = import_module("algoarcade.games.super_mario_land.reader").SuperMarioLandReader()
+    backend = PyBoyBackend(ROMS / "super_mario_land.gb")
+    reader = SuperMarioLandReader()
     rewards = RewardRegistry({"explore": Explore}, {"explore": 1.0})
     # Guessed scales: a three-digit timer, a two-digit BCD life count, a long level.
     features = {
@@ -60,8 +60,10 @@ def pyboy_env(state: bytes | None) -> AlgoArcadeEnv:
         "lives_left": lambda s: s.lives_left / 99,
         "level_progress": lambda s: s.level_progress / 4096,
     }
-    start = state or backend.save_state()
-    return AlgoArcadeEnv(backend, reader, rewards, start, BUDGET, features)
+    if state is None:
+        backend.step(120)  # the reader is not ready until Init sets hWorldAndLevel
+        state = backend.save_state()
+    return AlgoArcadeEnv(backend, reader, rewards, state, BUDGET, features)
 
 
 def trace(env: AlgoArcadeEnv, seed: int, actions: list[int]) -> list[list[Any]]:
