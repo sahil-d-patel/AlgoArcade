@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 from algoarcade.training.config import PRESETS, load_config, save_config
 
 
@@ -21,3 +22,7 @@ def test_firered_preset_has_gamma_0997_and_no_reward_normalisation() -> None:
     assert config.ppo.gamma == 0.997
     assert config.norm_reward is False
     assert config.norm_obs is True
+
+
+def test_firered_preset_pays_the_default_reward() -> None:
+    assert PRESETS["firered"][1].reward_weights == DEFAULT_WEIGHTS

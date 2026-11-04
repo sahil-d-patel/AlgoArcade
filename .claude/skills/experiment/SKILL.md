@@ -55,7 +55,7 @@ Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an
 
 ## FireRed and the fake game
 
-With `env_id` set to `firered` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset is the baseline at 1M steps with explore as the only reward (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers.
+With `env_id` set to `firered` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset is the baseline at 1M steps on the default reward: events, explore, level, badge and milestone at `DEFAULT_WEIGHTS`, penalties off (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers, and each worker checks the state's options.
 
 The TRN-05 runs, launched one after another so a stop loses only the run in progress:
 
@@ -86,7 +86,7 @@ env.training = False
 model = PPO.load("step_<n>.zip")
 ```
 
-where `env_fn` comes from `algoarcade.training.games.env_factory`. Until ENV-08 and ENV-13 land, FireRed logs `story_flags` and `milestone_count` as -1 and `in_battle` as False: the reader does not provide them.
+where `env_fn` comes from `algoarcade.training.games.env_factory`. The episodes table's `badge_count`, `party_level_sum` and `story_flags` are each the latest value two consecutive reads agreed on, because a read on the frame a save block moves can be wrong; `milestone_count` is the env's episode best.
 
 Super Mario Land is not wired in. It needs PyBoyBackend and its reader (ENV-03, #58), the ROM, a reward for `level_progress`, and a place to log `level_progress`: the steps table has no column for it.
 

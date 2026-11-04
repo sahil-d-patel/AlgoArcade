@@ -10,6 +10,8 @@ from pathlib import Path
 
 import tyro
 
+from algoarcade.rewards.registry import DEFAULT_WEIGHTS
+
 
 @dataclass(frozen=True)
 class PPOConfig:
@@ -84,17 +86,16 @@ BASELINE = TrainConfig(
     norm_reward=False,
 )
 
-# TRN-05's first FireRed runs. Explore is the only reward: the other default components read
-# story_flags, party_level_sum, badge_count and milestone_count, which FireRedState gains in
-# ENV-08 and ENV-13. 1M steps and 3 eval episodes are guesses; a deterministic policy from an
-# indoor state replays near-identical episodes, so more eval episodes add little.
+# TRN-05's FireRed runs, on the default reward: the five positive terms at their starting
+# weights, penalties off. 1M steps and 3 eval episodes are guesses; a deterministic policy from
+# an indoor state replays the same episode, so more eval episodes add little.
 FIRERED = dataclasses.replace(
     BASELINE,
     env_id="firered",
     start_state=tyro.MISSING,
     total_timesteps=1_000_000,
     eval_episodes=3,
-    reward_weights={"explore": 0.02},
+    reward_weights=dict(DEFAULT_WEIGHTS),
 )
 
 # The control tasks end within 500 steps, so they do not need the baseline's long horizon. These
