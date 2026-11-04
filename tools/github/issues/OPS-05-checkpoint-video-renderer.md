@@ -31,7 +31,7 @@ Two tools every later result depends on. Footage: a reward exploit is easier to 
 - [ ] The `experiment` skill states the reporting rule: IQM, 95% interval, n, and five seeds for a headline.
 
 ## Notes
-Contract: docs/harness-spec.md, Reward registry and Logging schema. The five exploit signatures: oscillation, menu spam, faint loop, reset farming, grass camping.
+Contract: docs/harness-spec.md, Reward registry and Logging schema. The six exploit signatures: oscillation, menu spam, faint loop, reset farming, grass camping, warp flicker.
 
 Gotchas: imageio rescales any frame whose width or height is not divisible by 16, and defaults to 10 fps. PyBoy updates its frame buffer in place, so copy every frame. A checkpoint needs the normalisation statistics TRN-05 saves beside it. Text overlays need Pillow. If it is not in `uv.lock`, ask a PM before adding it.
 
