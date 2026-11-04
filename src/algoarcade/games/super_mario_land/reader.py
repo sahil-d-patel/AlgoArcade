@@ -27,7 +27,7 @@ LEVEL_BLOCK = 0xC0AB  # Counts 16-pixel blocks scrolled; bank0.asm calls it "pro
 MARIO_X = 0xC202  # Mario's x on screen. bank0.asm: "Mario X pos".
 MARIO_Y = 0xC201  # Mario's y on screen. bank0.asm: "Mario Y pos". Not checked against the game.
 # No label. Call_2198 (bank0.asm lines 5098-5113) loads the next 8-pixel tile column each time
-# bit 3 of hScrollX reaches this byte, then flips it between 0 and 8, and every second flip it
+# bit 3 of hScrollX equals this byte, then flips it between 0 and 8, and every second flip it
 # also adds 1 to LEVEL_BLOCK. Every write in the disassembly is 0 or that flip.
 COLUMN_BIT = 0xFFA3
 
@@ -55,7 +55,7 @@ class SuperMarioLandReader:
         seconds, hundreds = backend.read(TIME_LEFT, 2)
         world_and_level = read_u8(backend, WORLD_AND_LEVEL)
         world, level = world_and_level >> 4, world_and_level & 0x0F
-        # Init (bank0.asm) clears HRAM, then sets 0x11. Every later write is world 1-4, level 1-3.
+        # Init (bank0.asm lines 210-291) clears HRAM, then sets 0x11. Later writes stay in 1-4, 1-3.
         if not (1 <= world <= 4 and 1 <= level <= 3):
             raise StateNotReady(f"hWorldAndLevel is {world_and_level:#04x}: Init has not run")
         level_block = read_u8(backend, LEVEL_BLOCK)
