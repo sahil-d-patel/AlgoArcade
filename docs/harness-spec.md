@@ -130,7 +130,7 @@ the source commit used for the pinned symbol build:
 | party species, moves | `gPlayerParty`, 100-byte entries; XOR twelve words at +0x20 with personality (+0x00) XOR trainer id (+0x04), then check the 16-bit sum against +0x1C | `include/pokemon.h`, `src/pokemon.c` |
 | battle_own, battle_enemy | `gBattleMons`, 0x58-byte `struct BattlePokemon`, plaintext: moves at +0x0C, PP at +0x24, HP at +0x28, level at +0x2A, max HP at +0x2C, personality at +0x48. Battler 0 is the player and 1 the opponent | `include/pokemon.h`, `src/battle_controllers.c` (`InitSinglePlayerBtlControllers`) |
 | event_flags | `gSaveBlock1Ptr` +0xEE0, the flags named in `milestones.FLAGS` | `include/constants/flags.h` |
-| parcel_delivered | `VAR_MAP_SCENE_VIRIDIAN_CITY_MART` at `gSaveBlock1Ptr` +0x1000 + 2 × (0x4057 − 0x4000) is at least 1, and no slot of `bagPocket_KeyItems` (+0x3B8, 30 slots of item id and quantity) holds `ITEM_OAKS_PARCEL` | `include/global.h`, `data/maps/ViridianCity_Mart/scripts.inc`, `data/maps/PalletTown_ProfessorOaksLab/scripts.inc` |
+| parcel_delivered | `VAR_MAP_SCENE_VIRIDIAN_CITY_MART` at `gSaveBlock1Ptr` +0x1000 + 2 × (0x4057 − 0x4000) is at least 1, and no slot of `pcItems` (+0x298) or `bagPocket_KeyItems` (+0x3B8), 30 slots each of item id and quantity, holds `ITEM_OAKS_PARCEL` | `include/global.h`, `data/maps/ViridianCity_Mart/scripts.inc`, `data/maps/PalletTown_ProfessorOaksLab/scripts.inc` |
 
 gBattleMons keeps the last battle's Pokémon after the battle ends, so the reader reads it only
 while `in_battle` is true. `in_battle` turns on about 30 frames before the battle intro copies

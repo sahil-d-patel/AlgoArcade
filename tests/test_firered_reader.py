@@ -477,6 +477,10 @@ def test_event_flags_and_parcel_follow_the_save_block(sha1: str, offset: int) ->
     assert not reader.read(backend).parcel_delivered
     backend.write(pointer + 0x3B8 + 4 * 2, bytes(4))
     assert reader.read(backend).parcel_delivered
+    # Stored in the PC is not delivered.
+    backend.write(pointer + 0x298 + 4 * 29, struct.pack("<HH", parcel, 1))
+    assert not reader.read(backend).parcel_delivered
+    backend.write(pointer + 0x298 + 4 * 29, bytes(4))
     backend.write(mart, struct.pack("<H", 0))
     assert not reader.read(backend).parcel_delivered
 

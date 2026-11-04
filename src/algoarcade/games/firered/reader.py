@@ -212,12 +212,15 @@ class FireRedReader:
     def _parcel_delivered(backend: GameBackend, pointer: int) -> bool:
         # ViridianCity_Mart/scripts.inc sets the var to 1 as the clerk hands the parcel over;
         # PalletTown_ProfessorOaksLab/scripts.inc takes it out of the bag as Oak receives it,
-        # before FLAG_SYS_POKEDEX_GET. SaveBlock1 holds vars from 0x1000 (VARS_START is 0x4000)
-        # and bagPocket_KeyItems at 0x3B8: 30 slots of (itemId, quantity), ids not encrypted.
+        # before FLAG_SYS_POKEDEX_GET. SaveBlock1 holds vars from 0x1000 (VARS_START is 0x4000),
+        # and pcItems at 0x298 and bagPocket_KeyItems at 0x3B8, 30 slots each of (itemId,
+        # quantity) with the ids not encrypted. Nothing in item_menu.c stops the parcel going
+        # into the PC, so a stored parcel is not delivered.
         mart = IDS["VAR_MAP_SCENE_VIRIDIAN_CITY_MART"].value - 0x4000
+        stored = struct.unpack("<60H", backend.read(pointer + 0x298, 120))[::2]
         key_items = struct.unpack("<60H", backend.read(pointer + 0x3B8, 120))[::2]
         return read_u16(backend, pointer + 0x1000 + 2 * mart) >= 1 and (
-            IDS["ITEM_OAKS_PARCEL"].value not in key_items
+            IDS["ITEM_OAKS_PARCEL"].value not in stored + key_items
         )
 
     def _battlers(self, backend: GameBackend) -> tuple[BattlePokemon | None, BattlePokemon | None]:
