@@ -139,6 +139,10 @@ class Step:
     stop_reason: str | None
     state: dict[str, Any] | None
 
+    @property
+    def prompt_tokens(self) -> int:
+        return self.input_tokens + self.cache_write_tokens + self.cache_read_tokens
+
 
 @dataclass(frozen=True)
 class Attempt:
@@ -327,13 +331,59 @@ async def run(settings: Run, create: Create) -> Attempt:
 
         async with Client(server(segment.server), raise_exceptions=True) as client:
             attempt = await run_attempt(create, client, settings, segment, record)
-    summary = asdict(settings) | asdict(attempt) | {"per_action": attempt.per_action()}
+    projection = project(attempt.steps, settings.prices)
+    summary = asdict(settings) | asdict(attempt)
+    summary |= {
+        "per_action": attempt.per_action(),
+        "projection_300_requests": asdict(projection) if projection else None,
+    }
     del summary["steps"]
     (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
     return attempt
 
 
-def report(attempt: Attempt) -> str:
+@dataclass(frozen=True)
+class Projection:
+    start: int
+    growth: float
+    dollars: float
+
+
+def project(steps: list[Step], prices: Prices, requests: int = 300) -> Projection | None:
+    """The cost of `requests` requests, from an attempt's log. The first is priced as measured.
+    Request i has a prompt of the first's size plus i times the mean growth per request, sends
+    the mean uncached input and cache write of the later requests and reads the rest from the
+    cache (all of it is input if nothing was read from the cache), and is priced on the card its
+    prompt size picks. None with fewer than two requests, as there is no growth to measure."""
+    if len(steps) < 2:
+        return None
+    first, later = steps[0], steps[1:]
+    start = first.prompt_tokens
+    growth = (steps[-1].prompt_tokens - start) / len(later)
+
+    def mean(kind: str) -> int:
+        return round(sum(getattr(step, kind) for step in later) / len(later))
+
+    output = mean("output_tokens")
+    uncached, written = mean("input_tokens"), mean("cache_write_tokens")
+    cached = any(step.cache_read_tokens for step in later)
+    dollars = first.dollars
+    for index in range(1, requests):
+        size = round(start + index * growth)
+        if cached:
+            usage = Usage(
+                input_tokens=uncached,
+                output_tokens=output,
+                cache_creation_input_tokens=written,
+                cache_read_input_tokens=size - uncached - written,
+            )
+        else:
+            usage = Usage(input_tokens=size, output_tokens=output)
+        dollars += prices.dollars(usage)
+    return Projection(start=start, growth=growth, dollars=dollars)
+
+
+def report(attempt: Attempt, prices: Prices) -> str:
     lines = [
         f"{attempt.outcome}: {attempt.actions} actions in {len(attempt.steps)} requests, "
         f"${attempt.dollars:.4f}"
@@ -343,13 +393,19 @@ def report(attempt: Attempt) -> str:
         dollars = per_action.pop("dollars")
         tokens = ", ".join(f"{kind} {value:.1f}" for kind, value in per_action.items())
         lines.append(f"per action: {tokens}, ${dollars:.6f}")
-        lines.append(f"300 actions at this rate: ${300 * dollars:.2f}")
+    projection = project(attempt.steps, prices)
+    if projection is not None:
+        lines.append(
+            f"projected 300 requests: ${projection.dollars:.2f}, a prompt of {projection.start} "
+            f"tokens growing {projection.growth:.0f} a request, each priced on its card"
+        )
     return "\n".join(lines)
 
 
 def main() -> None:
-    attempt = asyncio.run(run(tyro.cli(Run), AsyncAnthropic().messages.create))
-    print(report(attempt))  # noqa: T201
+    settings = tyro.cli(Run)
+    attempt = asyncio.run(run(settings, AsyncAnthropic().messages.create))
+    print(report(attempt, settings.prices))  # noqa: T201
 
 
 if __name__ == "__main__":
