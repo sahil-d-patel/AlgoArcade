@@ -22,7 +22,7 @@ Evaluate from the fixed start state with the archive off, whatever the training 
 
 Debug locally with one environment and 1,000 steps. Nothing interactive happens on the training box. Once the queue exists, a run on the box goes through the queue, never a terminal.
 
-Never change the logging schema to suit a run. It freezes on November 1.
+Never change the logging schema to suit a run. It freezes on November 8.
 
 Before you believe a curve, watch the agent. Check the per-component reward chart, check that unique tiles rise with return, and watch five minutes of video.
 

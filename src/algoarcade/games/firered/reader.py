@@ -44,12 +44,15 @@ class FireRedReader:
             raise StateNotReady(f"Invalid gSaveBlock1Ptr: {pointer:#010x}")
         # SaveBlock1.pos/location: include/global.h at the same source commit.
         x, y, map_group, map_num = struct.unpack("<hhbb", backend.read(pointer, 6))
-        # SaveBlock1.flags is at 0xEE0 and FLAG_BADGE01_GET is 0x820 (include/constants/flags.h),
-        # so the eight badges are the byte at 0xFE4, Boulder Badge in bit 0.
-        badge_flags = read_u8(backend, pointer + 0xFE4)
         count = read_u8(backend, self._addresses["gPlayerPartyCount"].address)
         if count > 6:
             raise StateNotReady(f"Invalid gPlayerPartyCount: {count}")
+        # On the title screen and intro the pointer is valid but the block is still empty.
+        if (map_group, map_num, x, y) == (0, 0, 0, 0) and count == 0:
+            raise StateNotReady("SaveBlock1 is empty: the game has not reached the overworld")
+        # SaveBlock1.flags is at 0xEE0 and FLAG_BADGE01_GET is 0x820 (include/constants/flags.h),
+        # so the eight badges are the byte at 0xFE4, Boulder Badge in bit 0.
+        badge_flags = read_u8(backend, pointer + 0xFE4)
         party = []
         for index in range(count):
             # struct Pokemon: include/pokemon.h at the same source commit; live party only.
