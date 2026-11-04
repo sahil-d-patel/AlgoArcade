@@ -61,6 +61,7 @@ class MemoryBackend(FakeBackend):
         self.write(addresses["gBattleMons"].address, bytes(2 * 0x58))
         self.write(addresses["gBattlerPartyIndexes"].address, bytes(8))
         self.write(addresses["gEnemyParty"].address, bytes(600))
+        self.write(addresses["gPlayerParty"].address, bytes(600))
 
     def read(self, address: int, size: int) -> bytes:
         return bytes(self.memory[address + offset] for offset in range(size))
@@ -458,26 +459,51 @@ def battler(species: int, hp: int, level: int, max_hp: int, personality: int) ->
     return bytes(entry)
 
 
-@pytest.mark.parametrize("sha1", ADDRESSES)
-def test_battle_fields_need_in_battle_and_the_current_opponent(sha1: str) -> None:
+def in_battle(sha1: str) -> MemoryBackend:
+    """Squirtle 14/ 20 in party slot 0 against Bulbasaur 13/ 19 in enemy slot 1."""
     addresses = ADDRESSES[sha1]
     backend, _ = overworld(sha1)
     mons = addresses["gBattleMons"].address
     backend.write(mons, battler(7, 14, 5, 20, 0x1111) + battler(1, 13, 5, 19, 0x2222))
     backend.write(addresses["gBattlerPartyIndexes"].address, struct.pack("<4H", 0, 1, 0, 0))
-    backend.write(addresses["gEnemyParty"].address + 100, (0x2222).to_bytes(4, "little"))
-    reader = FireRedReader(sha1)
-    # gBattleMons outlives the battle: gMain.inBattle is clear.
-    assert (reader.read(backend).battle_own, reader.read(backend).battle_enemy) == (None, None)
+    backend.write(addresses["gPlayerParty"].address, party_entry(0x1111, 7, 5, 14) + bytes(500))
+    backend.write(addresses["gEnemyParty"].address + 100, party_entry(0x2222, 1, 5, 13))
     backend.write(addresses["gMain"].address + 0x439, b"\x02")
-    state = reader.read(backend)
+    return backend
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_battle_fields_read_both_battlers(sha1: str) -> None:
+    state = FireRedReader(sha1).read(in_battle(sha1))
     assert state.battle_own == BattlePokemon(14, 20, 5, (33, 45, 0, 0), (35, 40, 0, 0))
     assert state.battle_enemy == BattlePokemon(13, 19, 5, (33, 45, 0, 0), (35, 40, 0, 0))
-    # A new battle's intro, before the game copies its Pokemon into gBattleMons.
-    backend.write(addresses["gEnemyParty"].address + 100, (0x3333).to_bytes(4, "little"))
-    assert (reader.read(backend).battle_own, reader.read(backend).battle_enemy) == (None, None)
-    backend.write(addresses["gBattlerPartyIndexes"].address + 2, struct.pack("<H", 0xFFFF))
-    assert reader.read(backend).battle_enemy is None
+
+
+# Each write leaves gBattleMons behind the party copies, as the game does for some frames.
+STALE = {
+    # gBattleMons outlives the battle.
+    "battle over": ("gMain", 0x439, b"\x00"),
+    # A switch: gBattlerPartyIndexes moves before the new Pokemon is copied in.
+    "player switch": ("gBattlerPartyIndexes", 0, struct.pack("<H", 1)),
+    "opponent switch": ("gBattlerPartyIndexes", 2, struct.pack("<H", 2)),
+    # A new opponent, before the battle intro copies it.
+    "new opponent": ("gEnemyParty", 100, (0x3333).to_bytes(4, "little")),
+    # A rematch after a loss: same personalities, the party healed.
+    "rematch": ("gPlayerParty", 0x56, struct.pack("<H", 20)),
+    # A level-up reaches the party first.
+    "level up": ("gPlayerParty", 0x54, b"\x06"),
+    "bad slot": ("gBattlerPartyIndexes", 2, struct.pack("<H", 0xFFFF)),
+}
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize("case", STALE)
+def test_battle_fields_are_none_while_gbattlemons_is_stale(sha1: str, case: str) -> None:
+    backend = in_battle(sha1)
+    symbol, offset, data = STALE[case]
+    backend.write(ADDRESSES[sha1][symbol].address + offset, data)
+    state = FireRedReader(sha1).read(backend)
+    assert (state.battle_own, state.battle_enemy) == (None, None)
 
 
 @pytest.mark.parametrize("sha1", ADDRESSES)

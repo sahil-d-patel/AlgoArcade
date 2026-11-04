@@ -249,17 +249,32 @@ class FireRedReader:
         # InitSinglePlayerBtlControllers (src/battle_controllers.c) puts the player at battler 0
         # and the opponent at battler 1 in every single battle.
         mons = backend.read(self._addresses["gBattleMons"].address, 2 * BATTLER_SIZE)
-        # gMain.inBattle goes up in CB2_InitBattleInternal, about 30 frames before
-        # BattleIntroDrawTrainersOrMonsSprites copies the Pokemon in; until then gBattleMons
-        # holds the last battle's, or zeros. The new opponent is already in gEnemyParty.
-        slot = read_u16(backend, self._addresses["gBattlerPartyIndexes"].address + 2)
-        personality = struct.unpack_from("<I", mons, BATTLER_SIZE + 0x48)[0]
-        enemy = self._addresses["gEnemyParty"].address + slot * 100
-        if slot > 5 or read_u32(backend, enemy) != personality:
-            return None, None
+        slots = struct.unpack(
+            "<2H", backend.read(self._addresses["gBattlerPartyIndexes"].address, 4)
+        )
+        # gBattleMons is never cleared. gMain.inBattle goes up in CB2_InitBattleInternal about 30
+        # frames before BattleIntroDrawTrainersOrMonsSprites copies the new Pokemon in, and a
+        # switch moves gBattlerPartyIndexes a few frames before the copy. A rematch after a
+        # loss brings back the same personalities (CreateNPCTrainerParty), so each battler must
+        # also match its party entry's plaintext level (+0x54) and HP (+0x56). Damage reaches
+        # both copies on the same frame. A level-up reaches the party first, so the fields are
+        # None until the level-up box shows: 92 frames after Onix faints from brock.state, 26 after
+        # the rival's Bulbasaur faints.
         battlers = []
-        for base in (0, BATTLER_SIZE):
+        for base, party, slot in (
+            (0, self._addresses["gPlayerParty"].address, slots[0]),
+            (BATTLER_SIZE, self._addresses["gEnemyParty"].address, slots[1]),
+        ):
+            if slot > 5:
+                return None, None
             hp, level, max_hp = struct.unpack_from("<HBxH", mons, base + 0x28)
+            entry = backend.read(party + slot * 100, 0x58)
+            same_pokemon = mons[base + 0x48 : base + 0x4C] == entry[:4]
+            if not same_pokemon or (level, hp) != (
+                entry[0x54],
+                int.from_bytes(entry[0x56:0x58], "little"),
+            ):
+                return None, None
             battlers.append(
                 BattlePokemon(
                     hp=hp,

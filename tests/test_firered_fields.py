@@ -8,6 +8,7 @@ from capture_validation_states import SEGMENTS, play
 
 from algoarcade.backends.base import Button
 from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
 from algoarcade.games.firered.reader import BattlePokemon, FireRedReader, FireRedState
 from algoarcade.rewards.penalties import AntiSpam
@@ -121,6 +122,10 @@ CAPTURES = {
     "validate_potion.state": (
         REV1,
         "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
+    ),
+    "validate_brock_lost.state": (
+        REV1,
+        "bbe9ee5dcd2499a159929060861c382ac9f44bc794453b9ed900bdcc5d3985a8",
     ),
     "brock_goal.state": (
         REV1,
@@ -612,3 +617,60 @@ def test_firered_fields_battle_null_in_the_overworld(name: str) -> None:
     state = read_start_state(name)
     assert not state.in_battle
     assert (state.battle_own, state.battle_enemy) == (None, None)
+
+
+def battle_frames(backend: MgbaBackend, frames: int) -> list[FireRedState]:
+    """One read per frame for `frames` frames, skipping a read torn by a party rewrite."""
+    reader = FireRedReader(backend.rom.sha1)
+    states = []
+    for _ in range(frames):
+        backend.step(1)
+        try:
+            states.append(reader.read(backend))
+        except StateNotReady:
+            continue
+    return states
+
+
+@pytest.mark.rom
+def test_firered_fields_battle_rematch_reads_no_stale_battler(firered_backend: MgbaBackend) -> None:
+    # The loss left Squirtle at 0 HP in gBattleMons, and CreateNPCTrainerParty gives the rematch's
+    # Geodude the same personality. The Pokemon Center has healed Squirtle to 40/ 40.
+    load_capture(firered_backend, "validate_brock_lost.state")
+    player = Player(firered_backend)
+    player.run("aa tDx4 tD tRx5 tUx14 tLx14 tDx5 tRx7 tU tUx4 tRx3 tUx2 tL tUx2 tLx2 U")
+    reader = FireRedReader(firered_backend.rom.sha1)
+    for _ in range(100):
+        if reader.read(firered_backend).in_battle:
+            break
+        firered_backend.press([Button.A], hold=2, release=28)
+    states = battle_frames(firered_backend, 120)
+    assert all(state.in_battle for state in states)
+    own = [state.battle_own for state in states]
+    assert {pokemon.hp for pokemon in own if pokemon} == {40}
+    assert own[0] is None
+    assert own[-1] is not None
+    assert own[-1].level == 14
+    assert {pokemon.hp for state in states if (pokemon := state.battle_enemy)} == {31}
+
+
+@pytest.mark.rom
+def test_firered_fields_battle_enemy_switch_reads_no_stale_battler(
+    firered_backend: MgbaBackend,
+) -> None:
+    # Water Gun every turn: Geodude (Lv12, 31 max HP) faints and Brock sends out Onix (Lv14, 33).
+    # gBattlerPartyIndexes moves to Onix's slot two frames before gBattleMons holds Onix.
+    path = ROOT / "data/states/brock.state"
+    if firered_backend.rom.sha1 != ROM_SHA1 or not path.is_file():
+        pytest.skip("Needs brock.state and the rev 1 ROM it was captured on")
+    data = path.read_bytes()
+    assert hashlib.sha256(data).hexdigest() == {e.name: e.sha256 for e in MANIFEST}["brock"]
+    firered_backend.load_state(data)
+    states = []
+    for _ in range(40):
+        firered_backend.press([Button.A], hold=2, release=0)
+        states += battle_frames(firered_backend, 28)
+    enemies = {(pokemon.level, pokemon.max_hp) for s in states if (pokemon := s.battle_enemy)}
+    assert enemies == {(12, 31), (14, 33)}
+    onix = next(i for i, s in enumerate(states) if s.battle_enemy and s.battle_enemy.level == 14)
+    assert all(s.battle_enemy is None or s.battle_enemy.level == 14 for s in states[onix:])

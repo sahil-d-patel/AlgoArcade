@@ -96,6 +96,9 @@ BRANCHES = (
         + "A w30 " * 8
         + "w60",
     ),
+    # Tail Whip against Brock's Geodude until Squirtle faints; the player whites out to the
+    # Pewter Pokemon Center. gBattleMons keeps Squirtle at 0 HP and the undamaged Geodude.
+    ("brock_lost", "brock", "A w20 RIGHT w10 A w300 B*10 w60 " * 10),
 )
 
 
