@@ -65,7 +65,7 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Position | x, y | Tile coordinates on that map |
 | Progress | badge_flags, badge_count | The badge byte and its popcount |
 | Progress | story_flags | Count of set flags on the story whitelist |
-| Progress | trainers_defeated | Popcount of the trainer flag range |
+| Progress | trainers_defeated | Popcount of the trainer flag range: trainers beaten, plus early rival battles, which set their flag on a loss too |
 | Progress | world_map_flags | Count of the visited-map flags, 0x890 through 0x8C2 |
 | Progress | milestone_count | How far down the ordered Pallet-to-Brock list |
 | Progress | pokedex_owned, pokedex_seen | Pokédex counts |
@@ -117,7 +117,7 @@ the source commit used for the pinned symbol build:
 |---|---|---|
 | money | `gSaveBlock1Ptr` + 0x290, XOR `gSaveBlock2Ptr` + 0xF20 | `include/global.h`, `src/money.c` |
 | badge_flags, badge_count | `gSaveBlock1Ptr` + 0xFE4; flags 0x820 through 0x827 | `include/constants/flags.h`, `src/event_data.c` |
-| trainers_defeated | `gSaveBlock1Ptr` + 0xEE0; flags 0x500 through 0x7FF | Same flag definitions and indexing |
+| trainers_defeated | `gSaveBlock1Ptr` + 0xEE0; flags 0x500 through 0x7FF. `CB2_EndTrainerBattle` sets the flag after a win, and for `TRAINER_BATTLE_EARLY_RIVAL` with `RIVAL_BATTLE_HEAL_AFTER` (the lab rival) after a loss too | Same flag definitions and indexing, `src/battle_setup.c` |
 | story_flags | Seven persistent flags listed below, indexed from `gSaveBlock1Ptr` +0xEE0 | `include/constants/flags.h`, `src/event_data.c` |
 | world_map_flags | `gSaveBlock1Ptr` +0xFF2; 51 bits for flags 0x890 through 0x8C2 | Same flag definitions and indexing |
 | text_speed, battle_scene_off | `gSaveBlock2Ptr` +0x14 bits 0–2; +0x15 bit 2 | `include/global.h` |
@@ -138,7 +138,7 @@ The story whitelist, approved in `docs/decisions.md` on 2026-11-03, counts each 
 |---|---|---|
 | FLAG_VISITED_OAKS_LAB | 0x2CF | Entered Oak's Lab |
 | FLAG_SYS_POKEMON_GET | 0x828 | Starter received |
-| FLAG_BEAT_RIVAL_IN_OAKS_LAB | 0x258 | Lab rival battle finished, won or lost; `trainers_defeated` counts a win |
+| FLAG_BEAT_RIVAL_IN_OAKS_LAB | 0x258 | Lab rival battle finished, won or lost. `trainers_defeated` also rises on either outcome; level 6 tells a win |
 | FLAG_GOT_POTION_ON_ROUTE_1 | 0x230 | Route 1 gift potion received |
 | FLAG_SYS_POKEDEX_GET | 0x829 | Pokedex received |
 | FLAG_DEFEATED_BROCK | 0x4B0 | Brock defeated |
@@ -158,6 +158,7 @@ Rules:
 - The save blocks relocate on every warp and every return from a battle or full-screen menu. The offset is one of 32 values. Never keep a dereferenced address across steps.
 - Check that each pointer lands inside its expected range before using it. A null or out-of-range pointer means "not ready", not zero.
 - Both blocks move by the same offset (`SetSaveBlocksPointers`). Two different offsets mean "not ready".
+- On the frame the blocks move, a read can see a half-copied block: `MoveSaveBlocks_ResetHeap` (`src/load_save.c`) sets the pointers, then copies the data. In per-frame replays on rev 1 this read `pokedex_owned` and `pokedex_seen` as 0 for one frame at 3 block moves in 31,816 reads, and no other field. The decomp has no copy-in-progress flag the reader can use: both `gMain` interrupt callbacks are NULL during the copy, but also for 40 frames and more in the bedroom menus. So a consumer of a count must not act on a single read. Require two consecutive reads that agree, as `NewMaximum` does.
 - Validate the party checksum before trusting species or moves.
 - File-local symbols carry a numeric suffix that differs between builds. Match on the base name.
 - No address enters the code without a symbol name and the commit it came from.
