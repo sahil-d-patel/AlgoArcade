@@ -153,7 +153,7 @@ class FireRedReader:
         # On the title screen and intro the pointer is valid but the block is still empty.
         if (map_group, map_num, x, y) == (0, 0, 0, 0) and count == 0:
             raise StateNotReady("SaveBlock1 is empty: the game has not reached the overworld")
-        flags = backend.read(pointer + 0xEE0, 0x120)
+        flags = backend.read(pointer + 0xEE0, 0x120)  # NUM_FLAG_BYTES
         event_flags = frozenset(
             name
             for name in milestones.FLAGS

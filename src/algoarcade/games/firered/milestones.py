@@ -1,10 +1,10 @@
 """The ordered Pallet-to-Brock milestones. Contract: docs/harness-spec.md, FireRed GameState fields.
 
-`count` is one more than the position of the furthest milestone that holds, so a lost rival
-battle does not hold back the rest. Two milestones are a map the player walks off; AlgoArcadeEnv
-keeps each episode's best count, which latches them. Flag and item ids are in addresses.IDS, map
-ids are (group, number) from data/maps/map_groups.json, and scripts are under data/maps/, all in
-pret/pokefirered at addresses.LAYOUT_COMMIT.
+`count` is the position, 1 to 9, of the furthest milestone that holds, or 0, so a lost rival
+battle does not hold back the rest. forest_exited and gym_entered stop holding when the player
+walks off their map; AlgoArcadeEnv keeps each episode's best count, which latches them. Flag and
+item ids are in addresses.IDS, map ids are (group, number) from data/maps/map_groups.json, and
+scripts are under data/maps/, all in pret/pokefirered at addresses.LAYOUT_COMMIT.
 """
 
 from collections.abc import Callable
