@@ -135,6 +135,21 @@ def test_info_carries_location_and_milestone_count() -> None:
     assert info["milestone_count"] == 0
 
 
+def test_info_keeps_the_episode_best_milestone_count() -> None:
+    backend = FakeBackend()
+    env = make_env(backend)
+    env.reset(seed=0)
+    counts = []
+    for value in (3, 1, 0, 4):
+        ram = bytearray(backend.save_state())
+        ram[fake.MILESTONES] = value
+        backend.load_state(bytes(ram))
+        counts.append(env.step(3)[4]["milestone_count"])
+    assert counts == [3, 3, 3, 4]
+    _, info = env.reset(seed=0)
+    assert info["milestone_count"] == 0
+
+
 def test_reset_pays_nothing_and_clears_the_episode() -> None:
     env = make_env()
     env.reset(seed=0)

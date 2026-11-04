@@ -3,11 +3,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from capture_states import Player
 from capture_validation_states import SEGMENTS, play
 
 from algoarcade.backends.base import Button
 from algoarcade.backends.mgba import MgbaBackend
-from algoarcade.games.firered.reader import FireRedReader, FireRedState
+from algoarcade.games.base import StateNotReady
+from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
+from algoarcade.games.firered.reader import BattlePokemon, FireRedReader, FireRedState
 from algoarcade.rewards.penalties import AntiSpam
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -119,6 +122,10 @@ CAPTURES = {
     "validate_potion.state": (
         REV1,
         "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
+    ),
+    "validate_brock_lost.state": (
+        REV1,
+        "bbe9ee5dcd2499a159929060861c382ac9f44bc794453b9ed900bdcc5d3985a8",
     ),
     "brock_goal.state": (
         REV1,
@@ -528,3 +535,142 @@ def test_firered_fields_text_box_open_battle_tutorial(firered_backend: MgbaBacke
     assert arrow.text_box_open
     firered_backend.step(30)
     assert reader.read(firered_backend).text_progress == arrow.text_progress
+
+
+def read_start_state(name: str, inputs: str = "") -> FireRedState:
+    """The manifest state `name`, after the recorded inputs for capture_validation_states.play."""
+    rom = ROOT / "data/roms/firered.gba"
+    path = ROOT / "data/states" / f"{name}.state"
+    if not rom.is_file() or not path.is_file():
+        pytest.skip(f"Needs the local FireRed ROM and {path.name}")
+    data = path.read_bytes()
+    assert hashlib.sha256(data).hexdigest() == {e.name: e.sha256 for e in MANIFEST}[name]
+    backend = MgbaBackend(rom, render=False)
+    try:
+        if backend.rom.sha1 != ROM_SHA1:
+            pytest.skip("The start states were captured on rev 1")
+        backend.load_state(data)
+        if name == "seg_03_rival":
+            # The rival stops the player at the lab door; A through his lines starts the battle.
+            player = Player(backend)
+            player.run("tDx2 tLx3")
+            backend.press([Button.DOWN], hold=20, release=20)
+            player.run("ab")
+        play(backend, inputs)
+        return FireRedReader(backend.rom.sha1).read(backend)
+    finally:
+        backend.close()
+
+
+@pytest.fixture(scope="module")
+def rival_battle() -> FireRedState:
+    # Through Oak's tutorial to "What will SQUIRTLE do?", then FIGHT and Tackle twice. On screen,
+    # each turn prints "SQUIRTLE used TACKLE!" and "Foe BULBASAUR used TACKLE!".
+    turn = "A w20 A w300 B*10 w60"
+    return read_start_state("seg_03_rival", f"w60 B*60 w200 {turn} {turn}")
+
+
+@pytest.fixture(scope="module")
+def brock_battle() -> FireRedState:
+    return read_start_state("brock")
+
+
+# The player's side: the battle box (Lv, HP) and the FIGHT menu (move names, PP of the cursor's
+# move). The rival battle shows SQUIRTLE Lv5 14/ 20, TACKLE PP 33/35 and TAIL WHIP 30/30; at
+# Brock, SQUIRTLE Lv14 40/ 40, WATER GUN 25/25, TAIL WHIP 30/30, BUBBLE 30/30, WITHDRAW 40/40.
+# Move ids: Tackle 33, Tail Whip 39, Water Gun 55, Bubble 145, Withdraw 110, Growl 45, Defense
+# Curl 111 (include/constants/moves.h).
+#
+# The opponent's box shows only the level and an HP bar of 48 pixels. BULBASAUR Lv5's bar is 32
+# pixels after two Tackles, floor(48 * 13 / 19); GEODUDE Lv12's is full. Max HP, moves and the
+# untouched PP follow src/data/trainer_parties.h: both have iv 0, so max HP is 19 and 31
+# (base HP 45 and 40); Bulbasaur at level 5 knows Tackle and Growl (level_up_learnsets.h), and
+# Brock's Geodude Tackle and Defense Curl. Bulbasaur's Tackle PP is 35 less the two uses on screen.
+BATTLE_SCREEN = {
+    "own": {
+        "rival": BattlePokemon(14, 20, 5, (33, 39, 0, 0), (33, 30, 0, 0)),
+        "brock": BattlePokemon(40, 40, 14, (55, 39, 145, 110), (25, 30, 30, 40)),
+    },
+    "enemy": {
+        "rival": BattlePokemon(13, 19, 5, (33, 45, 0, 0), (33, 40, 0, 0)),
+        "brock": BattlePokemon(31, 31, 12, (33, 111, 0, 0), (35, 40, 0, 0)),
+    },
+}
+
+
+@pytest.mark.rom
+@pytest.mark.parametrize("side", ["own", "enemy"])
+@pytest.mark.parametrize("field", ["hp", "max_hp", "level", "moves", "pp"])
+def test_firered_fields_battle(
+    rival_battle: FireRedState, brock_battle: FireRedState, side: str, field: str
+) -> None:
+    for battle, state in [("rival", rival_battle), ("brock", brock_battle)]:
+        assert state.in_battle
+        expected = getattr(BATTLE_SCREEN[side][battle], field)
+        assert getattr(getattr(state, f"battle_{side}"), field) == expected, battle
+
+
+# s1 still holds a fainted Pidgey from its last wild battle in gBattleMons.
+@pytest.mark.rom
+@pytest.mark.parametrize("name", ["s0", "s1", "seg_05_forest"])
+def test_firered_fields_battle_null_in_the_overworld(name: str) -> None:
+    state = read_start_state(name)
+    assert not state.in_battle
+    assert (state.battle_own, state.battle_enemy) == (None, None)
+
+
+def battle_frames(backend: MgbaBackend, frames: int) -> list[FireRedState]:
+    """One read per frame for `frames` frames, skipping a read torn by a party rewrite."""
+    reader = FireRedReader(backend.rom.sha1)
+    states = []
+    for _ in range(frames):
+        backend.step(1)
+        try:
+            states.append(reader.read(backend))
+        except StateNotReady:
+            continue
+    return states
+
+
+@pytest.mark.rom
+def test_firered_fields_battle_rematch_reads_no_stale_battler(firered_backend: MgbaBackend) -> None:
+    # The loss left Squirtle at 0 HP in gBattleMons, and CreateNPCTrainerParty gives the rematch's
+    # Geodude the same personality. The Pokemon Center has healed Squirtle to 40/ 40.
+    load_capture(firered_backend, "validate_brock_lost.state")
+    player = Player(firered_backend)
+    player.run("aa tDx4 tD tRx5 tUx14 tLx14 tDx5 tRx7 tU tUx4 tRx3 tUx2 tL tUx2 tLx2 U")
+    reader = FireRedReader(firered_backend.rom.sha1)
+    for _ in range(100):
+        if reader.read(firered_backend).in_battle:
+            break
+        firered_backend.press([Button.A], hold=2, release=28)
+    states = battle_frames(firered_backend, 120)
+    assert all(state.in_battle for state in states)
+    own = [state.battle_own for state in states]
+    assert {pokemon.hp for pokemon in own if pokemon} == {40}
+    assert own[0] is None
+    assert own[-1] is not None
+    assert own[-1].level == 14
+    assert {pokemon.hp for state in states if (pokemon := state.battle_enemy)} == {31}
+
+
+@pytest.mark.rom
+def test_firered_fields_battle_enemy_switch_reads_no_stale_battler(
+    firered_backend: MgbaBackend,
+) -> None:
+    # Water Gun every turn: Geodude (Lv12, 31 max HP) faints and Brock sends out Onix (Lv14, 33).
+    # gBattlerPartyIndexes moves to Onix's slot two frames before gBattleMons holds Onix.
+    path = ROOT / "data/states/brock.state"
+    if firered_backend.rom.sha1 != ROM_SHA1 or not path.is_file():
+        pytest.skip("Needs brock.state and the rev 1 ROM it was captured on")
+    data = path.read_bytes()
+    assert hashlib.sha256(data).hexdigest() == {e.name: e.sha256 for e in MANIFEST}["brock"]
+    firered_backend.load_state(data)
+    states = []
+    for _ in range(40):
+        firered_backend.press([Button.A], hold=2, release=0)
+        states += battle_frames(firered_backend, 28)
+    enemies = {(pokemon.level, pokemon.max_hp) for s in states if (pokemon := s.battle_enemy)}
+    assert enemies == {(12, 31), (14, 33)}
+    onix = next(i for i, s in enumerate(states) if s.battle_enemy and s.battle_enemy.level == 14)
+    assert all(s.battle_enemy is None or s.battle_enemy.level == 14 for s in states[onix:])

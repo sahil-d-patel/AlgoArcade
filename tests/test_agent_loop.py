@@ -308,6 +308,10 @@ def test_seg_01_is_graded_by_the_manifest_goal() -> None:
         world_map_flags=0,
         text_speed=2,
         battle_scene_off=True,
+        battle_own=None,
+        battle_enemy=None,
+        event_flags=("FLAG_SYS_POKEMON_GET",),
+        parcel_delivered=False,
     )
     # The state JSON the server sends, as get_state builds it.
     bedroom = to_jsonable_python(state)

@@ -8,8 +8,13 @@ import pytest
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady
-from algoarcade.games.firered.addresses import ADDRESSES
-from algoarcade.games.firered.reader import STORY_FLAGS, FireRedReader, PartyPokemon
+from algoarcade.games.firered.addresses import ADDRESSES, IDS
+from algoarcade.games.firered.reader import (
+    STORY_FLAGS,
+    BattlePokemon,
+    FireRedReader,
+    PartyPokemon,
+)
 from algoarcade.rewards.penalties import AntiSpam
 from algoarcade.rom import identify
 
@@ -53,6 +58,10 @@ class MemoryBackend(FakeBackend):
         self.write(addresses["sLockFieldControls"].address, b"\x00")
         self.write(addresses["sTextPrinters"].address, bytes(25 * 0x24))
         self.write(addresses["sGlobalScriptContext"].address, bytes(8))
+        self.write(addresses["gBattleMons"].address, bytes(2 * 0x58))
+        self.write(addresses["gBattlerPartyIndexes"].address, bytes(8))
+        self.write(addresses["gEnemyParty"].address, bytes(600))
+        self.write(addresses["gPlayerParty"].address, bytes(600))
 
     def read(self, address: int, size: int) -> bytes:
         return bytes(self.memory[address + offset] for offset in range(size))
@@ -428,6 +437,117 @@ def test_text_progress_reads_printer_zero_and_drives_anti_spam(sha1: str) -> Non
     anti_spam.reset(first)
     assert anti_spam.score(first, same) == 1.0
     assert anti_spam.score(first, advanced) == 0.0
+
+
+def overworld(sha1: str) -> tuple[MemoryBackend, int]:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    return backend, base
+
+
+def battler(species: int, hp: int, level: int, max_hp: int, personality: int) -> bytes:
+    entry = bytearray(0x58)
+    struct.pack_into("<H", entry, 0, species)
+    struct.pack_into("<4H", entry, 0x0C, 33, 45, 0, 0)
+    entry[0x24:0x28] = bytes([35, 40, 0, 0])
+    struct.pack_into("<HBxH", entry, 0x28, hp, level, max_hp)
+    struct.pack_into("<I", entry, 0x48, personality)
+    return bytes(entry)
+
+
+def in_battle(sha1: str) -> MemoryBackend:
+    """Squirtle 14/ 20 in party slot 0 against Bulbasaur 13/ 19 in enemy slot 1."""
+    addresses = ADDRESSES[sha1]
+    backend, _ = overworld(sha1)
+    mons = addresses["gBattleMons"].address
+    backend.write(mons, battler(7, 14, 5, 20, 0x1111) + battler(1, 13, 5, 19, 0x2222))
+    backend.write(addresses["gBattlerPartyIndexes"].address, struct.pack("<4H", 0, 1, 0, 0))
+    backend.write(addresses["gPlayerParty"].address, party_entry(0x1111, 7, 5, 14) + bytes(500))
+    backend.write(addresses["gEnemyParty"].address + 100, party_entry(0x2222, 1, 5, 13))
+    backend.write(addresses["gMain"].address + 0x439, b"\x02")
+    return backend
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_battle_fields_read_both_battlers(sha1: str) -> None:
+    state = FireRedReader(sha1).read(in_battle(sha1))
+    assert state.battle_own == BattlePokemon(14, 20, 5, (33, 45, 0, 0), (35, 40, 0, 0))
+    assert state.battle_enemy == BattlePokemon(13, 19, 5, (33, 45, 0, 0), (35, 40, 0, 0))
+
+
+# Each write leaves gBattleMons behind the party copies, as the game does for some frames.
+STALE = {
+    # gBattleMons outlives the battle.
+    "battle over": ("gMain", 0x439, b"\x00"),
+    # A switch: gBattlerPartyIndexes moves before the new Pokemon is copied in.
+    "player switch": ("gBattlerPartyIndexes", 0, struct.pack("<H", 1)),
+    "opponent switch": ("gBattlerPartyIndexes", 2, struct.pack("<H", 2)),
+    # A new opponent, before the battle intro copies it.
+    "new opponent": ("gEnemyParty", 100, (0x3333).to_bytes(4, "little")),
+    # A rematch after a loss: same personalities, the party healed.
+    "rematch": ("gPlayerParty", 0x56, struct.pack("<H", 20)),
+    # A level-up reaches the party first.
+    "level up": ("gPlayerParty", 0x54, b"\x06"),
+    "bad slot": ("gBattlerPartyIndexes", 2, struct.pack("<H", 0xFFFF)),
+}
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize("case", STALE)
+def test_battle_fields_are_none_while_gbattlemons_is_stale(sha1: str, case: str) -> None:
+    backend = in_battle(sha1)
+    symbol, offset, data = STALE[case]
+    backend.write(ADDRESSES[sha1][symbol].address + offset, data)
+    state = FireRedReader(sha1).read(backend)
+    assert (state.battle_own, state.battle_enemy) == (None, None)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+@pytest.mark.parametrize("offset", [0, 0x7C])
+def test_event_flags_and_parcel_follow_the_save_block(sha1: str, offset: int) -> None:
+    addresses = ADDRESSES[sha1]
+    backend, base = overworld(sha1)
+    pointer = base + offset
+    backend.write(addresses["gSaveBlock1Ptr"].address, pointer.to_bytes(4, "little"))
+    backend.write(
+        addresses["gSaveBlock2Ptr"].address,
+        (addresses["gSaveBlock2"].address + offset).to_bytes(4, "little"),
+    )
+    backend.write(pointer, struct.pack("<hhbb", 12, 19, 3, 4))
+    reader = FireRedReader(sha1)
+    first = reader.read(backend)
+    assert first.event_flags == ()
+    assert not first.parcel_delivered
+    for name in ("FLAG_SYS_POKEMON_GET", "FLAG_WORLD_MAP_PEWTER_CITY", "FLAG_BADGE01_GET"):
+        flag = IDS[name].value
+        address = pointer + 0xEE0 + flag // 8
+        backend.write(address, bytes([backend.read(address, 1)[0] | 1 << (flag % 8)]))
+    # A neighbour of FLAG_WORLD_MAP_PEWTER_CITY that is not a milestone.
+    neighbour = pointer + 0xEE0 + 0x893 // 8
+    backend.write(neighbour, bytes([backend.read(neighbour, 1)[0] | 1 << (0x893 % 8)]))
+    # In milestones.FLAGS order, so the state JSON does not depend on PYTHONHASHSEED.
+    assert reader.read(backend).event_flags == (
+        "FLAG_SYS_POKEMON_GET",
+        "FLAG_WORLD_MAP_PEWTER_CITY",
+        "FLAG_BADGE01_GET",
+    )
+    mart = pointer + 0x1000 + 2 * (IDS["VAR_MAP_SCENE_VIRIDIAN_CITY_MART"].value - 0x4000)
+    parcel = IDS["ITEM_OAKS_PARCEL"].value
+    backend.write(mart, struct.pack("<H", 1))
+    backend.write(pointer + 0x3B8 + 4 * 2, struct.pack("<HH", parcel, 1))
+    assert not reader.read(backend).parcel_delivered
+    backend.write(pointer + 0x3B8 + 4 * 2, bytes(4))
+    assert reader.read(backend).parcel_delivered
+    # Stored in the PC is not delivered.
+    backend.write(pointer + 0x298 + 4 * 29, struct.pack("<HH", parcel, 1))
+    assert not reader.read(backend).parcel_delivered
+    backend.write(pointer + 0x298 + 4 * 29, bytes(4))
+    backend.write(mart, struct.pack("<H", 0))
+    assert not reader.read(backend).parcel_delivered
 
 
 @pytest.mark.rom

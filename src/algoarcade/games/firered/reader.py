@@ -2,23 +2,28 @@ import struct
 from dataclasses import dataclass
 from itertools import permutations
 
-from algoarcade.backends.base import GameBackend, read_u8, read_u32
+from algoarcade.backends.base import GameBackend, read_u8, read_u16, read_u32
 from algoarcade.games.base import StateNotReady
-from algoarcade.games.firered.addresses import ADDRESSES
+from algoarcade.games.firered import milestones
+from algoarcade.games.firered.addresses import ADDRESSES, IDS
 
 # GetSubstruct in src/pokemon.c: physical order of growth, attacks, EVs and miscellaneous.
 SUBSTRUCT_ORDERS = tuple(permutations(range(4)))
-# include/constants/flags.h at source e93eb12a336fb97df420b0961753d8a3713c9fcc. The list defines
-# the logged story_flags column: docs/decisions.md, 2026-11-03.
+# The list defines the logged story_flags column: docs/decisions.md, 2026-11-03.
 STORY_FLAGS = {
-    "FLAG_VISITED_OAKS_LAB": 0x2CF,
-    "FLAG_SYS_POKEMON_GET": 0x828,
-    "FLAG_BEAT_RIVAL_IN_OAKS_LAB": 0x258,
-    "FLAG_GOT_POTION_ON_ROUTE_1": 0x230,
-    "FLAG_SYS_POKEDEX_GET": 0x829,
-    "FLAG_DEFEATED_BROCK": 0x4B0,
-    "FLAG_GOT_TM39_FROM_BROCK": 0x254,
+    name: IDS[name].value
+    for name in (
+        "FLAG_VISITED_OAKS_LAB",
+        "FLAG_SYS_POKEMON_GET",
+        "FLAG_BEAT_RIVAL_IN_OAKS_LAB",
+        "FLAG_GOT_POTION_ON_ROUTE_1",
+        "FLAG_SYS_POKEDEX_GET",
+        "FLAG_DEFEATED_BROCK",
+        "FLAG_GOT_TM39_FROM_BROCK",
+    )
 }
+# struct BattlePokemon in include/pokemon.h at the layout commit: 0x58 plaintext bytes.
+BATTLER_SIZE = 0x58
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,15 @@ class PartyPokemon:
     species: int
     moves: tuple[int, int, int, int]
     is_egg: bool
+
+
+@dataclass(frozen=True)
+class BattlePokemon:
+    hp: int
+    max_hp: int
+    level: int
+    moves: tuple[int, int, int, int]
+    pp: tuple[int, int, int, int]
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,12 @@ class FireRedState:
     world_map_flags: int
     text_speed: int
     battle_scene_off: bool
+    # The player's and the opponent's active Pokemon; None outside a single battle.
+    battle_own: BattlePokemon | None
+    battle_enemy: BattlePokemon | None
+    # Names of the set flags among milestones.FLAGS, in that order, so the state JSON is stable.
+    event_flags: tuple[str, ...]
+    parcel_delivered: bool
 
     @property
     def party_count(self) -> int:
@@ -76,6 +96,10 @@ class FireRedState:
         hatched = [pokemon for pokemon in self.party if not pokemon.is_egg]
         maximum = sum(pokemon.max_hp for pokemon in hatched)
         return sum(pokemon.hp for pokemon in hatched) / maximum if maximum else 0.0
+
+    @property
+    def milestone_count(self) -> int:
+        return milestones.count(self)
 
 
 class FireRedReader:
@@ -142,6 +166,13 @@ class FireRedReader:
         # On the title screen and intro the pointer is valid but the block is still empty.
         if (map_group, map_num, x, y) == (0, 0, 0, 0) and count == 0:
             raise StateNotReady("SaveBlock1 is empty: the game has not reached the overworld")
+        flags = backend.read(pointer + 0xEE0, 0x120)  # NUM_FLAG_BYTES
+        event_flags = tuple(
+            name
+            for name in milestones.FLAGS
+            if flags[IDS[name].value // 8] & (1 << (IDS[name].value % 8))
+        )
+        battle_own, battle_enemy = self._battlers(backend) if in_battle else (None, None)
         party = []
         for index in range(count):
             # struct Pokemon: include/pokemon.h at the same source commit; live party only.
@@ -193,7 +224,67 @@ class FireRedReader:
             world_map_flags=world_map_flags.bit_count(),
             text_speed=options[0] & 7,
             battle_scene_off=bool(options[1] & 4),
+            battle_own=battle_own,
+            battle_enemy=battle_enemy,
+            event_flags=event_flags,
+            parcel_delivered=self._parcel_delivered(backend, pointer),
         )
+
+    @staticmethod
+    def _parcel_delivered(backend: GameBackend, pointer: int) -> bool:
+        # ViridianCity_Mart/scripts.inc sets the var to 1 as the clerk hands the parcel over;
+        # PalletTown_ProfessorOaksLab/scripts.inc takes it out of the bag as Oak receives it,
+        # before FLAG_SYS_POKEDEX_GET. SaveBlock1 holds vars from 0x1000 (VARS_START is 0x4000),
+        # and pcItems at 0x298 and bagPocket_KeyItems at 0x3B8, 30 slots each of (itemId,
+        # quantity) with the ids not encrypted. Nothing in item_menu.c stops the parcel going
+        # into the PC, so a stored parcel is not delivered.
+        mart = IDS["VAR_MAP_SCENE_VIRIDIAN_CITY_MART"].value - 0x4000
+        stored = struct.unpack("<60H", backend.read(pointer + 0x298, 120))[::2]
+        key_items = struct.unpack("<60H", backend.read(pointer + 0x3B8, 120))[::2]
+        return read_u16(backend, pointer + 0x1000 + 2 * mart) >= 1 and (
+            IDS["ITEM_OAKS_PARCEL"].value not in stored + key_items
+        )
+
+    def _battlers(self, backend: GameBackend) -> tuple[BattlePokemon | None, BattlePokemon | None]:
+        # InitSinglePlayerBtlControllers (src/battle_controllers.c) puts the player at battler 0
+        # and the opponent at battler 1 in every single battle.
+        mons = backend.read(self._addresses["gBattleMons"].address, 2 * BATTLER_SIZE)
+        slots = struct.unpack(
+            "<2H", backend.read(self._addresses["gBattlerPartyIndexes"].address, 4)
+        )
+        # gBattleMons is never cleared. gMain.inBattle goes up in CB2_InitBattleInternal about 30
+        # frames before BattleIntroDrawTrainersOrMonsSprites copies the new Pokemon in, and a
+        # switch moves gBattlerPartyIndexes a few frames before the copy. A rematch after a
+        # loss brings back the same personalities (CreateNPCTrainerParty), so each battler must
+        # also match its party entry's plaintext level (+0x54) and HP (+0x56). Damage reaches
+        # both copies on the same frame. A level-up reaches the party first, so the fields are
+        # None until the level-up box shows: 92 frames after Onix faints from brock.state, 26 after
+        # the rival's Bulbasaur faints.
+        battlers = []
+        for base, party, slot in (
+            (0, self._addresses["gPlayerParty"].address, slots[0]),
+            (BATTLER_SIZE, self._addresses["gEnemyParty"].address, slots[1]),
+        ):
+            if slot > 5:
+                return None, None
+            hp, level, max_hp = struct.unpack_from("<HBxH", mons, base + 0x28)
+            entry = backend.read(party + slot * 100, 0x58)
+            same_pokemon = mons[base + 0x48 : base + 0x4C] == entry[:4]
+            if not same_pokemon or (level, hp) != (
+                entry[0x54],
+                int.from_bytes(entry[0x56:0x58], "little"),
+            ):
+                return None, None
+            battlers.append(
+                BattlePokemon(
+                    hp=hp,
+                    max_hp=max_hp,
+                    level=level,
+                    moves=struct.unpack_from("<4H", mons, base + 0x0C),
+                    pp=struct.unpack_from("<4B", mons, base + 0x24),
+                )
+            )
+        return battlers[0], battlers[1]
 
     def check_options(self, backend: GameBackend) -> None:
         state = self.read(backend)
