@@ -80,8 +80,7 @@ The framework asks one thing of every GameState: a `location`, a hashable tuple 
 | Context | text_speed, battle_scene_off | Saved options; fast text is 2 and battle scenes must be off |
 | Battle | own and enemy HP, level, moves, PP | Only meaningful while in_battle is true |
 
-Fields arrive in stages: position and plaintext party fields in ENV-05; badges, encrypted party
-fields and the remaining context in ENV-08; detailed battle fields and milestones in ENV-13.
+Fields arrive in stages: position and plaintext party fields in ENV-05, `badge_flags` in ENV-06 (#69), encrypted party fields and the remaining context in ENV-08, detailed battle fields and milestones in ENV-13.
 
 Every field has a validation test against a captured save state with a known value.
 
@@ -110,8 +109,7 @@ Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number a
 
 Inside a party entry: status at 0x50, level at 0x54, HP at 0x56, max HP at 0x58, all plain. The encrypted block is at 0x20 to 0x4F.
 
-ENV-08 source layouts below were checked at `e93eb12a336fb97df420b0961753d8a3713c9fcc`,
-the source commit used for the pinned symbol build:
+ENV-08 source layouts below were checked at `e93eb12a336fb97df420b0961753d8a3713c9fcc`, the source commit used for the pinned symbol build:
 
 | Fields | Symbol and layout | Source |
 |---|---|---|
@@ -144,14 +142,7 @@ The story whitelist, approved in `docs/decisions.md` on 2026-11-03, counts each 
 | FLAG_DEFEATED_BROCK | 0x4B0 | Brock defeated |
 | FLAG_GOT_TM39_FROM_BROCK | 0x254 | Brock's TM received |
 
-`tests/test_firered_fields.py` checks each field against hash-pinned local captures whose
-values were read off the screen: trainer card, party and summary screens, options, dialogue,
-battle and Pokedex. Each capture runs only on the revision it was made with. Rev 0 captures are
-Kumario1's. Rev 1 captures come from `scripts/capture_validation_states.py`, including a
-poisoned Squirtle (status 8), plus `brock_goal` from `scripts/capture_states.py` (Boulder Badge).
-On each revision a replay crosses a warp and the lab rival battle, checking map ids, money and
-that no progress count falls. Capture tests carry the `rom` marker and skip without the ROM or
-the capture.
+`tests/test_firered_fields.py` checks each field against captures read off the screen; the ram-field skill says how they are pinned and regenerated.
 
 Rules:
 
