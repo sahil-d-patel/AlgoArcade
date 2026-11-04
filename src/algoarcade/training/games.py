@@ -13,45 +13,74 @@ from typing import Any
 
 import gymnasium as gym
 
+from algoarcade.backends.base import GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games import fake
-from algoarcade.games.base import StateReader
+from algoarcade.games.base import GameState, StateReader
 from algoarcade.games.firered.features import FEATURES as FIRERED_FEATURES
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1, STATES
 from algoarcade.games.firered.reader import FireRedReader, FireRedState
-from algoarcade.rewards.explore import Explore
 from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
 from algoarcade.rom import identify
 
 FIRERED_ROM = Path(__file__).resolve().parents[3] / "data" / "roms" / "firered.gba"
-# The components FireRedState can feed until ENV-08 adds story_flags, badge_count and
-# party_level_sum. Any other name in reward_weights is refused by the registry.
-FIRERED_COMPONENTS = {"explore": Explore}
 FAKE_STEP_BUDGET = 64
+# Logged at the episode's end. A save block read on the frame the block moves can dip or read
+# high (docs/harness-spec.md, FireRed memory map), so each is the value of the latest two
+# consecutive reads that agreed.
+COUNTS = ("badge_count", "party_level_sum", "story_flags")
+
+
+class LastRead:
+    """A reader that keeps the last state it returned, so the logs see the state the env used,
+    after its not-ready retry, without reading memory a second time."""
+
+    def __init__(self, reader: StateReader) -> None:
+        self._reader = reader
+        self.state: Any = None
+
+    def read(self, backend: GameBackend) -> GameState:
+        self.state = self._reader.read(backend)
+        return self.state
 
 
 class Measures(gym.Wrapper[dict[str, Any], Any, dict[str, Any], Any]):
-    """Adds `name: measure(state)` to every step's info, for the logs: the start state's goal
-    and the episode-end counts the env does not report. It reads the state again after the
-    env's own read; nothing has advanced in between, so the two agree."""
+    """Adds to each step's info what the logs need and the env does not report: `goal`,
+    `in_battle`, and each of COUNTS. Until two reads agree on a count, the reset read stands."""
 
     def __init__(
         self,
         env: AlgoArcadeEnv,
-        reader: StateReader,
-        measures: Mapping[str, Callable[[Any], Any]],
+        reads: LastRead,
+        goal: Callable[[Any], bool],
+        in_battle: Callable[[Any], bool],
     ) -> None:
         super().__init__(env)
-        self._backend = env.backend
-        self._reader = reader
-        self._measures = measures
+        self._reads = reads
+        self._goal = goal
+        self._in_battle = in_battle
+        self._last: dict[str, int] = {}
+        self._agreed: dict[str, int] = {}
+
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        obs, info = self.env.reset(seed=seed, options=options)
+        self._last = {name: getattr(self._reads.state, name) for name in COUNTS}
+        self._agreed = dict(self._last)
+        return obs, info
 
     def step(self, action: Any) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         obs, reward, terminated, truncated, info = self.env.step(action)
-        state = self._reader.read(self._backend)
-        info |= {name: measure(state) for name, measure in self._measures.items()}
+        state = self._reads.state
+        for name in COUNTS:
+            value = getattr(state, name)
+            if value == self._last[name]:
+                self._agreed[name] = value
+            self._last[name] = value
+        info |= self._agreed | {"goal": self._goal(state), "in_battle": self._in_battle(state)}
         return obs, float(reward), terminated, truncated, info
 
 
@@ -60,30 +89,24 @@ def firered_env(state: bytes, start_state: str, reward_weights: Mapping[str, flo
     assert entry.step_budget is not None
     backend = MgbaBackend(FIRERED_ROM, render=False)
     reader = FireRedReader(backend.rom.sha1)
-    rewards = RewardRegistry[FireRedState](FIRERED_COMPONENTS, reward_weights)
-    env = AlgoArcadeEnv(backend, reader, rewards, state, entry.step_budget, FIRERED_FEATURES)
-    measures: dict[str, Callable[[FireRedState], Any]] = {
-        "goal": entry.goal,
-        "badge_count": lambda s: s.badge_flags.bit_count(),
-        "party_level_sum": lambda s: sum(p.level for p in s.party),
-    }
-    return Measures(env, reader, measures)
+    # The start state is the same on every reset, so one check covers them all.
+    backend.load_state(state)
+    reader.check_options(backend)
+    reads = LastRead(reader)
+    rewards = RewardRegistry[FireRedState](COMPONENTS, reward_weights)
+    env = AlgoArcadeEnv(backend, reads, rewards, state, entry.step_budget, FIRERED_FEATURES)
+    return Measures(env, reads, entry.goal, lambda s: s.in_battle)
 
 
 def fake_env(reward_weights: Mapping[str, float]) -> gym.Env:
     backend = FakeBackend()
-    reader = fake.FakeReader()
+    reads = LastRead(fake.FakeReader())
     rewards = RewardRegistry(COMPONENTS, reward_weights)
     env = AlgoArcadeEnv(
-        backend, reader, rewards, backend.save_state(), FAKE_STEP_BUDGET, fake.FEATURES
+        backend, reads, rewards, backend.save_state(), FAKE_STEP_BUDGET, fake.FEATURES
     )
-    measures: dict[str, Callable[[fake.FakeState], Any]] = {
-        "goal": lambda s: s.chest_opened,
-        "badge_count": lambda s: s.badge_count,
-        "party_level_sum": lambda s: s.party_level_sum,
-        "story_flags": lambda s: s.story_flags,
-    }
-    return Measures(env, reader, measures)
+    # The toy game has no battles.
+    return Measures(env, reads, lambda s: s.chest_opened, lambda _s: False)
 
 
 def env_factory(

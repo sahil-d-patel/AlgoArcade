@@ -1,10 +1,12 @@
 """The runner on the fake game: Parquet logs, normalisation statistics and checkpoint replay."""
 
 import dataclasses
+import time
 from functools import partial
 from pathlib import Path
 
 import gymnasium as gym
+import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
@@ -14,10 +16,13 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
+from algoarcade.backends import fake
+from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.logs.schema import TABLES, validate
 from algoarcade.training import runner
 from algoarcade.training.config import PRESETS
-from algoarcade.training.games import FAKE_STEP_BUDGET, fake_env
+from algoarcade.training.games import FAKE_STEP_BUDGET, FIRERED_ROM, env_factory, fake_env
+from algoarcade.training.parquet import ParquetLog
 from algoarcade.training.runner import train
 
 FIRERED = PRESETS["firered"][1]
@@ -66,6 +71,58 @@ def test_episodes_split_training_and_evaluation(run_dir: Path) -> None:
     assert [e["env_steps"] for e in eval_rows] == [256, 512]
     assert all(e["reward_level"] is None for e in episodes)
     assert all(e["reward_explore"] is not None for e in episodes)
+    # The fake's RAM starts with a level sum of 5 and nothing in the game changes it.
+    assert {(e["party_level_sum"], e["badge_count"], e["milestone_count"]) for e in episodes} == {
+        (5, 0, 0)
+    }
+
+
+def test_a_count_changes_only_once_two_reads_agree() -> None:
+    env = fake_env({"explore": 0.1})
+    env.reset(seed=0)
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    backend = unwrapped.backend
+    counts = []
+    for badges in (0, 1, 0, 1, 1, 1):
+        ram = bytearray(backend.save_state())
+        ram[fake.BADGES] = badges
+        backend.load_state(bytes(ram))
+        counts.append(env.step(5)[4]["badge_count"])
+    assert counts == [0, 0, 0, 0, 1, 1]
+
+
+@pytest.mark.rom
+def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
+    if not FIRERED_ROM.is_file():
+        pytest.skip("Needs the local FireRed ROM")
+    config = dataclasses.replace(FIRERED, start_state="seg_02_pallet", n_envs=1)
+    env_fn, _, _ = env_factory("firered", config.start_state, config.reward_weights)
+    # 64-step episodes keep the test short; the manifest's budget is 4,096.
+    venv = DummyVecEnv([lambda: gym.wrappers.TimeLimit(env_fn(), 64)])
+    log = ParquetLog(venv, config, tmp_path / "run_id=t", time.perf_counter())
+    log.reset()
+    for step in range(128):
+        log.step(np.array([2 + step % 2]))  # left, right
+    log.close()
+
+    steps = pq.read_table(tmp_path / "run_id=t" / "steps")
+    episodes = pq.read_table(tmp_path / "run_id=t" / "episodes")
+    validate(steps, "steps")
+    validate(episodes, "episodes")
+    # seg_02_pallet's party is one level 6 Pokemon, with three whitelist flags and two
+    # milestones set; walking left and right in Pallet Town changes none of them.
+    assert [
+        (e["party_level_sum"], e["story_flags"], e["badge_count"], e["milestone_count"])
+        for e in episodes.to_pylist()
+    ] == [(6, 3, 0, 2)] * 2
+    assert set(steps["milestone_count"].to_pylist()) == {2}
+    assert set(steps["in_battle"].to_pylist()) == {False}
+    assert all(
+        e[f"reward_{name}"] is not None
+        for e in episodes.to_pylist()
+        for name in config.reward_weights
+    )
 
 
 def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path) -> None:

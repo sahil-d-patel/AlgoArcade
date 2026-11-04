@@ -16,10 +16,6 @@ from algoarcade.logs.schema import EPISODES, REWARD_COMPONENTS, STEPS, VISITS
 from algoarcade.logs.writer import RollingWriter
 from algoarcade.training.config import TrainConfig
 
-# Written for a required column the GameState cannot provide yet: story_flags until ENV-08,
-# milestone_count until ENV-13 on FireRed. A real count is never negative. in_battle has no
-# such value and logs False until ENV-08 reads it.
-UNREAD = -1
 STEP_BATCH = 4096
 VISIT_WINDOW = 500_000
 LLM_COLUMNS = ("llm_model", "llm_tool_level", "llm_tokens_in", "llm_tokens_out", "llm_cost_usd")
@@ -132,8 +128,8 @@ class ParquetLog(VecEnvWrapper):
                 "map_num": map_num,
                 "x": x,
                 "y": y,
-                "in_battle": info.get("in_battle", False),
-                "milestone_count": info.get("milestone_count", UNREAD),
+                "in_battle": info["in_battle"],
+                "milestone_count": info["milestone_count"],
                 "reward_total": reward,
             }
             | self._reward_columns({c: info[f"reward/{c}"] for c in self._components})
@@ -152,9 +148,9 @@ class ParquetLog(VecEnvWrapper):
                 "episode_length": self._episode_step[i],
                 "badge_count": info["badge_count"],
                 "party_level_sum": info["party_level_sum"],
-                "story_flags": info.get("story_flags", UNREAD),
+                "story_flags": info["story_flags"],
                 "unique_tiles": len(self._tiles[i]),
-                "milestone_count": info.get("milestone_count", UNREAD),
+                "milestone_count": info["milestone_count"],
                 "start_state": self._start_state,
                 "archive_start": False,
                 # AlgoArcadeEnv ends episodes on the step budget only.
