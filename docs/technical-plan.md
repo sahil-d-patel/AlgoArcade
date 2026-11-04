@@ -359,7 +359,7 @@ The issues are sized at about five hours a week per member. That is more than th
 |---|---|---|
 | 1 | Oct 18 | Each person's starter task merged through a pull request |
 | 2 | Oct 25 | Emulators, memory reads, training runner and MCP server run on every machine |
-| 3 | Nov 1 | Logging schema frozen. First PPO curve on FireRed |
+| 3 | Nov 1 | First PPO curve on FireRed. The logging schema freeze moved to Nov 8 (#20) |
 | 4 | Nov 8 | Baseline clears the early segments across seeds. Run queue owns the box. Trainer parity decided |
 | 5 | Nov 15 | Feature freeze. Every experiment and the Brock runs queued. LLM arm evaluated. Second game trained |
 | 6 | Nov 22 | Everyone on analysis and visualization. Results frozen |
@@ -367,7 +367,7 @@ The issues are sized at about five hours a week per member. That is more than th
 
 Four dates cannot move.
 
-- Schema freeze, November 1. Runs logged before it are thrown away. If the StateReader is not validated on real memory by then, the freeze moves to November 8 instead of freezing a schema nobody has tested.
+- Schema freeze, November 8. Runs logged before it are thrown away. It was November 1, with the rule that it moves to November 8 if the StateReader is not validated on real memory by then; ENV-08 was not, so it moved (#20).
 - Run queue, November 8. Experiments do not fit without it.
 - Feature freeze, November 15. After it, only fixes and visualization merge.
 - Results freeze, November 22. Thanksgiving is the 26th, so week 7 is writing only.

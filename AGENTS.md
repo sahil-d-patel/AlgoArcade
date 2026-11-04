@@ -184,7 +184,7 @@ When finishing:
 - Gamma is an explicit config field and is never left at a library default. The baseline is 0.997.
 - A step-budget end is truncation, not termination.
 - A headline claim needs five seeds. Fewer is labeled exploratory.
-- The logging schema is frozen after November 1. Changing a logged field after that is a PM decision.
+- The logging schema is frozen after November 8. Changing a logged field after that is a PM decision.
 - Nobody debugs on the training box. Debug locally with one environment and 1,000 steps.
 - ROMs, save states, symbol files, map binaries and anything under `data/` never enter git.
 
