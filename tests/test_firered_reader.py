@@ -20,7 +20,7 @@ STATES_ROM_SHA1 = "dd5945db9b930750cb39d00c84da8571feebf417"  # rev 1, as captur
 SCREEN = {
     # Player's bedroom, MAP_PALLET_TOWN_PLAYERS_HOUSE_2F. The player faces up, and A prints "RED
     # played with the NES.": the bg event at (6, 5). The START menu has no POKéMON entry.
-    "s0": FireRedState(map_group=4, map_num=1, x=6, y=6, party=()),
+    "s0": FireRedState(map_group=4, map_num=1, x=6, y=6, party=(), badge_flags=0),
     # Oak's lab, MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB, after the starter and the parcel. The last
     # item ball, (10, 4) in map.json, sits four tiles right on the player's row, with Oak at
     # (6, 3) directly above. Party screen: SQUIRTLE Lv7, HP 14/ 25, no status icon.
@@ -30,8 +30,9 @@ SCREEN = {
         x=6,
         y=4,
         party=(PartyPokemon(level=7, hp=14, max_hp=25, status=0),),
+        badge_flags=0,
     ),
-    # MAP_VIRIDIAN_FOREST, on the middle tile of the south entrance warps (28 to 30, 62). The sign
+    # All three come before Brock, so badge_flags is 0. MAP_VIRIDIAN_FOREST, on the middle tile of the south entrance warps (28 to 30, 62). The sign
     # at (31, 60) is two tiles right and two up. Party screen: SQUIRTLE Lv13, HP 37/ 37, no status
     # icon.
     "seg_05_forest": FireRedState(
@@ -40,6 +41,7 @@ SCREEN = {
         x=29,
         y=62,
         party=(PartyPokemon(level=13, hp=37, max_hp=37, status=0),),
+        badge_flags=0,
     ),
 }
 
@@ -56,6 +58,13 @@ class MemoryBackend(FakeBackend):
         self.memory.update((address + offset, value) for offset, value in enumerate(data))
 
 
+def write_save_block1(
+    backend: MemoryBackend, address: int, position: bytes, badge_flags: int = 0
+) -> None:
+    backend.write(address, position)
+    backend.write(address + 0xFE4, bytes([badge_flags]))
+
+
 @pytest.mark.parametrize("sha1", ADDRESSES)
 @pytest.mark.parametrize("offset", range(0, 0x80, 4))
 def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
@@ -65,7 +74,7 @@ def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
     base = addresses["gSaveBlock1"].address
     pointer_address = addresses["gSaveBlock1Ptr"].address
     backend.write(pointer_address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    write_save_block1(backend, base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
     first = reader.read(backend)
     assert first.location == (3, 4, 12, 19)
@@ -73,7 +82,7 @@ def test_position_follows_moving_pointer(sha1: str, offset: int) -> None:
     assert first.party_count == 0
 
     backend.write(pointer_address, (base + offset).to_bytes(4, "little"))
-    backend.write(base + offset, struct.pack("<hhbb", 27, 31, 5, 6))
+    write_save_block1(backend, base + offset, struct.pack("<hhbb", 27, 31, 5, 6))
     assert reader.read(backend).location == (5, 6, 27, 31)
     assert first.location == (3, 4, 12, 19)
 
@@ -108,7 +117,7 @@ def test_party_uses_live_entries_and_refreshes_each_read(sha1: str, count: int) 
     backend = MemoryBackend()
     base = addresses["gSaveBlock1"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    write_save_block1(backend, base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["gPlayerPartyCount"].address, bytes([count]))
     expected = []
     for index in range(count):
@@ -140,7 +149,7 @@ def test_invalid_party_count_is_not_ready(sha1: str, count: int) -> None:
     backend = MemoryBackend()
     base = addresses["gSaveBlock1"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
-    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
+    write_save_block1(backend, base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["gPlayerPartyCount"].address, bytes([count]))
     with pytest.raises(StateNotReady, match="gPlayerPartyCount"):
         FireRedReader(sha1).read(backend)
@@ -165,3 +174,20 @@ def test_captured_state_matches_the_screen(name: str) -> None:
         assert FireRedReader(STATES_ROM_SHA1).read(backend) == SCREEN[name]
     finally:
         backend.close()
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_badge_flags_follow_moving_pointer(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    reader = FireRedReader(sha1)
+    base = addresses["gSaveBlock1"].address
+    pointer_address = addresses["gSaveBlock1Ptr"].address
+    backend.write(pointer_address, base.to_bytes(4, "little"))
+    backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    write_save_block1(backend, base, struct.pack("<hhbb", 6, 6, 4, 1), badge_flags=0x01)
+    assert reader.read(backend).badge_flags == 0x01
+
+    backend.write(pointer_address, (base + 0x40).to_bytes(4, "little"))
+    write_save_block1(backend, base + 0x40, struct.pack("<hhbb", 6, 6, 4, 1), badge_flags=0x03)
+    assert reader.read(backend).badge_flags == 0x03

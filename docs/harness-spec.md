@@ -200,7 +200,11 @@ Episodes start from save states listed in a manifest in the game's package. Each
 | seg_05_forest | Viridian Forest entrance | Exit the north side | 8,192 |
 | gym_door, brock | Pewter Gym door; the Brock battle | Badge flag set | Set per run |
 
-State files are not in git. They live in `data/states/` on each machine, and Akshaj (Co-PM), who captures them, hands the files to members directly. The manifest hash proves everyone has the same file.
+State files are not in git. They live in `data/states/` on each machine. Sahil (PM) regenerates them with `scripts/capture_states.py` and hands the files to members directly. The manifest hash proves everyone has the same file.
+
+The states were captured on FireRed rev 1. The address table is the same for rev 0, so a rev 0 user can regenerate the states into another folder with the script's `--out`, but nobody has run that.
+
+gym_door and brock carry a level 14 Squirtle that knows Water Gun, ground on Route 1 before the forest. Pressing A every turn wins the Brock battle from either state, so label any result from them with that.
 
 Every state has text speed fast and battle animations off. The reader asserts both at reset.
 
