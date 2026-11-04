@@ -143,23 +143,47 @@ Rules:
 
 ## AlgoArcadeEnv
 
-AlgoArcadeEnv is the Gymnasium environment. It is built from a backend, a StateReader, a list of reward components, a start state, an observation mode, and a seed.
+AlgoArcadeEnv is the Gymnasium environment, in `src/algoarcade/envs/env.py`. It is built from a backend, a StateReader, a `RewardRegistry`, the start state's bytes, a step budget and the game's feature table. The seed comes through `reset(seed=s)`. Create the backend inside the env factory: SubprocVecEnv spawns its workers.
 
 | Setting | Value |
 |---|---|
 | Decision length | 24 frames: hold 8, release 16 |
-| Actions | Up, down, left, right, A, B. Start and a no-op are options. |
-| Episode end | A step budget only. Reported as truncation. |
-| Reset | Loads the start state, then waits a seeded random number of frames |
-| Info | Each reward component, the location, the milestone count, and a save state when the archive asks for one |
+| Actions | `Discrete(6)`: 0 up, 1 down, 2 left, 3 right, 4 A, 5 B. `start=True` appends Start, then `noop=True` appends a no-op that holds nothing for 24 frames. |
+| Episode end | The step budget only. `truncated` is True on the budget's last step; `terminated` is always False. |
+| Reset | Loads the start state, then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
+| Not ready | A `StateNotReady` from the reader propagates out of `reset` and `step`. A start state that is not ready is a bad start state; the env never substitutes a state. A retry would hide reader bugs. |
+
+Reset noise does little. A 24-frame step absorbs most of a 0 to 7 frame offset, so the offset changes outcomes only through the game's RNG, such as a wild encounter. With the actions fixed (`scripts/env_trace.py --action-seed 0`), 128 steps from reset seeds 0 to 9 gave one location trace and one return from `s1.state` (13.0) and from `seg_02_pallet.state` (11.0), and two location traces from `seg_04_route1.state`. On `s1.state` the ten runs still ended in 4 different EWRAM states. So a deterministic evaluation from a state with no encounters nearby, such as these two, replays the same episode; TRN-05 and ENV-09 should not count on reset noise for variety there.
+
+For TRN-05:
+
+- A `StateNotReady` raised from `step` under SubprocVecEnv kills that worker, and the main process sees only `EOFError`. It was never raised in 16,000 random mGBA steps from `s1`, `seg_02_pallet` and `seg_04_route1`. Log the worker's traceback so a reader bug is visible.
+- The observation is a `Dict`, so SB3 needs `MultiInputPolicy`, not `MlpPolicy`.
+
+The observation is a `Dict` of two float32 boxes:
+
+| Key | Shape | Contents |
+|---|---|---|
+| `vector` | (number of features,) in [0, 1] | One value per entry in the game's `FEATURES` table (`games/fake.py`, `games/firered/features.py`), clipped to [0, 1]. FireRed has 7: map_group, map_num, x, y, party_count, party_level_sum, party_hp_frac. |
+| `visited` | (1, 9, 15) in {0, 1} | Tiles visited this episode, in a crop of 9 rows by 15 columns centred on the player. The location's last two elements are x and y; the rest name the map. The crop size is a guess from FireRed's 15 by 10 tile screen. |
+
+`info` on every step:
+
+| Key | Value |
+|---|---|
+| `reward/<name>` | Each configured component's raw value, before its weight. The logs store it as `reward_<name>`. The step's reward is the sum of weight times raw value. |
+| `location` | The GameState's location after the decision. For FireRed `(map_group, map_num, x, y)`. |
+| `milestone_count` | Present when the GameState has the field. FireRed gains it in ENV-13; Super Mario Land has none. |
+
+`reset` returns `location` and `milestone_count` only. ENV-09 adds a save state for the archive.
 
 Observation modes:
 
-- `symbolic`: a scaled state vector, plus a grid crop centered on the player with a visited channel (week 3) and a walkability channel (week 5).
-- `pixels`: the screen at 72 by 80 greyscale, three frames stacked, plus the same state vector.
-- `both`.
+- `symbolic`: the only mode so far, so the env takes no mode argument yet. The walkability channel arrives in ENV-12, as a second channel of the crop.
+- `pixels`: the screen at 72 by 80 greyscale, three frames stacked, plus the same state vector (ENV-12).
+- `both` (ENV-12).
 
-The environment must pass Gymnasium's environment checker on all three backends.
+The environment must pass Gymnasium's environment checker on all three backends. `uv run python scripts/env_trace.py <fake|mgba|pyboy> --state <file>` prints a hash of a 500-step trace; two processes with the same seed must print the same hash.
 
 ## Start states and segments
 
