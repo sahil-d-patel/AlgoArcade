@@ -20,24 +20,27 @@ A wrong address does not crash. It returns a believable number, the reward funct
 
 Locations are always `(map_group, map_num, x, y)`. Progress counts use only ranges that go up: the badge byte, trainer flags, world-map flags and the story whitelist. Temporary flags reset on every map load.
 
+Battle fields are `battle_own` and `battle_enemy`, from `gBattleMons`: battler 0 is the player and 1 the opponent in a single battle. gBattleMons keeps the last battle's Pokémon after the battle ends, so read it only while `gMain.inBattle` is set, and only once the opponent's personality matches `gEnemyParty` at its `gBattlerPartyIndexes` slot. For about 30 frames after inBattle goes up, gBattleMons still holds the last battle's Pokémon, or zeros. The enemy box shows only level and an HP bar, so validate enemy HP against the bar width and the rest against `src/data/trainer_parties.h`.
+
+The milestones are the nine predicates in `src/algoarcade/games/firered/milestones.py`, in order: starter_chosen, rival_beaten, parcel_delivered, pokedex_received, forest_exited, pewter_reached, gym_entered, brock_defeated, boulder_badge. `milestone_count` is the position, 1 to 9, of the furthest that holds, or 0. A flag, var or item id goes in `addresses.IDS` with its source file. A map-based milestone stops holding when the player leaves. Prefer a flag nothing clears, such as a world-map flag; otherwise rely on the env's per-episode best. The Oak's Lab rival battle sets its trainer flag and `FLAG_BEAT_RIVAL_IN_OAKS_LAB` on a loss too, so check for a win separately, as `rival_beaten` does.
+
 `FireRedReader` in `src/algoarcade/games/firered/reader.py` returns a `FireRedState`. Each field and the symbol it is read from:
 
 - `map_group`, `map_num`, `x`, `y`: `gSaveBlock1Ptr`. The `location` property is the four as a tuple.
 - `party`: `gPlayerPartyCount` entries of `gPlayerParty`, each a `PartyPokemon(level, hp, max_hp, status, species, moves)`. `species` and `moves` come from the encrypted block. The properties `party_count`, `party_level_sum` and `party_hp_frac` (total HP over total max HP, 0 when that total is 0) derive from it.
 - `money`: `gSaveBlock1Ptr`, XORed with the key at `gSaveBlock2Ptr`.
 - `badge_flags`: the badge byte in the `gSaveBlock1Ptr` flags. The `badge_count` property is its popcount.
-- `trainers_defeated`: popcount of the trainer flags in `gSaveBlock1Ptr`. This is the signal that a trainer battle was won.
+- `trainers_defeated`: popcount of the trainer flags in `gSaveBlock1Ptr`. This is the signal that a trainer battle was won, except the Oak's Lab rival battle, which sets its flag on a loss too (`CB2_EndTrainerBattle` in `src/battle_setup.c`).
 - `story_flags`: how many of the seven `STORY_FLAGS` in reader.py are set. `FLAG_BEAT_RIVAL_IN_OAKS_LAB` (0x258) means the lab rival battle finished, won or lost.
 - `world_map_flags`: popcount of the world-map flags in `gSaveBlock1Ptr`.
 - `pokedex_owned`, `pokedex_seen`: the `gSaveBlock2Ptr` bits. A seen bit counts only if both seen copies in `gSaveBlock1Ptr` also have it, and an owned bit only if its seen bit counts.
 - `text_speed`, `battle_scene_off`: saved options at `gSaveBlock2Ptr`. `check_options` raises `ValueError` unless they are 2 and True.
 - `in_battle`: `gMain.inBattle`.
+- `battle_own`, `battle_enemy`: `gBattleMons`, checked against `gEnemyParty` at the `gBattlerPartyIndexes` slot. Each is a `BattlePokemon(hp, max_hp, level, moves, pp)`, or None outside battle and until that check passes.
 - `text_active`: `sMessageBoxType` is not 0. It means field text is printing, not that a box is open. It turns false when printing ends while the box is still up, and stays false in battle.
 - `text_progress`: `currentChar` of printer 0 in `sTextPrinters`, in the field and in battle.
 - `script_active`: `sGlobalScriptContextStatus` is 0 (running).
 - `controls_locked`: `sLockFieldControls` is nonzero.
-
-`gBattleMons` is in the address table but nothing reads it yet. Battle fields come in ENV-13.
 
 `read` raises `StateNotReady` when:
 
