@@ -126,13 +126,7 @@ the source commit used for the pinned symbol build:
 | controls_locked | `sLockFieldControls` is nonzero | `src/script.c` |
 | party species, moves | `gPlayerParty`, 100-byte entries; XOR twelve words at +0x20 with personality (+0x00) XOR trainer id (+0x04), then check the 16-bit sum against +0x1C | `include/pokemon.h`, `src/pokemon.c` |
 
-The Pokédex screen counts only the 386 national entries. Seen bits must agree in all three
-copies; an owned bit also needs that seen bit. Party substructures have 24 physical orders,
-selected by personality modulo 24: species is in growth and four move ids are in attacks.
-`party_level_sum` sums the live party levels. `party_hp_frac` is total current party HP divided
-by total maximum party HP, or 0 when that total is zero. Species and move ids use the game's
-internal ids. `FireRedReader.check_options(backend)` raises `ValueError` unless saved text
-speed is fast (2) and battle scenes are off. Call it at environment reset.
+The Pokédex screen counts only the 386 national entries. Seen bits must agree in all three copies; an owned bit also needs that seen bit. Party substructures have 24 physical orders, selected by personality modulo 24: species is in growth, four move ids are in attacks, and `is_egg` is bit 30 of the word at +4 in misc (`MON_DATA_IS_EGG`). `party_level_sum` sums the live party's levels and `party_hp_frac` is its total HP over its total maximum HP, or 0 when that total is zero; both leave eggs out, while `party_count` counts them. Species and move ids use the game's internal ids. `FireRedReader.check_options(backend)` raises `ValueError` unless saved text speed is fast (2) and battle scenes are off. Call it at environment reset.
 
 The story whitelist, approved in `docs/decisions.md` on 2026-11-03, counts each of these persistent events once:
 
@@ -185,7 +179,7 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 | anti_spam | A press that left an open text box where it was | -0.02 | off | Avoiding NPCs and signs. It needs ENV-08 to provide `text_progress`. If that tracks only the text, moving the cursor in a yes/no menu is charged too. |
 | time | Every step | -0.001 | off | None while episodes end only on a step budget: every policy pays the same total. |
 
-`heal` and `blackout` read `party_hp_frac`, which ENV-08 computes as party HP over party max HP. It must leave eggs out: an egg has no HP to heal.
+`heal` and `blackout` read `party_hp_frac`, which ENV-08 computes as party HP over party max HP, leaving eggs out: an egg has no HP to heal.
 
 The five scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 

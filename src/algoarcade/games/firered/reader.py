@@ -29,6 +29,7 @@ class PartyPokemon:
     status: int
     species: int
     moves: tuple[int, int, int, int]
+    is_egg: bool
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,13 @@ class FireRedState:
 
     @property
     def party_level_sum(self) -> int:
-        return sum(pokemon.level for pokemon in self.party)
+        return sum(pokemon.level for pokemon in self.party if not pokemon.is_egg)
 
     @property
     def party_hp_frac(self) -> float:
-        maximum = sum(pokemon.max_hp for pokemon in self.party)
-        return sum(pokemon.hp for pokemon in self.party) / maximum if maximum else 0.0
+        hatched = [pokemon for pokemon in self.party if not pokemon.is_egg]
+        maximum = sum(pokemon.max_hp for pokemon in hatched)
+        return sum(pokemon.hp for pokemon in hatched) / maximum if maximum else 0.0
 
 
 class FireRedReader:
@@ -146,9 +148,17 @@ class FireRedReader:
             order = SUBSTRUCT_ORDERS[personality % 24]
             species = struct.unpack_from("<H", decrypted, order.index(0) * 12)[0]
             moves = struct.unpack_from("<4H", decrypted, order.index(1) * 12)
+            # PokemonSubstruct3.isEgg, bit 30 of the word at +4; GetMonData(MON_DATA_IS_EGG).
+            misc = struct.unpack_from("<I", decrypted, order.index(3) * 12 + 4)[0]
             party.append(
                 PartyPokemon(
-                    level=level, hp=hp, max_hp=max_hp, status=status, species=species, moves=moves
+                    level=level,
+                    hp=hp,
+                    max_hp=max_hp,
+                    status=status,
+                    species=species,
+                    moves=moves,
+                    is_egg=bool(misc >> 30 & 1),
                 )
             )
         return FireRedState(
