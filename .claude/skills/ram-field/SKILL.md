@@ -23,17 +23,18 @@ Locations are always `(map_group, map_num, x, y)`. Progress counts use only rang
 `FireRedReader` in `src/algoarcade/games/firered/reader.py` returns a `FireRedState`. Each field and the symbol it is read from:
 
 - `map_group`, `map_num`, `x`, `y`: `gSaveBlock1Ptr`. The `location` property is the four as a tuple.
-- `party`: `gPlayerPartyCount` entries of `gPlayerParty`, each a `PartyPokemon(level, hp, max_hp, status, species, moves)`. `species` and `moves` come from the encrypted block. The properties `party_count`, `party_level_sum` and `party_hp_frac` (total HP over total max HP, 0 when that total is 0) derive from it.
+- `party`: `gPlayerPartyCount` entries of `gPlayerParty`, each a `PartyPokemon(level, hp, max_hp, status, species, moves, is_egg)`. `species` and `moves` come from the encrypted block. The properties `party_count`, `party_level_sum` and `party_hp_frac` (total HP over total max HP, 0 when that total is 0) derive from it. `party_level_sum` and `party_hp_frac` leave eggs out (`is_egg` is PokemonSubstruct3's bit, `MON_DATA_IS_EGG`); `party_count` counts them.
 - `money`: `gSaveBlock1Ptr`, XORed with the key at `gSaveBlock2Ptr`.
 - `badge_flags`: the badge byte in the `gSaveBlock1Ptr` flags. The `badge_count` property is its popcount.
-- `trainers_defeated`: popcount of the trainer flags in `gSaveBlock1Ptr`. This is the signal that a trainer battle was won.
+- `trainers_defeated`: popcount of the trainer flags in `gSaveBlock1Ptr`. It also rises after a loss to an early rival such as the lab rival: `CB2_EndTrainerBattle` sets the flag either way.
 - `story_flags`: how many of the seven `STORY_FLAGS` in reader.py are set. `FLAG_BEAT_RIVAL_IN_OAKS_LAB` (0x258) means the lab rival battle finished, won or lost.
 - `world_map_flags`: popcount of the world-map flags in `gSaveBlock1Ptr`.
 - `pokedex_owned`, `pokedex_seen`: the `gSaveBlock2Ptr` bits. A seen bit counts only if both seen copies in `gSaveBlock1Ptr` also have it, and an owned bit only if its seen bit counts.
 - `text_speed`, `battle_scene_off`: saved options at `gSaveBlock2Ptr`. `check_options` raises `ValueError` unless they are 2 and True.
 - `in_battle`: `gMain.inBattle`.
 - `text_active`: `sMessageBoxType` is not 0. It means field text is printing, not that a box is open. It turns false when printing ends while the box is still up, and stays false in battle.
-- `text_progress`: `currentChar` of printer 0 in `sTextPrinters`, in the field and in battle.
+- `text_box_open`: printer 0 or 24 in `sTextPrinters` is active, or `sGlobalScriptContext` is in native mode with `nativePtr` at `WaitForAorBPress` (a finished box still up). `anti_spam` reads this. A yes/no menu reads false.
+- `text_progress`: `currentChar` of printer 24 (`B_WIN_OAK_OLD_MAN`) while it is active, else of printer 0, in the field and in battle.
 - `script_active`: `sGlobalScriptContextStatus` is 0 (running).
 - `controls_locked`: `sLockFieldControls` is nonzero.
 
@@ -47,7 +48,9 @@ Locations are always `(map_group, map_num, x, y)`. Progress counts use only rang
 - The save block is empty: position (0, 0, 0, 0) with an empty party, as on the title screen and intro.
 - A party slot fails its checksum.
 
-To add a field: add the symbol to `ADDRESSES` in `addresses.py` and raise the entry count in `tests/test_firered_addresses.py`. Add the field to `FireRedState` and read it in `FireRedReader.read`, with a fake-memory test in `tests/test_firered_reader.py`. Put the screen-read test in `tests/test_firered_fields.py`: rows in `test_firered_fields_state`, or in `test_firered_fields_party` for a party slot field, with two captures that read different values on each ROM revision. Each capture is pinned in `CAPTURES` by SHA-256 and the revision it was made on, and runs only on that revision. Rev 1 captures come from `scripts/capture_validation_states.py`, which replays recorded input from power-on. Extend its `SEGMENTS` to reach a new state. `SCREEN` in `tests/test_firered_reader.py` holds only the ENV-05 location and plaintext party values.
+AlgoArcadeEnv retries a not-ready read one frame later, up to 8 times. On the frame the save blocks move, Pokédex counts can read 0; consumers need two agreeing reads.
+
+To add a field: add the symbol to `ADDRESSES` in `addresses.py` and raise the entry count in `tests/test_firered_addresses.py`. Add the field to `FireRedState` and read it in `FireRedReader.read`, with a fake-memory test in `tests/test_firered_reader.py`. Put the screen-read test in `tests/test_firered_fields.py`: rows in `test_firered_fields_state`, or in `test_firered_fields_party` for a party slot field, with two captures that read different values on each ROM revision. Each capture is pinned in `CAPTURES` by SHA-256 and the revision it was made on, and runs only on that revision. Rev 1 captures come from `scripts/capture_validation_states.py`, which replays recorded input from power-on. Extend its `SEGMENTS` to reach a new state, or append a `BRANCHES` entry that starts from a saved state. `SCREEN` in `tests/test_firered_reader.py` holds only the ENV-05 location and plaintext party values.
 
 Offsets, layouts and the rules are in `docs/harness-spec.md` under "FireRed memory map". ENV-05 owns this skill.
 
