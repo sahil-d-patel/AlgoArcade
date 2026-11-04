@@ -8,6 +8,7 @@ buttons.
 
 import asyncio
 import json
+import math
 import os
 import sys
 from collections.abc import Awaitable, Callable
@@ -335,7 +336,7 @@ async def run(settings: Run, create: Create) -> Attempt:
     summary = asdict(settings) | asdict(attempt)
     summary |= {
         "per_action": attempt.per_action(),
-        "projection_300_requests": asdict(projection) if projection else None,
+        "projection_300_actions": asdict(projection) if projection else None,
     }
     del summary["steps"]
     (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
@@ -344,19 +345,25 @@ async def run(settings: Run, create: Create) -> Attempt:
 
 @dataclass(frozen=True)
 class Projection:
+    requests: int
+    presses_per_request: float
     start: int
     growth: float
     dollars: float
 
 
-def project(steps: list[Step], prices: Prices, requests: int = 300) -> Projection | None:
-    """The cost of `requests` requests, from an attempt's log. The first is priced as measured.
-    Request i has a prompt of the first's size plus i times the mean growth per request, sends
-    the mean uncached input and cache write of the later requests and reads the rest from the
-    cache (all of it is input if nothing was read from the cache), and is priced on the card its
-    prompt size picks. None with fewer than two requests, as there is no growth to measure."""
+def project(steps: list[Step], prices: Prices, actions: int = 300) -> Projection | None:
+    """The cost of an attempt of `actions` presses, from an attempt's log. It takes
+    ceil(actions / mean presses per request) requests, or `actions` if nothing was pressed.
+    The first is priced as measured. Request i has a prompt of the first's size plus i times
+    the mean growth per request, sends the mean uncached input and cache write of the later
+    requests and reads the rest from the cache (all of it is input if nothing was read from the
+    cache), and is priced on the card its prompt size picks. None with fewer than two requests,
+    as there is no growth to measure."""
     if len(steps) < 2:
         return None
+    presses_per_request = sum(len(step.buttons) for step in steps) / len(steps)
+    requests = math.ceil(actions / presses_per_request) if presses_per_request else actions
     first, later = steps[0], steps[1:]
     start = first.prompt_tokens
     growth = (steps[-1].prompt_tokens - start) / len(later)
@@ -380,7 +387,13 @@ def project(steps: list[Step], prices: Prices, requests: int = 300) -> Projectio
         else:
             usage = Usage(input_tokens=size, output_tokens=output)
         dollars += prices.dollars(usage)
-    return Projection(start=start, growth=growth, dollars=dollars)
+    return Projection(
+        requests=requests,
+        presses_per_request=presses_per_request,
+        start=start,
+        growth=growth,
+        dollars=dollars,
+    )
 
 
 def report(attempt: Attempt, prices: Prices) -> str:
@@ -396,8 +409,10 @@ def report(attempt: Attempt, prices: Prices) -> str:
     projection = project(attempt.steps, prices)
     if projection is not None:
         lines.append(
-            f"projected 300 requests: ${projection.dollars:.2f}, a prompt of {projection.start} "
-            f"tokens growing {projection.growth:.0f} a request, each priced on its card"
+            f"projected 300 actions ({projection.requests} requests at "
+            f"{projection.presses_per_request:.1f} presses a request): ${projection.dollars:.2f}, "
+            f"a prompt of {projection.start} tokens growing {projection.growth:.0f} a request, "
+            "each priced on its card"
         )
     return "\n".join(lines)
 

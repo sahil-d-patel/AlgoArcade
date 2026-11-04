@@ -266,16 +266,18 @@ def test_a_run_logs_every_request_and_reports_per_action(tmp_path: Path) -> None
             "dollars": 0.000125,
         }
     )
-    # The prompt is 2,700 tokens on both requests, so all 300 cost $0.0001875.
-    assert summary["projection_300_requests"] == pytest.approx(
-        {"start": 2_700, "growth": 0, "dollars": 300 * 0.0001875}
+    # 1.5 presses a request, so 300 presses take 200 requests. The prompt is 2,700 tokens on
+    # both, so each costs $0.0001875.
+    assert summary["projection_300_actions"] == pytest.approx(
+        {"requests": 200, "presses_per_request": 1.5, "start": 2_700, "growth": 0}
+        | {"dollars": 200 * 0.0001875}
     )
     assert report(result, settings.prices).splitlines() == [
         "goal: 3 actions in 2 requests, $0.0004",
         "per action: input_tokens 200.0, output_tokens 40.0, cache_write_tokens 600.0, "
         "cache_read_tokens 1000.0, $0.000125",
-        "projected 300 requests: $0.06, a prompt of 2700 tokens growing 0 a request, "
-        "each priced on its card",
+        "projected 300 actions (200 requests at 1.5 presses a request): $0.04, a prompt of 2700 "
+        "tokens growing 0 a request, each priced on its card",
     ]
 
 
@@ -287,10 +289,11 @@ def test_seg_01_is_graded_by_the_manifest_goal() -> None:
     assert (goal(bedroom), goal(pallet_town)) == (False, True)
 
 
-def growing(prompts: list[int]) -> list[Message]:
-    """One press per request. The first request is uncached; each later one sends 10 tokens
-    uncached, writes the rest of the new turn to the cache and reads everything before it."""
-    replies = [press(["DOWN"], Usage(input_tokens=prompts[0], output_tokens=5))]
+def growing(prompts: list[int], buttons: tuple[str, ...] = ("DOWN",)) -> list[Message]:
+    """One press of `buttons` per request. The first request is uncached; each later one sends
+    10 tokens uncached, writes the rest of the new turn to the cache and reads everything
+    before it."""
+    replies = [press(list(buttons), Usage(input_tokens=prompts[0], output_tokens=5))]
     for before, now in itertools.pairwise(prompts):
         usage = Usage(
             input_tokens=10,
@@ -298,7 +301,7 @@ def growing(prompts: list[int]) -> list[Message]:
             cache_creation_input_tokens=now - before - 10,
             cache_read_input_tokens=before,
         )
-        replies.append(press(["DOWN"], usage))
+        replies.append(press(list(buttons), usage))
     return replies
 
 
@@ -307,9 +310,9 @@ SIMPLE = Prices(input=1, output=4, cache_write=2, cache_read=0.5)
 
 def test_the_projection_sums_requests_whose_prompt_grows_by_the_mean() -> None:
     result = attempt(StubModel(growing([1_000, 1_050, 1_200])), max_actions=3, prices=SIMPLE)
-    projection = project(result.steps, SIMPLE, requests=4)
+    projection = project(result.steps, SIMPLE, actions=4)
     assert projection is not None
-    assert (projection.start, projection.growth) == (1_000, 100)
+    assert (projection.requests, projection.start, projection.growth) == (4, 1_000, 100)
     # The first request as measured, then prompts of 1,100, 1,200 and 1,300 tokens: 10 uncached,
     # 90 written, the rest read, and 5 output tokens each.
     later = sum(10 * 1 + 90 * 2 + (size - 100) * 0.5 + 5 * 4 for size in (1_100, 1_200, 1_300))
@@ -319,7 +322,7 @@ def test_the_projection_sums_requests_whose_prompt_grows_by_the_mean() -> None:
 def test_the_projection_moves_to_the_long_card_past_100k_tokens() -> None:
     prices = replace(SIMPLE, long_input=10, long_output=4, long_cache_write=2, long_cache_read=5)
     result = attempt(StubModel(growing([99_800, 99_900])), max_actions=2, prices=prices)
-    projection = project(result.steps, prices, requests=4)
+    projection = project(result.steps, prices, actions=4)
     assert projection is not None
     # Prompts of 99,900 and 100,000 tokens stay on the short card; 100,100 is on the long one,
     # where only the input and cache-read prices differ here.
@@ -331,9 +334,28 @@ def test_the_projection_moves_to_the_long_card_past_100k_tokens() -> None:
 def test_the_projection_sends_everything_uncached_when_the_cache_was_never_read() -> None:
     replies = [press(["DOWN"], Usage(input_tokens=n, output_tokens=5)) for n in (1_000, 1_100)]
     result = attempt(StubModel(replies), max_actions=2, prices=SIMPLE)
-    projection = project(result.steps, SIMPLE, requests=3)
+    projection = project(result.steps, SIMPLE, actions=3)
     assert projection is not None
     assert projection.dollars == pytest.approx((1_000 + 1_100 + 1_200 + 3 * 5 * 4) / 1e6)
+
+
+def test_the_projection_needs_fewer_requests_at_two_presses_a_request() -> None:
+    model = StubModel(growing([1_000, 1_050, 1_200], buttons=("DOWN", "DOWN")))
+    result = attempt(model, max_actions=6, prices=SIMPLE)
+    projection = project(result.steps, SIMPLE, actions=8)
+    assert projection is not None
+    assert (projection.requests, projection.presses_per_request) == (4, 2)
+    # The same four requests as at one press a request, for twice the presses.
+    later = sum(10 * 1 + 90 * 2 + (size - 100) * 0.5 + 5 * 4 for size in (1_100, 1_200, 1_300))
+    assert projection.dollars == pytest.approx((1_000 * 1 + 5 * 4 + later) / 1e6)
+
+
+def test_a_run_that_pressed_nothing_projects_one_request_per_action() -> None:
+    replies = [press([], Usage(input_tokens=n, output_tokens=5)) for n in (1_000, 1_100)]
+    result = attempt(StubModel([*replies, END]), prices=SIMPLE)
+    projection = project(result.steps[:2], SIMPLE, actions=3)
+    assert projection is not None
+    assert (projection.requests, projection.presses_per_request) == (3, 0)
 
 
 def test_no_projection_from_a_single_request() -> None:
