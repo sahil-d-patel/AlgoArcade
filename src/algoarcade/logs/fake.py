@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,7 @@ import pyarrow as pa
 
 from algoarcade.logs.schema import EPISODES, REWARD_COMPONENTS, RUNS, STEPS, VISITS
 from algoarcade.logs.writer import ROWS_PER_FILE, RollingWriter, run_dir
+from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
 
 # (name, map_group, map_num, width, height) from pret/pokefirered at commit
 # ce6406d8c2eaf46d543c8a2606de0c3cb1951982: data/maps/map_groups.json gives the ids,
@@ -55,9 +57,26 @@ BADGE_CHANCE = 0.0005
 START_LEVEL_SUM = 5
 
 
+@dataclass(frozen=True)
+class _Snapshot:
+    """What the reward components see of a walker. None of the enabled components reads the
+    party or text fields."""
+
+    location: tuple[int, int, int, int]
+    story_flags: int
+    party_level_sum: int
+    badge_count: int
+    milestone_count: int
+    party_count: int = 1
+    party_hp_frac: float = 1.0
+    text_box_open: bool = False
+    text_progress: int = 0
+
+
 class _Walker:
     def __init__(self, rng: np.random.Generator) -> None:
         self.episode_id = -1
+        self.rewards = RewardRegistry(COMPONENTS, WEIGHTS)
         self.reset(rng)
 
     @property
@@ -68,6 +87,11 @@ class _Walker:
     @property
     def milestone_count(self) -> int:
         return self.furthest + self.badges
+
+    def snapshot(self) -> _Snapshot:
+        return _Snapshot(
+            self.location, self.story_flags, self.level_sum, self.badges, self.milestone_count
+        )
 
     def reset(self, rng: np.random.Generator) -> None:
         self.episode_id += 1
@@ -83,6 +107,7 @@ class _Walker:
         self.visited = {self.location}
         self.totals = dict.fromkeys(WEIGHTS, 0.0)
         self.episode_return = 0.0
+        self.rewards.reset(self.snapshot())
 
     def _place(self, rng: np.random.Generator) -> None:
         _, _, _, width, height = MAPS[self.map]
@@ -92,7 +117,7 @@ class _Walker:
         """Moves one decision. Returns the action, each component's raw value and the reward."""
         self.episode_step += 1
         action = int(rng.integers(len(MOVES)))
-        level_sum, badges, milestones = self.level_sum, self.badges, self.milestone_count
+        prev = self.snapshot()
         name, _, _, width, height = MAPS[self.map]
         if self.battle:
             self.battle -= 1
@@ -112,20 +137,12 @@ class _Walker:
             self.badges = 1
             self.goal_step = self.episode_step
         self.furthest = max(self.furthest, self.map)
-        new_milestones = self.milestone_count - milestones
-        self.story_flags += new_milestones
-        new_tile = self.location not in self.visited
+        self.story_flags += self.milestone_count - prev.milestone_count
         self.visited.add(self.location)
-        raw = {
-            "events": float(new_milestones),
-            "explore": float(new_tile),
-            "level": float(min(self.level_sum - level_sum, 1)),
-            "badge": float(self.badges - badges),
-            "milestone": float(new_milestones),
-        }
+        reward, info = self.rewards.step(prev, self.snapshot())
+        raw = {c: info[f"reward/{c}"] for c in WEIGHTS}
         for c, value in raw.items():
             self.totals[c] += value
-        reward = sum(WEIGHTS[c] * value for c, value in raw.items())
         self.episode_return += reward
         return action, raw, reward
 

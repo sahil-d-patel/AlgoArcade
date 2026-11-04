@@ -177,6 +177,8 @@ Every component has a name, a weight in config, and its own column in the logs.
 | anti_spam | A press with no effect while a text box is open | -0.02 | off |
 | time | Every step | -0.001 | off |
 
+The four progress terms (events, level, badge, milestone) pay a rise one step late, once two consecutive reads agree on it. A count read while a save block moves can be wrong for one frame, and a one-frame spike must not pay. So the confirming step pays even if it changed nothing, and a rise on an episode's last step is never paid.
+
 The default set is positive only, and the evidence for that is consistent. Pleines et al. had their heal reward farmed. The best pure-RL entry in the PokéAgent Challenge used positive-only milestone rewards. An open Emerald project reports that every penalty it tried backfired. The penalty components stay in the registry, and whether they help on FireRed is experiment E5.
 
 Weights are starting points. The ratios matter most: badge above everything, events above level, and exploration over a full episode worth a few events.
@@ -190,6 +192,7 @@ Anyone adding a component writes in the pull request how an agent would exploit 
 - Blackout farming: fainting to get a free heal. The heal component is off by default and never fires on a blackout transition.
 - Menu spam: opening and closing menus because the screen changes. Start is not in the default action set.
 - Reset farming: any reward paid on reset teaches the agent to die fast. Every component returns zero on the reset step.
+- Warp flicker: stepping on and off a warp so a progress count misreads high for a frame. A progress term pays only a rise two consecutive reads agree on.
 
 ### Catching what we did not predict
 

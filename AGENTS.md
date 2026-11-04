@@ -180,7 +180,7 @@ When finishing:
 - Memory addresses come from the pokefirered symbol table, with the symbol name and commit recorded. Never from a wiki or from memory.
 - Save block pointers are dereferenced on every read. Never cache the address they point to.
 - A location is always `(map_group, map_num, x, y)`.
-- Every reward component is named, logged on its own, returns zero on a no-op step and on the reset step (except the penalties time and anti_spam, which never pay and are off by default), and ships with an isolation test and an exploit note.
+- Every reward component is named, logged on its own, returns zero on the reset step and on a no-op step (except the penalties time and anti_spam, which never pay and are off by default, and a progress term, which pays on the step after a rise when the second read confirms it), and ships with an isolation test and an exploit note.
 - Gamma is an explicit config field and is never left at a library default. The baseline is 0.997.
 - A step-budget end is truncation, not termination.
 - A headline claim needs five seeds. Fewer is labeled exploratory.
