@@ -1,14 +1,39 @@
 import struct
 from dataclasses import replace
 from itertools import permutations
+from pathlib import Path
 
 import pytest
 
 from algoarcade.backends.fake import FakeBackend
+from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.addresses import ADDRESSES
 from algoarcade.games.firered.reader import STORY_FLAGS, FireRedReader, PartyPokemon
 from algoarcade.rewards.penalties import AntiSpam
+from algoarcade.rom import identify
+
+DATA = Path(__file__).resolve().parents[1] / "data"
+ROM = DATA / "roms" / "firered.gba"
+STATES_ROM_SHA1 = "dd5945db9b930750cb39d00c84da8571feebf417"  # rev 1, as captured by ENV-06
+
+# Location and (level, hp, max_hp, status) per party slot, written down from the screen of each
+# state. Map ids are (group, number) in data/maps/map_groups.json of pret/pokefirered at
+# e93eb12a336fb97df420b0961753d8a3713c9fcc, and x and y share the frame of the event coordinates
+# in each map's map.json there.
+SCREEN = {
+    # Player's bedroom, MAP_PALLET_TOWN_PLAYERS_HOUSE_2F. The player faces up, and A prints "RED
+    # played with the NES.": the bg event at (6, 5). The START menu has no POKéMON entry.
+    "s0": ((4, 1, 6, 6), ()),
+    # Oak's lab, MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB, after the starter and the parcel. The last
+    # item ball, (10, 4) in map.json, sits four tiles right on the player's row, with Oak at
+    # (6, 3) directly above. Party screen: SQUIRTLE Lv7, HP 14/ 25, no status icon.
+    "s1": ((4, 3, 6, 4), ((7, 14, 25, 0),)),
+    # MAP_VIRIDIAN_FOREST, on the middle tile of the south entrance warps (28 to 30, 62). The sign
+    # at (31, 60) is two tiles right and two up. Party screen: SQUIRTLE Lv13, HP 37/ 37, no status
+    # icon.
+    "seg_05_forest": ((1, 0, 29, 62), ((13, 37, 37, 0),)),
+}
 
 
 class MemoryBackend(FakeBackend):
@@ -74,6 +99,18 @@ def test_invalid_pointer_is_not_ready(sha1: str, offset: int | None) -> None:
     pointer = 0 if offset is None else addresses["gSaveBlock1"].address + offset
     backend.write(addresses["gSaveBlock1Ptr"].address, pointer.to_bytes(4, "little"))
     with pytest.raises(StateNotReady, match="gSaveBlock1Ptr"):
+        FireRedReader(sha1).read(backend)
+
+
+@pytest.mark.parametrize("sha1", ADDRESSES)
+def test_empty_save_block_is_not_ready(sha1: str) -> None:
+    addresses = ADDRESSES[sha1]
+    backend = MemoryBackend()
+    base = addresses["gSaveBlock1"].address
+    backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
+    backend.write(base, bytes(6))
+    backend.write(addresses["gPlayerPartyCount"].address, bytes(1))
+    with pytest.raises(StateNotReady, match="empty"):
         FireRedReader(sha1).read(backend)
 
 
@@ -214,6 +251,7 @@ def test_progress_context_and_pokedex_follow_current_memory(sha1: str) -> None:
     base2 = addresses["gSaveBlock2"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base1.to_bytes(4, "little"))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base1, struct.pack("<hhbb", 12, 19, 3, 4))
     reader = FireRedReader(sha1)
     first = reader.read(backend)
     assert first.badge_count == first.trainers_defeated == 0
@@ -250,6 +288,7 @@ def test_temporary_and_hide_flags_do_not_count_as_progress(sha1: str) -> None:
     base = addresses["gSaveBlock1"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(base + 0xEE0, bytes([0xFF] * (0x230 // 8)))
     state = FireRedReader(sha1).read(backend)
     assert state.badge_count == 0
@@ -265,6 +304,7 @@ def test_story_whitelist_isolated_from_other_flags(sha1: str) -> None:
     base = addresses["gSaveBlock1"].address
     backend.write(addresses["gSaveBlock1Ptr"].address, base.to_bytes(4, "little"))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base, struct.pack("<hhbb", 12, 19, 3, 4))
     reader = FireRedReader(sha1)
     # The Pallet-to-Pewter list approved in docs/decisions.md, 2026-11-03.
     approved = [0x2CF, 0x828, 0x258, 0x230, 0x829, 0x4B0, 0x254]
@@ -293,6 +333,7 @@ def test_world_flags_and_options_follow_relocated_save_blocks(
     backend.write(addresses["gSaveBlock1Ptr"].address, base1.to_bytes(4, "little"))
     backend.write(addresses["gSaveBlock2Ptr"].address, base2.to_bytes(4, "little"))
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(base1, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(base1 + 0xFF2, bytes([0xFF] * 7))
     backend.write(base2 + 0x14, bytes([0xF8 | speed, 0xFB | (4 if scene_off else 0)]))
     reader = FireRedReader(sha1)
@@ -316,6 +357,7 @@ def test_party_hp_fraction_uses_total_hp() -> None:
         addresses["gSaveBlock1Ptr"].address, addresses["gSaveBlock1"].address.to_bytes(4, "little")
     )
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(addresses["gSaveBlock1"].address, struct.pack("<hhbb", 12, 19, 3, 4))
     state = FireRedReader(next(iter(ADDRESSES))).read(backend)
     party = (
         PartyPokemon(level=5, hp=10, max_hp=20, status=0, species=7, moves=(33, 39, 0, 0)),
@@ -332,6 +374,7 @@ def test_text_progress_reads_printer_zero_and_drives_anti_spam(sha1: str) -> Non
         addresses["gSaveBlock1Ptr"].address, addresses["gSaveBlock1"].address.to_bytes(4, "little")
     )
     backend.write(addresses["gPlayerPartyCount"].address, b"\x00")
+    backend.write(addresses["gSaveBlock1"].address, struct.pack("<hhbb", 12, 19, 3, 4))
     backend.write(addresses["sMessageBoxType"].address, b"\x02")
     reader = FireRedReader(sha1)
     printer = addresses["sTextPrinters"].address
@@ -347,3 +390,26 @@ def test_text_progress_reads_printer_zero_and_drives_anti_spam(sha1: str) -> Non
     anti_spam.reset(first)
     assert anti_spam.score(first, same) == 1.0
     assert anti_spam.score(first, advanced) == 0.0
+
+
+@pytest.mark.rom
+@pytest.mark.parametrize("name", SCREEN)
+def test_captured_state_matches_the_screen(name: str) -> None:
+    if not ROM.is_file():
+        pytest.skip("Place your FireRed ROM in data/roms/firered.gba")
+    if identify(ROM).sha1 != STATES_ROM_SHA1:
+        pytest.skip("The states were captured on rev 1")
+    state = DATA / "states" / f"{name}.state"
+    if not state.is_file():
+        pytest.skip(f"Missing {state.name}; scripts/capture_states.py (ENV-06) regenerates it")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    backend = MgbaBackend(ROM, render=False)
+    try:
+        backend.load_state(state.read_bytes())
+        state = FireRedReader(STATES_ROM_SHA1).read(backend)
+        party = tuple((mon.level, mon.hp, mon.max_hp, mon.status) for mon in state.party)
+        assert (state.location, party) == SCREEN[name]
+    finally:
+        backend.close()

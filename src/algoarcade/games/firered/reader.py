@@ -126,6 +126,9 @@ class FireRedReader:
         count = read_u8(backend, self._addresses["gPlayerPartyCount"].address)
         if count > 6:
             raise StateNotReady(f"Invalid gPlayerPartyCount: {count}")
+        # On the title screen and intro the pointer is valid but the block is still empty.
+        if (map_group, map_num, x, y) == (0, 0, 0, 0) and count == 0:
+            raise StateNotReady("SaveBlock1 is empty: the game has not reached the overworld")
         party = []
         for index in range(count):
             # struct Pokemon: include/pokemon.h at the same source commit; live party only.
