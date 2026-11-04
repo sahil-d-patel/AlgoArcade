@@ -1,6 +1,6 @@
 import random
 from dataclasses import dataclass
-from itertools import pairwise
+from itertools import pairwise, product
 
 import pytest
 
@@ -9,6 +9,7 @@ from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.fake import FakeReader, FakeState
 from algoarcade.rewards.explore import Explore
+from algoarcade.rewards.progress import NewMaximum
 from algoarcade.rewards.registry import (
     COMPONENTS,
     DEFAULT_WEIGHTS,
@@ -361,3 +362,34 @@ def test_losing_and_regaining_a_count_pays_the_gain_once(name: str) -> None:
         poke(backend, COUNT_BYTES[name], value)
         states.append(read(backend))
     assert total_reward(name, states) <= 1.0
+
+
+@dataclass(frozen=True)
+class Count:
+    badge_count: int
+    story_flags: int = 0
+    party_level_sum: int = 0
+    milestone_count: int = 0
+    location: tuple[int, ...] = (0, 0, 0, 0)
+
+
+@pytest.mark.parametrize(
+    ("maximum", "max_rise", "cap", "ceiling"),
+    [(4, 1, float("inf"), float("inf")), (5, 2, float("inf"), float("inf")), (6, 3, 1.0, 4.0)],
+)
+def test_no_read_sequence_pays_more_than_its_highest_confirmed_count(
+    maximum: int, max_rise: int, cap: float, ceiling: float
+) -> None:
+    # Every sequence up to six reads: the first step pays nothing, no step pays a negative amount,
+    # and the total never exceeds the highest count two consecutive valid reads agree on.
+    term = NewMaximum("x", lambda state: state.badge_count, maximum, max_rise, cap, ceiling)
+    for length in range(2, 7):
+        for reads in product(range(maximum + 2), repeat=length):
+            term.reset(Count(reads[0]))
+            paid = [term.score(Count(a), Count(b)) for a, b in pairwise(reads)]
+            agreed = [
+                min(a, b) for a, b in pairwise(reads) if max(a, b) <= maximum and b - a <= max_rise
+            ]
+            assert paid[0] == 0.0
+            assert min(paid) >= 0.0
+            assert sum(paid) <= min(max(agreed, default=0), ceiling), reads

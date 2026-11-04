@@ -33,7 +33,8 @@ class NewMaximum(RewardComponent[Progress]):
     On the first step the best becomes the reset read if the first read agrees with it, so a rise
     on the first step pays on the second; a reset read up to `max_rise` too low becomes the best
     too. With no best, or `prev` more than `max_rise` above it, an agreeing pair sets the best to
-    `prev` and the next step pays nothing, so re-establishing the best never pays. A bad read
+    `prev` and the next step pays nothing, so re-establishing the best never pays; a real rise
+    inside that pair is lost with it, at most `max_rise`. A bad read
     repeated on two consecutive steps becomes the best this way and can silence the term for the
     episode; only reader validation (ENV-05, ENV-08) prevents that."""
 
