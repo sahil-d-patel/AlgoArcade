@@ -12,6 +12,7 @@ from algoarcade.games.super_mario_land.reader import (
     LEVEL_BLOCK,
     LIVES_LEFT,
     MARIO_X,
+    MARIO_Y,
     SCROLL_X,
     TIME_LEFT,
     WORLD_AND_LEVEL,
@@ -51,6 +52,7 @@ def test_state_has_no_score_or_coins() -> None:
         "time_left",
         "world",
         "level_progress",
+        "mario_y",
     }
 
 
@@ -65,6 +67,7 @@ def test_reader_decodes_fixed_bytes() -> None:
                 LEVEL_BLOCK: 5,
                 SCROLL_X: 3,
                 MARIO_X: 40,
+                MARIO_Y: 112,
             }
         )
     )
@@ -73,8 +76,9 @@ def test_reader_decodes_fixed_bytes() -> None:
         time_left=345,
         world=(2, 3),
         level_progress=5 * 16 + 12 + 40,  # (3 - 7) % 16 is 12
+        mario_y=112,
     )
-    assert state.location == (2, 3, 132)
+    assert state.location == (2, 3, 132, 112)
 
 
 @pytest.mark.rom
@@ -85,10 +89,20 @@ def test_reader_matches_the_pyboy_wrapper_over_1000_random_steps(backend: PyBoyB
     rng = np.random.default_rng(0)
     states = []
     mismatches = []
+    still_scrolls = set()
+    scroll = read_u8(backend, SCROLL_X)
     for step in range(1000):
         backend.press([ACTIONS[rng.integers(len(ACTIONS))]])
         state = reader.read(backend)
         states.append(state)
+        drawn_scroll = pyboy.screen.tilemap_position_list[16][0]
+        # hScrollX only grows while the screen scrolls. If it did not move during this step,
+        # LCDStatus copied it to rSCX on the last frame, so PyBoy drew exactly this value.
+        previous, scroll = scroll, read_u8(backend, SCROLL_X)
+        if scroll == previous:
+            still_scrolls.add(scroll)
+            if scroll != drawn_scroll:
+                mismatches.append((step, "hScrollX", scroll, drawn_scroll))
         mismatches.extend(
             (step, field, getattr(state, field), getattr(wrapper, field))
             for field in ("lives_left", "time_left", "world")
@@ -107,12 +121,14 @@ def test_reader_matches_the_pyboy_wrapper_over_1000_random_steps(backend: PyBoyB
                     WORLD_AND_LEVEL,
                     LEVEL_BLOCK,
                     MARIO_X,
+                    MARIO_Y,
                 )
             }
-            | {SCROLL_X: pyboy.screen.tilemap_position_list[16][0]}
+            | {SCROLL_X: drawn_scroll}
         )
         level_progress = reader.read(drawn).level_progress
         if level_progress != wrapper.level_progress:
             mismatches.append((step, "level_progress", level_progress, wrapper.level_progress))
     assert len(set(states)) > 1, "the state never changed, so this run proves nothing"
+    assert len(still_scrolls) > 1, "the screen never scrolled and stopped, so hScrollX is untested"
     assert not mismatches, f"(step, field, reader, wrapper): {mismatches}"

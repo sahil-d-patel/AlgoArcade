@@ -55,7 +55,7 @@ A wrong ROM is an error, never a warning.
 
 A StateReader is written per game. It reads memory through a GameBackend and returns a GameState: a frozen record of everything we care about. The protocols live in `src/algoarcade/games/base.py`. A reader raises `StateNotReady` from that module when the reader detects memory is not ready; callers must handle this as not ready rather than substitute zero-valued fields. On the title screen and intro, FireRed's save-block pointer is valid but the block is empty; the reader detects this (position (0, 0, 0, 0) with an empty party, which no overworld state has) and raises.
 
-The framework asks one thing of every GameState: a `location`, a hashable tuple that identifies where the player is. Exploration rewards, the archive and the heatmap all key on it. For FireRed it is `(map_group, map_num, x, y)`. For Super Mario Land it is `(world, level, level_progress)`.
+The framework asks one thing of every GameState: a `location`, a hashable tuple that identifies where the player is. Exploration rewards, the archive and the heatmap all key on it. For FireRed it is `(map_group, map_num, x, y)`. For Super Mario Land it is `(world, level, level_progress, mario_y)`, logged in the `map_group`, `map_num`, `x` and `y` columns in that order. `level_progress` is in pixels and `mario_y` is the raw screen byte at 0xC201. While the screen scrolls, `level_progress` drops by 15 for one frame at each 16-pixel block boundary, so a novelty or progress consumer must act only on two consecutive reads that agree, as the FireRed progress terms do. Today only `scripts/env_trace.py` uses it, with `explore` on single reads, to compare traces, not to train.
 
 ### FireRed GameState fields
 

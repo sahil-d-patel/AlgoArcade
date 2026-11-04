@@ -15,11 +15,16 @@ from algoarcade.backends.base import GameBackend, read_u8
 TIME_LEFT = 0xDA01  # wGameTimer + 1, wram.asm. BCD: seconds 0-99, then hundreds.
 LIVES_LEFT = 0xDA15  # wLives, wram.asm. BCD.
 WORLD_AND_LEVEL = 0xFFB4  # hWorldAndLevel, hram.asm. World in the high nibble, level in the low.
-SCROLL_X = 0xFFA4  # hScrollX, hram.asm. The game copies it to rSCX at scanline 16.
-# No label in the disassembly. Source: PyBoy 2.8.1 game_wrapper_super_mario_land.py, which reads
-# them in post_tick. Logged as an exception in docs/decisions.md.
+# hScrollX, hram.asm. LCDStatus in bank0.asm copies it to rSCX after scanline 16. The wrapper
+# never reads it; the ROM oracle test checks it against the scroll PyBoy drew.
+SCROLL_X = 0xFFA4
+# No label in the disassembly. LEVEL_BLOCK and MARIO_X: PyBoy v2.8.1, commit
+# f97d75162df5dafa82db50850d04497013cf215b, pyboy/plugins/game_wrapper_super_mario_land.py
+# lines 360-361, in post_tick. MARIO_Y: the disassembly's comments only. Logged as exceptions
+# in docs/decisions.md.
 LEVEL_BLOCK = 0xC0AB  # Counts 16-pixel blocks scrolled; bank0.asm calls it "progress" in level.
-MARIO_X = 0xC202  # Mario's x on screen.
+MARIO_X = 0xC202  # Mario's x on screen. bank0.asm: "Mario X pos".
+MARIO_Y = 0xC201  # Mario's y on screen. bank0.asm: "Mario Y pos". Not checked against the game.
 
 
 @dataclass(frozen=True)
@@ -28,10 +33,11 @@ class SuperMarioLandState:
     time_left: int
     world: tuple[int, int]
     level_progress: int
+    mario_y: int
 
     @property
-    def location(self) -> tuple[int, int, int]:
-        return (*self.world, self.level_progress)
+    def location(self) -> tuple[int, int, int, int]:
+        return (*self.world, self.level_progress, self.mario_y)
 
 
 def bcd(byte: int) -> int:
@@ -45,7 +51,8 @@ class SuperMarioLandReader:
         # The wrapper's formula. It takes the scroll from the line PyBoy drew, which lags hScrollX
         # by one frame while the screen scrolls, so the two can differ on such a frame. While
         # scrolling, the result also drops by 15 for one frame at each 16-pixel block boundary,
-        # because LEVEL_BLOCK updates a frame after hScrollX. Pay progress on a running maximum.
+        # because LEVEL_BLOCK updates a frame after hScrollX. So a consumer must act only on two
+        # consecutive reads that agree.
         level_progress = (
             read_u8(backend, LEVEL_BLOCK) * 16
             + (read_u8(backend, SCROLL_X) - 7) % 16
@@ -56,4 +63,5 @@ class SuperMarioLandReader:
             time_left=bcd(seconds) + bcd(hundreds) * 100,
             world=(world_and_level >> 4, world_and_level & 0x0F),
             level_progress=level_progress,
+            mario_y=read_u8(backend, MARIO_Y),
         )
