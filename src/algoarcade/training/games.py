@@ -103,11 +103,13 @@ class Continues:
     for the demo's tiles. AlgoArcadeEnv ends an episode only on its step budget, so whenever the
     menu flag is set after a press or a step, this loads the start state again before anything
     reads memory. A continue costs the time it took to lose three lives and pays nothing: the
-    start tiles are already visited."""
+    start tiles are already visited. It is not a terminal transition: the episode goes on, PPO
+    bootstraps across it, and the episode still ends as `truncated`. `continues` counts them."""
 
-    def __init__(self, backend: PyBoyBackend, start_state: bytes) -> None:
+    def __init__(self, backend: GameBackend, start_state: bytes) -> None:
         self._backend = backend
         self._start_state = start_state
+        self.continues = 0
 
     def step(self, frames: int = 1) -> None:
         self._backend.step(frames)
@@ -120,6 +122,7 @@ class Continues:
     def _continue(self) -> None:
         if read_u8(self._backend, MENU):
             self._backend.load_state(self._start_state)
+            self.continues += 1
 
     def screen(self) -> Any:
         return self._backend.screen()
@@ -164,9 +167,12 @@ def super_mario_land_env(
         name: lambda _s: 0
         for name in ("badge_count", "party_level_sum", "story_flags", "milestone_count")
     }
-    return Measures(
-        env, reads, {"goal": entry.goal, "in_battle": lambda _s: False} | nothing, counts=()
-    )
+    measures = {
+        "goal": entry.goal,
+        "in_battle": lambda _s: False,
+        "continues": lambda _s: backend.continues,
+    }
+    return Measures(env, reads, measures | nothing, counts=())
 
 
 def fake_env(reward_weights: Mapping[str, float]) -> gym.Env:
