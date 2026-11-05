@@ -103,6 +103,9 @@ def test_a_count_changes_only_once_two_reads_agree() -> None:
 def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
     if not FIRERED_ROM.is_file():
         pytest.skip("Needs the local FireRed ROM")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     config = dataclasses.replace(FIRERED, start_state="seg_02_pallet", n_envs=1)
     env_fn, _, _ = env_factory("firered", config.start_state, config.reward_weights)
     # 64-step episodes keep the test short; the manifest's budget is 4,096.
