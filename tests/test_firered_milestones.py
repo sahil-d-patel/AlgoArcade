@@ -218,8 +218,9 @@ def test_env_keeps_gym_entered_after_leaving_the_gym() -> None:
             paid += info["reward/milestone"]
         assert (6, 2) in maps
         assert maps[-1] == (3, 2)
-        # The gym entry is kept one step after the read that first shows it.
-        assert counts == [6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7]
+        # The reset read counts once the first step agrees with it, and the gym entry is kept one
+        # step after the read that first shows it.
+        assert counts == [0, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7]
         assert paid == 1.0
     finally:
         env.close()

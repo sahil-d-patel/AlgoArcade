@@ -164,7 +164,7 @@ The milestones are named predicates over FireRedState in `src/algoarcade/games/f
 | 8 | brock_defeated | FLAG_DEFEATED_BROCK (0x4B0) |
 | 9 | boulder_badge | FLAG_BADGE01_GET (0x820) |
 
-`milestone_count` counts to the furthest one that holds, so a lost rival battle does not hold back the rest. A loss followed by training to level 6 on Route 1 passes `rival_beaten` wrongly. `forest_exited` and `gym_entered` stop holding when the player walks off the map; AlgoArcadeEnv latches them by reporting the episode's best count.
+`milestone_count` counts to the furthest one that holds, so a lost rival battle does not hold back the rest. A loss followed by training to level 6 on Route 1 passes `rival_beaten` wrongly. `forest_exited` and `gym_entered` stop holding when the player walks off the map; AlgoArcadeEnv latches them by reporting the episode's best count. The best rises only to the lower of two consecutive reads, the reset read included, so a real rise shows one step late and a count that reads high for one frame is never kept.
 
 `tests/test_firered_fields.py` checks each field against captures read off the screen; the ram-field skill says how they are pinned and regenerated.
 
@@ -244,7 +244,7 @@ The observation is a `Dict` of two float32 boxes:
 |---|---|
 | `reward/<name>` | Each configured component's raw value, before its weight. The logs store it as `reward_<name>`. The step's reward is the sum of weight times raw value. |
 | `location` | The GameState's location after the decision. For FireRed `(map_group, map_num, x, y)`. |
-| `milestone_count` | The highest `milestone_count` of the GameState so far this episode. Present when the GameState has the field; Super Mario Land has none. |
+| `milestone_count` | The episode's best `milestone_count`: the highest value two consecutive reads agreed on, the reset read included, so a rise shows one step late and the reset step reports 0. Present when the GameState has the field; Super Mario Land has none. |
 
 `reset` returns `location` and `milestone_count` only. ENV-09 adds a save state for the archive.
 
@@ -313,7 +313,7 @@ Written every Nth step: each environment writes the row of a decision whose `epi
 | action | Small integer | Index into the environment's action set |
 | map_group, map_num, x, y | Small integer | The location after the decision |
 | in_battle | Boolean | |
-| milestone_count | Small integer | |
+| milestone_count | Small integer | The env's episode best after this decision, as in `info` |
 | reward_total | Decimal | The weighted reward the environment returned |
 | reward_ plus component name | Decimal, nullable | One column per component |
 
@@ -343,9 +343,9 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 | episode_return | Decimal | Sum of `reward_total` over the episode |
 | episode_length | Integer | Decisions in the episode |
 | reward_ plus component name | Decimal, nullable | The component's raw total over the episode |
-| badge_count, party_level_sum, story_flags | Small integer | At the episode's end |
+| badge_count, party_level_sum, story_flags | Small integer | At the episode's end: each the latest value two consecutive reads agreed on, because a read on the frame a save block moves can dip or read high |
 | unique_tiles | Integer | Distinct `(map_group, map_num, x, y)` this episode |
-| milestone_count | Small integer | At the episode's end |
+| milestone_count | Small integer | At the episode's end: the env's episode best, as in `info` |
 | start_state | Text | The manifest name |
 | archive_start | Boolean | Whether the start came from the archive |
 | end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap` |
