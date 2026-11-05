@@ -140,12 +140,12 @@ def test_info_keeps_the_episode_best_milestone_count() -> None:
     env = make_env(backend)
     env.reset(seed=0)
     counts = []
-    for value in (3, 1, 0, 4):
+    for value in (3, 3, 1, 0, 4, 4):
         ram = bytearray(backend.save_state())
         ram[fake.MILESTONES] = value
         backend.load_state(bytes(ram))
         counts.append(env.step(3)[4]["milestone_count"])
-    assert counts == [3, 3, 3, 4]
+    assert counts == [0, 3, 3, 3, 3, 4]
     _, info = env.reset(seed=0)
     assert info["milestone_count"] == 0
 
@@ -253,3 +253,16 @@ def test_retries_stop_at_the_first_ready_frame() -> None:
     env.reset(seed=0)
     env.step(0)
     assert reader.reads == 2 + NOT_READY_FRAMES
+
+
+def test_a_one_read_milestone_spike_is_not_kept() -> None:
+    backend = FakeBackend()
+    env = make_env(backend)
+    env.reset(seed=0)
+    counts = []
+    for value in (0, 5, 0, 0):
+        ram = bytearray(backend.save_state())
+        ram[fake.MILESTONES] = value
+        backend.load_state(bytes(ram))
+        counts.append(env.step(3)[4]["milestone_count"])
+    assert counts == [0, 0, 0, 0]
