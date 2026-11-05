@@ -139,6 +139,9 @@ def firered_backend() -> Iterator[MgbaBackend]:
     rom = ROOT / "data/roms/firered.gba"
     if not rom.is_file():
         pytest.skip("Needs the local FireRed ROM")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     backend = MgbaBackend(rom)
     try:
         yield backend
@@ -545,6 +548,9 @@ def read_start_state(name: str, inputs: str = "") -> FireRedState:
         pytest.skip(f"Needs the local FireRed ROM and {path.name}")
     data = path.read_bytes()
     assert hashlib.sha256(data).hexdigest() == {e.name: e.sha256 for e in MANIFEST}[name]
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     backend = MgbaBackend(rom, render=False)
     try:
         if backend.rom.sha1 != ROM_SHA1:
