@@ -49,7 +49,7 @@ from algoarcade.training.parquet import ParquetLog
 # Training envs take seeds seed .. seed + n_envs - 1; the eval env sits clear of them.
 EVAL_SEED_OFFSET = 1_000
 EVAL_FIELDS = ["step", "mean_return", "std_return", "wall_time_s"]
-GAMES = ("fake", "firered")
+GAMES = ("fake", "firered", "super_mario_land")
 SPAWN = {"vec_env_cls": SubprocVecEnv, "vec_env_kwargs": {"start_method": "spawn"}}
 
 
@@ -67,6 +67,9 @@ class CheckpointEval(BaseCallback):
     so every checkpoint plays the same episodes.
     _on_step runs during a rollout, before that rollout's update, so the final checkpoint waits
     for _on_training_end; a periodic one in the last rollout would miss the last update.
+
+    When the env reports `continues` (Super Mario Land), the total across the training envs so
+    far goes to progress.csv and W&B as rollout/continues.
     """
 
     def __init__(self, run_dir: Path, config: TrainConfig, eval_env: VecEnv) -> None:
@@ -76,12 +79,20 @@ class CheckpointEval(BaseCallback):
         self.eval_env = eval_env
         self.next_at = config.checkpoint_every
         self.start = time.time()
+        self.continues: dict[int, int] = {}
 
     def _on_step(self) -> bool:
+        for i, info in enumerate(self.locals["infos"]):
+            if "continues" in info:
+                self.continues[i] = info["continues"]
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
             self.next_at += self.config.checkpoint_every
             self.checkpoint()
         return True
+
+    def _on_rollout_end(self) -> None:
+        if self.continues:
+            self.logger.record("rollout/continues", sum(self.continues.values()))
 
     def _on_training_end(self) -> None:
         self.checkpoint()

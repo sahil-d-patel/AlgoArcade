@@ -153,7 +153,8 @@ class ParquetLog(VecEnvWrapper):
                 "milestone_count": info["milestone_count"],
                 "start_state": self._start_state,
                 "archive_start": False,
-                # AlgoArcadeEnv ends episodes on the step budget only.
+                # AlgoArcadeEnv ends episodes on the step budget only. A Super Mario Land
+                # continue after a game over is not an end: the episode goes on.
                 "end_reason": "truncated",
                 "goal_reached": self._goal_step[i] is not None,
                 "goal_step": self._goal_step[i],

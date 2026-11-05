@@ -53,9 +53,9 @@ data/runs/run_id=<env_id>-seed<seed>-<YYYYmmdd-HHMMSS>/
 
 Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an env reseeded to `seed + 1000` first, so every checkpoint plays the same episodes. The last row is the final result. `uv run python scripts/summarize_runs.py --out-dir <dir>` prints the table of runs and saves one learning-curve PNG per env.
 
-## FireRed and the fake game
+## The games
 
-With `env_id` set to `firered` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset is the baseline at 1M steps on the default reward: events, explore, level, badge and milestone at `DEFAULT_WEIGHTS`, penalties off (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers, and each worker checks the state's options.
+With `env_id` set to `firered`, `super_mario_land` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset is the baseline at 1M steps on the default reward: events, explore, level, badge and milestone at `DEFAULT_WEIGHTS`, penalties off (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers, and each worker checks the state's options.
 
 The TRN-05 runs, launched one after another so a stop loses only the run in progress:
 
@@ -88,6 +88,12 @@ model = PPO.load("step_<n>.zip")
 
 where `env_fn` comes from `algoarcade.training.games.env_factory`. The episodes table's `badge_count`, `party_level_sum` and `story_flags` are each the latest value two consecutive reads agreed on, because a read on the frame a save block moves can be wrong; `milestone_count` is the env's episode best.
 
-Super Mario Land is not wired in. It needs PyBoyBackend and its reader (ENV-03, #58), the ROM, a reward for `level_progress`, and a place to log `level_progress`: the steps table has no column for it.
+With `env_id` set to `super_mario_land`, the runner trains Super Mario Land on PyBoy from the start state `level_1_1` (regenerate it with `uv run python scripts/capture_sml_states.py`). The `super_mario_land` preset uses the FireRed PPO values for 2M steps with `explore` at 0.02 as the only reward. A game over continues from the start state instead of showing the title menu and its demo (docs/harness-spec.md, Reward registry). The steps table's `x` holds `x_tile`, which is `level_progress` at 8-pixel resolution; use it for progress. Rows log `in_battle` False and the FireRed counts as 0. The TRN-05 runs:
+
+```
+for seed in 0 1 2; do
+  WANDB_MODE=offline uv run python -m algoarcade.training.runner super_mario_land --seed $seed --track
+done
+```
 
 The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.

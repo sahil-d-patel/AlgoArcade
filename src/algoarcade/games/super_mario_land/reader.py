@@ -30,6 +30,15 @@ MARIO_Y = 0xC201  # Mario's y on screen. bank0.asm: "Mario Y pos". Not checked a
 # bit 3 of hScrollX equals this byte, then flips it between 0 and 8, and every second flip it
 # also adds 1 to LEVEL_BLOCK. Every write in the disassembly is 0 or that flip.
 COLUMN_BIT = 0xFFA3
+# hGameState, hram.asm. 0 is normal gameplay; the jump table in bank0.asm lines 385-404 names the
+# others.
+GAME_STATE = 0xFFB3
+# No label. Non-zero while the title menu or its demo runs, 0 while the player plays: the menu
+# init stores 0x28 (bank0.asm lines 591-593), .startLevel clears it when START starts a game
+# (lines 760-762), and AddScore and the pause check skip on it ("Demo mode?", lines 185, 320).
+# After a game over the game returns to the menu, and after 0x28 * 16 frames the demo plays a
+# level on its own.
+MENU = 0xFF9F
 
 
 @dataclass(frozen=True)

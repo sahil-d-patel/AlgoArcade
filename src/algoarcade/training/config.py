@@ -10,6 +10,7 @@ from pathlib import Path
 
 import tyro
 
+from algoarcade.games.super_mario_land import rewards as sml_rewards
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 
 
@@ -47,11 +48,12 @@ class TrainConfig:
     track: bool = False
     """Send SB3's scalars to Weights & Biases."""
     start_state: str = ""
-    """With env_id firered: a manifest entry with a step budget, such as seg_01_house."""
+    """With env_id firered or super_mario_land: a manifest entry with a step budget, such as
+    seg_01_house or level_1_1."""
     reward_weights: dict[str, float] = dataclasses.field(default_factory=dict)
-    """With env_id fake or firered: component name to weight."""
+    """With a game env_id: component name to weight."""
     step_log_every: int = 4
-    """With env_id fake or firered: log every Nth decision of each episode to the steps table."""
+    """With a game env_id: log every Nth decision of each episode to the steps table."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
@@ -96,6 +98,18 @@ FIRERED = dataclasses.replace(
     total_timesteps=1_000_000,
     eval_episodes=3,
     reward_weights=dict(DEFAULT_WEIGHTS),
+)
+
+# TRN-05's Super Mario Land runs: the same PPO values as FireRed, explore on the location, from the
+# first frame of 1-1. 2M steps is the top of TRN-05's 1M to 2M guess; PyBoy runs about 7,000 env
+# steps/s with 16 envs on the Mac, so a run takes minutes.
+SUPER_MARIO_LAND = dataclasses.replace(
+    BASELINE,
+    env_id="super_mario_land",
+    start_state="level_1_1",
+    total_timesteps=2_000_000,
+    eval_episodes=3,
+    reward_weights=dict(sml_rewards.DEFAULT_WEIGHTS),
 )
 
 # The control tasks end within 500 steps, so they do not need the baseline's long horizon. These
@@ -145,6 +159,7 @@ ACROBOT = TrainConfig(
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
     "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
+    "super_mario_land": ("Super Mario Land 1-1 on PyBoy, explore reward.", SUPER_MARIO_LAND),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),
 }
