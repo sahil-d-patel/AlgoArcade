@@ -106,6 +106,9 @@ def start(name: str) -> MgbaBackend:
     path = ROOT / "data/states" / f"{name}.state"
     if not rom.is_file() or not path.is_file():
         pytest.skip(f"Needs the local FireRed ROM and {path.name}")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
     backend = MgbaBackend(rom, render=False)
     if backend.rom.sha1 != ROM_SHA1:
         backend.close()
