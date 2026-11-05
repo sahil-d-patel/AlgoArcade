@@ -144,7 +144,7 @@ ACROBOT = TrainConfig(
 
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
-    "firered": ("FireRed on mGBA, explore reward. Pass --start-state.", FIRERED),
+    "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),
 }
