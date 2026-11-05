@@ -174,6 +174,14 @@ def run_row(
     }
 
 
+def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
+    """Each row in its own closed file: an open Parquet file cannot be read, so a run killed
+    before its end row still reads as running."""
+    runs = RollingWriter(run_dir, "runs", "train", resume=True)
+    runs.write(pa.Table.from_pylist([row], schema=RUNS))
+    runs.close()
+
+
 def train(config: TrainConfig) -> Path:
     name = f"{config.env_id}-{config.start_state}" if config.start_state else config.env_id
     run_id = f"{name}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -230,15 +238,9 @@ def train(config: TrainConfig) -> Path:
     logger = Logger(str(run_dir), outputs)
     model.set_logger(logger)
 
-    runs = None
     fixed = run_row(config, run_id, backend, rom_sha1, git_info["commit"])
     if game:
-        runs = RollingWriter(run_dir, "runs", "train")
-        runs.write(
-            pa.Table.from_pylist(
-                [fixed | {"status": "running", "env_steps": 0, "wall_clock_s": 0.0}], schema=RUNS
-            )
-        )
+        write_run_row(run_dir, fixed | {"status": "running", "env_steps": 0, "wall_clock_s": 0.0})
     status = "crashed"
     try:
         model.learn(
@@ -255,21 +257,10 @@ def train(config: TrainConfig) -> Path:
                 vec.closed = True
         raise RuntimeError("A SubprocVecEnv worker died; its traceback is above") from error
     finally:
-        if runs is not None:
-            runs.write(
-                pa.Table.from_pylist(
-                    [
-                        fixed
-                        | {
-                            "status": status,
-                            "env_steps": model.num_timesteps,
-                            "wall_clock_s": time.perf_counter() - start,
-                        }
-                    ],
-                    schema=RUNS,
-                )
-            )
-            runs.close()
+        if game:
+            elapsed = time.perf_counter() - start
+            end = {"status": status, "env_steps": model.num_timesteps, "wall_clock_s": elapsed}
+            write_run_row(run_dir, fixed | end)
         logger.close()
         env.close()
         eval_env.close()

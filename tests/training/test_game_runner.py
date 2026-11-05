@@ -50,6 +50,13 @@ def test_every_table_validates(run_dir: Path) -> None:
         validate(pq.read_table(run_dir / name), name)
 
 
+def test_the_start_row_is_readable_before_the_run_ends(run_dir: Path) -> None:
+    # An open Parquet file cannot be read, so a killed run shows `running` only if the start
+    # row's file was closed at launch.
+    first = pq.read_table(run_dir / "runs" / "train-00000.parquet").to_pylist()
+    assert [r["status"] for r in first] == ["running"]
+
+
 def test_tables_agree_on_the_step_count(run_dir: Path) -> None:
     runs = pq.read_table(run_dir / "runs").to_pylist()
     assert [r["status"] for r in runs] == ["running", "finished"]
