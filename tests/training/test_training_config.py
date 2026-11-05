@@ -17,8 +17,9 @@ def test_saved_config_reloads_equal(name: str, tmp_path: Path) -> None:
     assert load_config(path) == config
 
 
-def test_firered_preset_has_gamma_0997_and_no_reward_normalisation() -> None:
-    config = PRESETS["firered"][1]
+@pytest.mark.parametrize("name", ["firered", "super_mario_land"])
+def test_game_presets_have_gamma_0997_and_no_reward_normalisation(name: str) -> None:
+    config = PRESETS[name][1]
     assert config.ppo.gamma == 0.997
     assert config.norm_reward is False
     assert config.norm_obs is True
@@ -26,3 +27,7 @@ def test_firered_preset_has_gamma_0997_and_no_reward_normalisation() -> None:
 
 def test_firered_preset_pays_the_default_reward() -> None:
     assert PRESETS["firered"][1].reward_weights == DEFAULT_WEIGHTS
+
+
+def test_super_mario_land_trains_with_the_firered_ppo_values() -> None:
+    assert PRESETS["super_mario_land"][1].ppo == PRESETS["firered"][1].ppo

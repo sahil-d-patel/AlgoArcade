@@ -49,7 +49,7 @@ from algoarcade.training.parquet import ParquetLog
 # Training envs take seeds seed .. seed + n_envs - 1; the eval env sits clear of them.
 EVAL_SEED_OFFSET = 1_000
 EVAL_FIELDS = ["step", "mean_return", "std_return", "wall_time_s"]
-GAMES = ("fake", "firered")
+GAMES = ("fake", "firered", "super_mario_land")
 SPAWN = {"vec_env_cls": SubprocVecEnv, "vec_env_kwargs": {"start_method": "spawn"}}
 
 
