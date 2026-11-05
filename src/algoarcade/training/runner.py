@@ -75,7 +75,7 @@ class CheckpointEval(BaseCallback):
         self.config = config
         self.eval_env = eval_env
         self.next_at = config.checkpoint_every
-        self.start = time.perf_counter()
+        self.start = time.time()
 
     def _on_step(self) -> bool:
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
@@ -115,7 +115,7 @@ class CheckpointEval(BaseCallback):
                     "step": self.num_timesteps,
                     "mean_return": mean,
                     "std_return": float(np.std(returns)),
-                    "wall_time_s": round(time.perf_counter() - self.start, 1),
+                    "wall_time_s": round(time.time() - self.start, 1),
                 }
             )
 
@@ -197,7 +197,8 @@ def train(config: TrainConfig) -> Path:
     git_info = {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
     (run_dir / "git.json").write_text(json.dumps(git_info) + "\n")
 
-    start = time.perf_counter()
+    # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
+    start = time.time()
     env: VecEnv
     eval_env: VecEnv
     if game:
@@ -258,7 +259,7 @@ def train(config: TrainConfig) -> Path:
         raise RuntimeError("A SubprocVecEnv worker died; its traceback is above") from error
     finally:
         if game:
-            elapsed = time.perf_counter() - start
+            elapsed = time.time() - start
             end = {"status": status, "env_steps": model.num_timesteps, "wall_clock_s": elapsed}
             write_run_row(run_dir, fixed | end)
         logger.close()

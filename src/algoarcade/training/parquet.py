@@ -81,7 +81,7 @@ class ParquetLog(VecEnvWrapper):
 
     def step_wait(self) -> Any:
         obs, rewards, dones, infos = self.venv.step_wait()
-        clock = time.perf_counter() - self._start
+        clock = time.time() - self._start
         episode_rows = []
         for i, info in enumerate(infos):
             self._episode_step[i] += 1

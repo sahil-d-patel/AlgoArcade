@@ -107,7 +107,7 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
     env_fn, _, _ = env_factory("firered", config.start_state, config.reward_weights)
     # 64-step episodes keep the test short; the manifest's budget is 4,096.
     venv = DummyVecEnv([lambda: gym.wrappers.TimeLimit(env_fn(), 64)])
-    log = ParquetLog(venv, config, tmp_path / "run_id=t", time.perf_counter())
+    log = ParquetLog(venv, config, tmp_path / "run_id=t", time.time())
     log.reset()
     for step in range(128):
         log.step(np.array([2 + step % 2]))  # left, right
