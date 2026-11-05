@@ -48,11 +48,12 @@ class TrainConfig:
     track: bool = False
     """Send SB3's scalars to Weights & Biases."""
     start_state: str = ""
-    """With env_id firered: a manifest entry with a step budget, such as seg_01_house."""
+    """With env_id firered or super_mario_land: a manifest entry with a step budget, such as
+    seg_01_house or level_1_1."""
     reward_weights: dict[str, float] = dataclasses.field(default_factory=dict)
-    """With env_id fake or firered: component name to weight."""
+    """With a game env_id: component name to weight."""
     step_log_every: int = 4
-    """With env_id fake or firered: log every Nth decision of each episode to the steps table."""
+    """With a game env_id: log every Nth decision of each episode to the steps table."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
