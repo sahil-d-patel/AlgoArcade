@@ -140,12 +140,12 @@ def test_info_keeps_the_episode_best_milestone_count() -> None:
     env = make_env(backend)
     env.reset(seed=0)
     counts = []
-    for value in (3, 1, 0, 4):
+    for value in (3, 3, 1, 0, 4, 4):
         ram = bytearray(backend.save_state())
         ram[fake.MILESTONES] = value
         backend.load_state(bytes(ram))
         counts.append(env.step(3)[4]["milestone_count"])
-    assert counts == [3, 3, 3, 4]
+    assert counts == [0, 3, 3, 3, 3, 4]
     _, info = env.reset(seed=0)
     assert info["milestone_count"] == 0
 
@@ -253,3 +253,41 @@ def test_retries_stop_at_the_first_ready_frame() -> None:
     env.reset(seed=0)
     env.step(0)
     assert reader.reads == 2 + NOT_READY_FRAMES
+
+
+def test_a_one_read_milestone_spike_is_not_kept() -> None:
+    backend = FakeBackend()
+    env = make_env(backend)
+    env.reset(seed=0)
+    counts = []
+    for value in (0, 5, 0, 0):
+        ram = bytearray(backend.save_state())
+        ram[fake.MILESTONES] = value
+        backend.load_state(bytes(ram))
+        counts.append(env.step(3)[4]["milestone_count"])
+    assert counts == [0, 0, 0, 0]
+
+
+def start_with_milestones(value: int) -> tuple[FakeBackend, AlgoArcadeEnv]:
+    backend = FakeBackend()
+    ram = bytearray(backend.save_state())
+    ram[fake.MILESTONES] = value
+    backend.load_state(bytes(ram))
+    return backend, make_env(backend)
+
+
+def test_a_reset_read_counts_once_the_first_step_agrees() -> None:
+    _, env = start_with_milestones(2)
+    _, info = env.reset(seed=0)
+    assert info["milestone_count"] == 0
+    assert env.step(3)[4]["milestone_count"] == 2
+
+
+def test_a_reset_read_spike_is_not_kept() -> None:
+    backend, env = start_with_milestones(5)
+    _, info = env.reset(seed=0)
+    ram = bytearray(backend.save_state())
+    ram[fake.MILESTONES] = 0
+    backend.load_state(bytes(ram))
+    counts = [info["milestone_count"]] + [env.step(3)[4]["milestone_count"] for _ in range(3)]
+    assert counts == [0, 0, 0, 0]

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import tyro
 
+from algoarcade.rewards.registry import DEFAULT_WEIGHTS
+
 
 @dataclass(frozen=True)
 class PPOConfig:
@@ -36,11 +38,20 @@ class TrainConfig:
     checkpoint_every: int
     """Env steps between checkpoints. Each checkpoint is evaluated."""
     ppo: PPOConfig
+    norm_obs: bool
+    norm_reward: bool
+    """VecNormalize's switches. The plan normalizes observations and never the reward."""
     seed: int = 0
     eval_episodes: int = 10
     runs_dir: Path = Path("data/runs")
     track: bool = False
     """Send SB3's scalars to Weights & Biases."""
+    start_state: str = ""
+    """With env_id firered: a manifest entry with a step budget, such as seg_01_house."""
+    reward_weights: dict[str, float] = dataclasses.field(default_factory=dict)
+    """With env_id fake or firered: component name to weight."""
+    step_log_every: int = 4
+    """With env_id fake or firered: log every Nth decision of each episode to the steps table."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
@@ -71,6 +82,20 @@ BASELINE = TrainConfig(
         clip_range=0.2,
         ent_coef=0.01,
     ),
+    norm_obs=True,
+    norm_reward=False,
+)
+
+# TRN-05's FireRed runs, on the default reward: the five positive terms at their starting
+# weights, penalties off. 1M steps and 3 eval episodes are guesses; a deterministic policy from
+# an indoor state replays the same episode, so more eval episodes add little.
+FIRERED = dataclasses.replace(
+    BASELINE,
+    env_id="firered",
+    start_state=tyro.MISSING,
+    total_timesteps=1_000_000,
+    eval_episodes=3,
+    reward_weights=dict(DEFAULT_WEIGHTS),
 )
 
 # The control tasks end within 500 steps, so they do not need the baseline's long horizon. These
@@ -93,6 +118,8 @@ CARTPOLE = TrainConfig(
         clip_range=0.2,
         ent_coef=0.0,
     ),
+    norm_obs=False,
+    norm_reward=False,
 )
 
 ACROBOT = TrainConfig(
@@ -111,10 +138,13 @@ ACROBOT = TrainConfig(
         clip_range=0.2,
         ent_coef=0.0,
     ),
+    norm_obs=False,
+    norm_reward=False,
 )
 
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
+    "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),
 }

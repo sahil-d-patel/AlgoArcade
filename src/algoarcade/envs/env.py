@@ -69,6 +69,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._visited: set[tuple[Any, ...]] = set()
         self._steps = 0
         self._milestone_count = 0
+        self._last_milestone_count: int | None = None
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -81,6 +82,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._visited = {self._state.location}
         self._steps = 0
         self._milestone_count = 0
+        self._last_milestone_count = None
         return self._observe(self._state), self._info(self._state)
 
     def step(
@@ -121,9 +123,13 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     def _info(self, state: GameState) -> dict[str, Any]:
         info: dict[str, Any] = {"location": state.location}
         # Super Mario Land has no milestones. FireRed's count drops when the player walks off a
-        # map-based milestone, so the episode keeps its best.
+        # map-based milestone, so the episode keeps its best. A count can read high for one frame
+        # while a save block moves, so the best rises only to the lower of two consecutive reads,
+        # the reset read included: a real rise shows one step late, as in NewMaximum.
         milestone_count = getattr(state, "milestone_count", None)
         if milestone_count is not None:
-            self._milestone_count = max(self._milestone_count, milestone_count)
+            last, self._last_milestone_count = self._last_milestone_count, milestone_count
+            if last is not None:
+                self._milestone_count = max(self._milestone_count, min(last, milestone_count))
             info["milestone_count"] = self._milestone_count
         return info
