@@ -282,7 +282,11 @@ def test_a_manifest_state_must_match_its_hash(
 def test_a_manifest_state_needs_the_rom_it_was_captured_on(
     states: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (rev0,) = (rom for rom in KNOWN_ROMS.values() if rom.sha1 != MANIFEST_ROM_SHA1)
+    (rev0,) = (
+        rom
+        for rom in KNOWN_ROMS.values()
+        if rom.game == "firered" and rom.sha1 != MANIFEST_ROM_SHA1
+    )
     monkeypatch.setattr(agent_server, "identify", lambda _: rev0)
     with pytest.raises(ValueError, match="captured on rev 1"):
         agent_server.start_state("seg_01_house")

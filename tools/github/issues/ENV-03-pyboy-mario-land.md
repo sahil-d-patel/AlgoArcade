@@ -17,7 +17,7 @@ Super Mario Land on PyBoy is our pipeline test game from week 2 and the second g
 
 ## Acceptance criteria
 - [ ] The suite in `tests/conformance/` passes for `PyBoyBackend` on the owner's machine and on one other OS. CI has no ROM, so both pytest summaries are pasted in the pull request.
-- [ ] Over 1,000 seeded random steps, the reader's four fields equal the wrapper's `lives_left`, `time_left`, `world` and `level_progress` at every step. Zero mismatches. Output pasted.
+- [ ] Over 1,000 seeded random steps, the reader's `lives_left`, `time_left` and `world` equal the wrapper's at every step. For `level_progress`, the reader run on that step's memory with PyBoy's drawn scroll (scanline 16) in place of `hScrollX` (0xFFA4) equals the wrapper's `level_progress` exactly, at every step. Zero mismatches. Output pasted.
 - [ ] The reader has no score field and no coins field.
 - [ ] `rom.py` and DATA.md carry one Super Mario Land SHA-1. Two members post the same hash on this issue.
 - [ ] `uv run python -m algoarcade.rom <dump>` names the standard dump as Super Mario Land. A test shows `PyBoyBackend` refusing a file with any other hash.

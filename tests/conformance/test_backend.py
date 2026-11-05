@@ -5,6 +5,7 @@ the file is absent, and its entry is wrapped in pytest.param(..., marks=pytest.m
 """
 
 import hashlib
+import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,9 +13,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from algoarcade import rom
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.mgba import EWRAM_BASE, EWRAM_SIZE, MgbaBackend
+from algoarcade.backends.pyboy import ADDRESS_SPACE, PyBoyBackend
 
 
 def make_mgba() -> GameBackend:
@@ -25,6 +28,37 @@ def make_mgba() -> GameBackend:
         "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
     )
     return MgbaBackend(path)
+
+
+def make_pyboy() -> GameBackend:
+    path = Path(__file__).resolve().parents[2] / "data" / "roms" / "super_mario_land.gb"
+    if not path.is_file():
+        pytest.skip("Place your Super Mario Land ROM in data/roms/super_mario_land.gb")
+    backend = PyBoyBackend(path)
+    backend.step(120)  # WRAM stays zero until the game initialises it, about frame 96
+    return backend
+
+
+# A 15-byte Game Boy program of our own, with no Nintendo code, logo or data, so CI can run
+# PyBoyBackend without a ROM. It loops forever: select the d-pad, count at 0xC000, copy the
+# d-pad to 0xC001.
+PROBE_CODE = bytes.fromhex("3e20e0002100c034f000ea01c018f1")
+
+
+def make_pyboy_probe() -> GameBackend:
+    image = bytearray(0x8000)
+    image[0x100:0x104] = bytes.fromhex("00c35001")  # nop; jp 0x150
+    image[0x150 : 0x150 + len(PROBE_CODE)] = PROBE_CODE
+    image[0x14D] = (-sum(image[0x134:0x14D]) - 25) & 0xFF  # header checksum; PyBoy checks it
+    sha1 = hashlib.sha1(image).hexdigest()
+    with tempfile.TemporaryDirectory() as folder, pytest.MonkeyPatch.context() as patch:
+        path = Path(folder) / "probe.gb"
+        path.write_bytes(image)
+        # PyBoyBackend runs only Super Mario Land, so the probe borrows that game name.
+        patch.setitem(rom.KNOWN_ROMS, sha1, rom.Rom(sha1, "super_mario_land", "probe"))
+        backend = PyBoyBackend(path)
+    backend.step(120)  # PyBoy's boot ROM runs first; the probe starts at frame 65
+    return backend
 
 
 @dataclass(frozen=True)
@@ -45,6 +79,8 @@ BACKENDS = {
         ram=(EWRAM_BASE, EWRAM_SIZE),
         unmapped=EWRAM_BASE + EWRAM_SIZE,
     ),
+    "pyboy": BackendCase(make=make_pyboy, ram=(0xC000, 0x2000), unmapped=ADDRESS_SPACE),
+    "pyboy_probe": BackendCase(make=make_pyboy_probe, ram=(0xC000, 0x2000), unmapped=ADDRESS_SPACE),
 }
 
 INPUTS: list[list[Button]] = [
@@ -61,7 +97,7 @@ INPUTS: list[list[Button]] = [
 
 @pytest.fixture(
     params=[
-        pytest.param(value, id=name, marks=pytest.mark.rom if name == "mgba" else ())
+        pytest.param(value, id=name, marks=pytest.mark.rom if name in ("mgba", "pyboy") else ())
         for name, value in BACKENDS.items()
     ]
 )

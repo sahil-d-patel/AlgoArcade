@@ -45,7 +45,7 @@ FireRed shipped in several revisions, and addresses differ between them. On load
 |---|---|
 | Pokémon FireRed (USA) rev 0, the target | 41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc |
 | Pokémon FireRed (USA) rev 1, accepted | dd5945db9b930750cb39d00c84da8571feebf417 |
-| Super Mario Land | Recorded by ENV-03 once two members confirm the same dump |
+| Super Mario Land (World) rev A | 418203621b887caa090215d97e3f509b79affd3e |
 
 Address tables are keyed by this hash. Rev 0 and rev 1 share every RAM address we use, but ROM function addresses differ.
 
@@ -55,7 +55,7 @@ A wrong ROM is an error, never a warning.
 
 A StateReader is written per game. It reads memory through a GameBackend and returns a GameState: a frozen record of everything we care about. The protocols live in `src/algoarcade/games/base.py`. A reader raises `StateNotReady` from that module when the reader detects memory is not ready; callers must handle this as not ready rather than substitute zero-valued fields. On the title screen and intro, FireRed's save-block pointer is valid but the block is empty; the reader detects this (position (0, 0, 0, 0) with an empty party, which no overworld state has) and raises.
 
-The framework asks one thing of every GameState: a `location`, a hashable tuple that identifies where the player is. Exploration rewards, the archive and the heatmap all key on it. For FireRed it is `(map_group, map_num, x, y)`.
+The framework asks one thing of every GameState: a `location`, a hashable tuple that identifies where the player is. Exploration rewards, the archive and the heatmap all key on it. For FireRed it is `(map_group, map_num, x, y)`. For Super Mario Land it is `(world, level, x_tile, mario_y // 8)`, in 8-pixel tiles, logged in the `map_group`, `map_num`, `x` and `y` columns in that order. 8 pixels is the Game Boy's background tile, and the game loads its level one 8-pixel tile column at a time (`Call_2198` and `LoadNextColumn`, `bank0.asm` in kaspermeerts/supermarioland at 618d00e). `x_tile` is `2 * LEVEL_BLOCK + COLUMN_BIT // 8 + mario_x // 8`: the columns the game has loaded plus Mario's screen tile. `Call_2198` writes the two column bytes in one call and their sum only rises within a level, so `x_tile` cannot dip with the scroll; it can lag by one column for a frame. `level_progress`, the wrapper's pixel formula, does dip: it reads 15 low while `hScrollX` is 7 mod 16, because its scroll term wraps at 7 and `LEVEL_BLOCK` goes up at 8. So a progress term must use `x_tile`, or act on `level_progress` only when two consecutive reads agree, as the FireRed progress terms do. Both rules come from the disassembly and have not been run against the game. Today only `scripts/env_trace.py` uses the location, with `explore`, to compare traces, not to train.
 
 ### FireRed GameState fields
 
@@ -200,6 +200,8 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 | time | Every step | -0.001 | off | None while episodes end only on a step budget: every policy pays the same total. |
 
 `heal` and `blackout` read `party_hp_frac`, which ENV-08 computes as party HP over party max HP, leaving eggs out: an egg has no HP to heal.
+
+Super Mario Land has no reward table yet. If `explore` runs on its location, jumping is the exploit: each new y tile in a column pays once. Jumping in place pays once per tile of the jump's height on the first jump, and nothing after; a column holds at most 32 y tiles, one byte over 8. Jumping while running right pays up to that many per column instead of one. `explore` keys on the full location, so this is bounded, not prevented. `test_jumping_in_place_pays_explore_once_per_y_tile` checks it on a 48-pixel arc, which pays 6.
 
 The six scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 
@@ -394,7 +396,7 @@ These are blocking. Nothing merges to `main` until they pass.
 7. Exploit bounds: each scripted exploit policy earns less than its stated bound.
 8. Schema validation: every logged row matches the frozen schema.
 
-Tests 1 to 3 live in `tests/conformance/` and run against every backend in the registry. A new backend adds one registry entry and must pass them. The ROM guard is tested in `tests/test_rom.py`. Tests that need a ROM are marked and skip when the ROM is absent, so CI runs the fake backend and members run the real ones.
+Tests 1 to 3 live in `tests/conformance/` and run against every backend in the registry. A new backend adds one registry entry and must pass them. The ROM guard is tested in `tests/test_rom.py`. Tests that need a ROM are marked and skip when the ROM is absent, so CI runs the fake backend and members run the real ones. CI also runs `PyBoyBackend` on `pyboy_probe`, a 15-byte Game Boy program of our own built at test time, which checks the backend but not Super Mario Land.
 
 ## Fake backend and fake logger
 
