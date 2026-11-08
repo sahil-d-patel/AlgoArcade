@@ -100,6 +100,10 @@ FIRERED = dataclasses.replace(
     reward_weights=dict(DEFAULT_WEIGHTS),
 )
 
+# TRN-08's baseline: experiments import it and change one field. The 20 evaluation episodes per
+# seed are TRN-08's; tests/training/test_training_config.py pins every field.
+BASELINE_V1 = dataclasses.replace(FIRERED, eval_episodes=20)
+
 # TRN-05's Super Mario Land runs: the same PPO values as FireRed, explore on the location, from the
 # first frame of 1-1. 2M steps is the top of TRN-05's 1M to 2M guess; PyBoy runs about 7,000 env
 # steps/s with 16 envs on the Mac, so a run takes minutes.
@@ -159,6 +163,7 @@ ACROBOT = TrainConfig(
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
     "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
+    "baseline_v1": ("The experiments' baseline (TRN-08). Pass --start-state.", BASELINE_V1),
     "super_mario_land": ("Super Mario Land 1-1 on PyBoy, explore reward.", SUPER_MARIO_LAND),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),

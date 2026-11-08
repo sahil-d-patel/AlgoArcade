@@ -2,9 +2,10 @@ import dataclasses
 from pathlib import Path
 
 import pytest
+import tyro
 
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
-from algoarcade.training.config import PRESETS, load_config, save_config
+from algoarcade.training.config import BASELINE_V1, PRESETS, load_config, save_config
 
 
 @pytest.mark.parametrize("name", ["cartpole", "acrobot", "firered"])
@@ -31,3 +32,39 @@ def test_firered_preset_pays_the_default_reward() -> None:
 
 def test_super_mario_land_trains_with_the_firered_ppo_values() -> None:
     assert PRESETS["super_mario_land"][1].ppo == PRESETS["firered"][1].ppo
+
+
+def test_baseline_v1_pins_every_field() -> None:
+    # Every experiment changes one field of the baseline, so changing it must change this test.
+    assert PRESETS["baseline_v1"][1] is BASELINE_V1
+    assert dataclasses.asdict(BASELINE_V1) == {
+        "env_id": "firered",
+        "total_timesteps": 1_000_000,
+        "n_envs": 16,
+        "checkpoint_every": 500_000,
+        "ppo": {
+            "learning_rate": 0.0003,
+            "n_steps": 2048,
+            "batch_size": 4096,
+            "n_epochs": 3,
+            "gamma": 0.997,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
+            "ent_coef": 0.01,
+        },
+        "norm_obs": True,
+        "norm_reward": False,
+        "seed": 0,
+        "eval_episodes": 20,
+        "runs_dir": Path("data/runs"),
+        "track": False,
+        "start_state": tyro.MISSING,
+        "reward_weights": {
+            "events": 1.0,
+            "explore": 0.02,
+            "level": 0.5,
+            "badge": 10.0,
+            "milestone": 2.0,
+        },
+        "step_log_every": 4,
+    }
