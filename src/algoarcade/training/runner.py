@@ -193,7 +193,11 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
 
 
 def train(config: TrainConfig) -> Path:
-    name = f"{config.env_id}-{config.start_state}" if config.start_state else config.env_id
+    name = (
+        f"{config.experiment_id}-{config.arm}"
+        if config.experiment_id
+        else "-".join(filter(None, (config.env_id, config.start_state)))
+    )
     run_id = f"{name}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
     run_dir = config.runs_dir / f"run_id={run_id}"
     game = config.env_id in GAMES

@@ -125,6 +125,11 @@ def test_crash_does_not_stop_queue(
         "crash-first-seed0-1.log",
         "crash-third-seed0-1.log",
     ]
+    assert {p.name.rsplit("-", 2)[0] for p in (tmp_path / "runs").iterdir()} == {
+        "run_id=crash-first-seed0",
+        "run_id=crash-broken-seed0",
+        "run_id=crash-third-seed0",
+    }
     rows = [
         row
         for path in sorted((tmp_path / "runs").glob("*/runs/*.parquet"))
