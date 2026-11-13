@@ -38,6 +38,8 @@ def test_model_takes_every_ppo_value_from_config() -> None:
         gae_lambda=0.9,
         clip_range=0.15,
         ent_coef=0.02,
+        vf_coef=0.4,
+        max_grad_norm=0.7,
     )
     config = dataclasses.replace(CARTPOLE, n_envs=1, ppo=ppo)
     model = build_model(config, make_vec_env(config.env_id, n_envs=1))
@@ -51,6 +53,8 @@ def test_model_takes_every_ppo_value_from_config() -> None:
     assert callable(clip_range)
     assert clip_range(1.0) == ppo.clip_range
     assert model.ent_coef == ppo.ent_coef
+    assert model.vf_coef == ppo.vf_coef
+    assert model.max_grad_norm == ppo.max_grad_norm
 
 
 def test_smoke_run_writes_all_four_artifacts(tmp_path: Path) -> None:
