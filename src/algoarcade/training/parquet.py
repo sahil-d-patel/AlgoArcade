@@ -5,10 +5,11 @@ Contract: docs/harness-spec.md, Logging schema.
 
 import time
 from collections import Counter
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 from stable_baselines3.common.vec_env import VecEnv, VecEnvWrapper
 
@@ -21,23 +22,26 @@ VISIT_WINDOW = 500_000
 LLM_COLUMNS = ("llm_model", "llm_tool_level", "llm_tokens_in", "llm_tokens_out", "llm_cost_usd")
 
 
-class ParquetLog(VecEnvWrapper):
-    """Logs every decision of `venv` from the main process.
+class RunLog:
+    """Logs every decision of `n_envs` environments, from the main process, for either trainer.
 
-    A training log writes the steps, visits and episodes tables, and its `env_steps` matches
-    SB3's num_timesteps. An eval log, built with `training=` the training log, writes only
+    A training log writes the steps, visits and episodes tables, and its `env_steps` counts the
+    trainer's env steps. An eval log, built with `training=` the training log, writes only
     episodes, marked is_eval with the training log's env_steps as checkpoint_step. The run id
-    is the run directory's name after `run_id=`."""
+    is the run directory's name after `run_id=`.
+
+    Call `begin` with the reset infos of the envs that start an episode, and `step` with each
+    env's info for the step it took, which for an env that just finished is the info of its last
+    step, not of the reset."""
 
     def __init__(
         self,
-        venv: VecEnv,
+        n_envs: int,
         config: TrainConfig,
         run: Path,
         start: float,
-        training: "ParquetLog | None" = None,
+        training: "RunLog | None" = None,
     ) -> None:
-        super().__init__(venv)
         self._ids = {"run_id": run.name.removeprefix("run_id="), "seed": config.seed}
         self._start_state = config.start_state
         self._components = set(config.reward_weights)
@@ -54,33 +58,25 @@ class ParquetLog(VecEnvWrapper):
         self._window = 0
         self._visit_counts: Counter[tuple[Hashable, ...]] = Counter()
         self._actions: Any = None
-        n = venv.num_envs
-        self._episode_id = [0] * n
-        self._episode_step = [0] * n
-        self._return = [0.0] * n
-        self._totals: list[Counter[str]] = [Counter() for _ in range(n)]
-        self._tiles: list[set[tuple[Hashable, ...]]] = [set() for _ in range(n)]
-        self._goal_step: list[int | None] = [None] * n
+        self._episode_id = [0] * n_envs
+        self._episode_step = [0] * n_envs
+        self._return = [0.0] * n_envs
+        self._totals: list[Counter[str]] = [Counter() for _ in range(n_envs)]
+        self._tiles: list[set[tuple[Hashable, ...]]] = [set() for _ in range(n_envs)]
+        self._goal_step: list[int | None] = [None] * n_envs
 
-    def _begin_episodes(self, envs: Iterable[int]) -> None:
+    def begin(self, envs: Iterable[int], reset_infos: Sequence[Mapping[str, Any]]) -> None:
         for i in envs:
             self._episode_step[i] = 0
             self._return[i] = 0.0
             self._totals[i] = Counter()
-            self._tiles[i] = {tuple(self.venv.reset_infos[i]["location"])}
+            self._tiles[i] = {tuple(reset_infos[i]["location"])}
             self._goal_step[i] = None
 
-    def reset(self) -> Any:
-        obs = self.venv.reset()
-        self._begin_episodes(range(self.num_envs))
-        return obs
-
-    def step_async(self, actions: Any) -> None:
+    def step(
+        self, actions: Any, rewards: Any, dones: Any, infos: Sequence[Mapping[str, Any]]
+    ) -> None:
         self._actions = actions
-        self.venv.step_async(actions)
-
-    def step_wait(self) -> Any:
-        obs, rewards, dones, infos = self.venv.step_wait()
         clock = time.time() - self._start
         episode_rows = []
         for i, info in enumerate(infos):
@@ -99,13 +95,16 @@ class ParquetLog(VecEnvWrapper):
                 self._episode_id[i] += 1
         if episode_rows:
             self._episodes.write(pa.Table.from_pylist(episode_rows, schema=EPISODES))
-            self._begin_episodes([i for i, done in enumerate(dones) if done])
         if len(self._step_rows) >= STEP_BATCH:
             self._flush_steps()
-        return obs, rewards, dones, infos
 
     def _log_step(
-        self, i: int, info: dict[str, Any], location: tuple[Any, ...], reward: float, clock: float
+        self,
+        i: int,
+        info: Mapping[str, Any],
+        location: tuple[Any, ...],
+        reward: float,
+        clock: float,
     ) -> None:
         window = (self.env_steps - 1) // VISIT_WINDOW * VISIT_WINDOW
         if window != self._window:
@@ -135,7 +134,7 @@ class ParquetLog(VecEnvWrapper):
             | self._reward_columns({c: info[f"reward/{c}"] for c in self._components})
         )
 
-    def _episode_row(self, i: int, info: dict[str, Any], clock: float) -> dict[str, Any]:
+    def _episode_row(self, i: int, info: Mapping[str, Any], clock: float) -> dict[str, Any]:
         training = self._training
         return (
             self._ids
@@ -198,6 +197,40 @@ class ParquetLog(VecEnvWrapper):
             self._steps.close()
             self._visits.close()
         self._episodes.close()
+
+
+class ParquetLog(VecEnvWrapper):
+    """A RunLog over a Stable-Baselines3 VecEnv. `log` is the RunLog."""
+
+    def __init__(
+        self,
+        venv: VecEnv,
+        config: TrainConfig,
+        run: Path,
+        start: float,
+        training: RunLog | None = None,
+    ) -> None:
+        super().__init__(venv)
+        self.log = RunLog(venv.num_envs, config, run, start, training)
+        self._actions: Any = None
+
+    def reset(self) -> Any:
+        obs = self.venv.reset()
+        self.log.begin(range(self.num_envs), self.venv.reset_infos)
+        return obs
+
+    def step_async(self, actions: Any) -> None:
+        self._actions = actions
+        self.venv.step_async(actions)
+
+    def step_wait(self) -> Any:
+        obs, rewards, dones, infos = self.venv.step_wait()
+        self.log.step(self._actions, rewards, dones, infos)
+        self.log.begin(np.flatnonzero(dones), self.venv.reset_infos)
+        return obs, rewards, dones, infos
+
+    def close(self) -> None:
+        self.log.close()
         self.venv.close()
 
 

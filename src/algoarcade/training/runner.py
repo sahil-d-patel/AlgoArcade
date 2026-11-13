@@ -226,7 +226,7 @@ def train(config: TrainConfig) -> Path:
             config,
             run_dir,
             start,
-            training=log,
+            training=log.log,
         )
     else:
         env = make_vec_env(config.env_id, n_envs=config.n_envs, seed=config.seed, **SPAWN)
