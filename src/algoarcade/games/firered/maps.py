@@ -99,7 +99,7 @@ def load_maps(root: Path = MAP_DATA) -> dict[tuple[int, int], MapGrid]:
     for map_id, header in headers_by_id.items():
         layout = layouts[header["layout"]]
         blocks = np.fromfile(root / layout["blockdata_filepath"], dtype="<u2")
-        blocks = blocks.reshape(layout["height"], layout["width"]).astype(np.uint16)
+        blocks = blocks.reshape(layout["height"], layout["width"])
         primary = np.fromfile(tilesets[layout["primary_tileset"]], dtype="<u4")
         if primary.size != NUM_METATILES_IN_PRIMARY:
             raise ValueError(f"{layout['primary_tileset']} has {primary.size} metatiles, not 640")

@@ -63,14 +63,14 @@ def test_offset_shifts_the_neighbour_along_the_shared_edge() -> None:
 
 
 def test_blocks_decode_collision_and_behaviour() -> None:
-    # Metatile 1, collision 1, elevation 1; then 0x3FF; then open water; then an open ledge.
-    blocks = np.array([[0x1401, 0x03FF, 0x1002, 0x0003]], dtype=np.uint16)
-    behavior = np.array([[0x00, 0x00, 0x10, 0x3B]], dtype=np.uint16)
+    # Metatile 1 with collision 1 and elevation 1, 0x3FF, open ground, water, a ledge.
+    blocks = np.array([[0x1401, 0x03FF, 0x3001, 0x1002, 0x0403]], dtype=np.uint16)
+    behavior = np.array([[0x00, 0x00, 0x00, 0x10, 0x3B]], dtype=np.uint16)
     tiles = MapGrid("MAP_TEST", blocks, behavior, ())
-    assert tiles.blocked.tolist() == [[True, True, False, False]]
-    assert tiles.water.tolist() == [[False, False, True, False]]
-    assert tiles.ledge.tolist() == [[False, False, False, True]]
-    assert tiles.walkable.tolist() == [[False, False, False, True]]
+    assert tiles.blocked.tolist() == [[True, True, False, False, True]]
+    assert tiles.water.tolist() == [[False, False, False, True, False]]
+    assert tiles.ledge.tolist() == [[False, False, False, False, True]]
+    assert tiles.walkable.tolist() == [[False, False, True, False, False]]
 
 
 @pytest.fixture(scope="module")
