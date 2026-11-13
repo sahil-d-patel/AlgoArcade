@@ -116,7 +116,7 @@ def test_both_sides_of_each_connection_agree(
             if back not in maps[connection.map_id].connections:
                 disagree.append((maps[map_id].name, maps[connection.map_id].name))
     # Route 6 has MAP_SAFFRON_CITY_CONNECTION at offset 0, and that map has Route 6 at 12. The walk
-    # reaches the city side first, so Route 6's edge is the one left out.
+    # places Route 6 from the city side, which Vermilion City's edge to Route 6 agrees with.
     assert disagree == [
         ("MAP_SAFFRON_CITY_CONNECTION", "MAP_ROUTE6"),
         ("MAP_ROUTE6", "MAP_SAFFRON_CITY_CONNECTION"),

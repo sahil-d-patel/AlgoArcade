@@ -107,6 +107,8 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 | WaitForAorBPress | 0x0806B898 (rev 1: 0x0806B8AC) | ROM function; the only address that differs between the revisions |
 | gBattlerPartyIndexes | 0x02023BCE | Four u16 party slots, one per battler |
 | gEnemyParty | 0x0202402C | Six entries of 100 bytes |
+| VMap | 0x03005040 | The live map: Xsize and Ysize (s32), then a pointer to gBackupMapData |
+| gBackupMapData | 0x02031DFC | One map.bin cell per tile: the current map inside a 7-tile border of its neighbours |
 
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
@@ -177,6 +179,25 @@ Rules:
 - Validate the party checksum before trusting species or moves.
 - File-local symbols carry a numeric suffix that differs between builds. Match on the base name.
 - No address enters the code without a symbol name and the commit it came from.
+
+### FireRed map data
+
+RAM holds only the current map and its border, so `src/algoarcade/games/firered/maps.py` builds every map's grid offline from pret/pokefirered at `e93eb12a336fb97df420b0961753d8a3713c9fcc`. `uv run python scripts/fetch_maps.py` fetches the files into `data/pokefirered/`; `DATA.md` lists them.
+
+`load_maps()` returns a `MapGrid` for each map in `map_groups.json`, keyed by (map_group, map_num). Its arrays are indexed [y, x] in the frame of SaveBlock1's x and y:
+
+- `blocks`: the `map.bin` cells. Bits 0 to 9 are the metatile id, 10 and 11 collision, 12 to 15 elevation (`include/global.fieldmap.h`).
+- `behavior`: bits 0 to 8 of the metatile's 32-bit attribute. Ids below 640 read the primary tileset's `metatile_attributes.bin`, the rest the secondary's (`GetAttributeByMetatileIdAndMapLayout`, `src/fieldmap.c`).
+- `blocked`: collision nonzero, or the cell is 0x3FF (`MAPGRID_UNDEFINED`). No map has a 0x3FF cell at this commit.
+- `ledge`: behaviour 0x38 to 0x3B (`MB_JUMP_EAST` to `MB_JUMP_SOUTH`). Ledge cells carry collision 1, so they are also blocked; the player crosses one only by jumping it in its direction.
+- `water`: the surfable behaviours in `sBehaviorSurfable` (`src/metatile_behavior.c`). Water has collision 0.
+- `walkable`: not blocked and not water.
+
+`place(maps)` walks connections breadth-first from Pallet Town (3, 0), placed at (0, 0), and returns each reached map's offset: global (x, y) = local (x, y) + offset. A connection's offset moves the neighbour along the shared edge, x for up and down, y for left and right (`FillNorthConnection` and the others in `src/fieldmap.c`). It places 37 maps: the mainland towns and routes and `MAP_SAFFRON_CITY_CONNECTION`. Every other map is a separate panel: interiors, gyms, Viridian Forest, the 25 Sevii Islands maps, which connect only to each other, and `MAP_SAFFRON_CITY`. Routes 5 to 8 connect to `MAP_SAFFRON_CITY_CONNECTION` instead, and the player enters the city through gatehouse warps.
+
+One connection pair disagrees. Route 6 has `MAP_SAFFRON_CITY_CONNECTION` above it at offset 0, and that map has Route 6 below it at offset 12. The walk places Route 6 from the city side, which Vermilion City's edge to Route 6 agrees with.
+
+`tests/test_firered_maps.py` compares the offline grid with the live buffer on each FireRed manifest state: `VMap.map` points at `gBackupMapData`, and the current map sits at (7, 7) inside it (`InitMapLayoutData`). The test needs 99% of the map's collision to agree; on rev 1 all nine states agree on every cell.
 
 ## Reward registry
 
