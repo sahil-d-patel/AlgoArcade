@@ -1,6 +1,6 @@
 """Builds reward components from a config of name to weight. Contract: docs/harness-spec.md."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from typing import Protocol
 
 from algoarcade.games.base import GameState
@@ -96,9 +96,13 @@ class RewardRegistry[S: GameState]:
         self._weights = dict(weights)
         self._components = [components[name]() for name in weights]
 
-    def reset(self, state: S) -> None:
+    def reset(self, state: S, visited: Iterable[tuple[Hashable, ...]] = ()) -> None:
+        """`visited` is an archive start's visited set; explore does not pay those locations."""
         for component in self._components:
-            component.reset(state)
+            if isinstance(component, Explore):
+                component.reset(state, visited)
+            else:
+                component.reset(state)
 
     def step(self, prev: S, curr: S) -> tuple[float, dict[str, float]]:
         """The weighted reward, and each component's raw value as `reward/<name>`."""
