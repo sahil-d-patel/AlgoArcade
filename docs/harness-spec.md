@@ -288,7 +288,7 @@ Evaluation always starts from the fixed state with the archive off, even when tr
 
 ## Logging schema
 
-Freezes November 8 under the tag `schema-v1`. It moved from November 1 because ENV-08 was not validated on real memory by then (#20). Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section.
+Frozen under the tag `schema-v1` (November 13; due November 8, moved from November 1 because ENV-08 was not validated on real memory by then, #20). Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section.
 
 Logs are Parquet files under `data/runs/run_id=<id>/<table>/`, one folder per table: `steps`, `visits`, `episodes`, `runs`. Each writing process owns its own files, named `<writer_id>-<n>.parquet`, and rolls to a new file every 100,000 rows by default, because a Parquet file cannot be read until it is closed. The open file is `_<writer_id>-<n>.parquet.inprogress`, so a glob on `*.parquet` and a pyarrow folder read (`pq.read_table`, `ds.dataset`) see only closed files.
 
@@ -428,8 +428,8 @@ A level includes every tool below it. The server takes the level as a launch opt
 
 Jayden updates this section when AGT-04 lands.
 
-## Open questions before the freeze
+## Settled at the freeze
 
-- Frames per decision: does a 24-frame decision still land menu inputs reliably? OPS-02 checks 8, 16, 24 and 48.
-- Number of environments: 12 or 16 on the training box? Set from the benchmark.
-- Per-step sampling: is every fourth step enough for the reward decomposition chart? Decide before the freeze.
+- Frames per decision: 24 (8 held, 16 released). OPS-02's menu check moved the cursor on 20 of 20 presses at 8, 16, 24 and 48 frames on the Mac (`docs/benchmarks.md`); the box has not been measured.
+- Number of environments: 16, the fastest of 4, 8, 12 and 16 on the Mac (1,005 steps/s at 24 frames). Revisit when OPS-02 runs on the box.
+- Per-step sampling: every fourth decision. The reward decomposition reads each component's episode total from the episodes table, and the visits table counts every step, so neither needs every row.
