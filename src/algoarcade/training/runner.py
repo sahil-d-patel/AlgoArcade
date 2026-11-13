@@ -162,9 +162,8 @@ def run_row(
     """The per-run table's fields that do not change between the start and end rows."""
     return {
         "run_id": run_id,
-        # Set by the run queue (OPS-04); a run launched by hand has neither.
-        "experiment_id": "",
-        "arm": "",
+        "experiment_id": config.experiment_id,
+        "arm": config.arm,
         "algorithm": "ppo",
         "trainer": "sb3",
         "seed": config.seed,
@@ -244,7 +243,11 @@ def train(config: TrainConfig) -> Path:
     if config.track:
         outputs.append(
             WandbOutput(
-                project="algoarcade", name=run_id, dir=run_dir, config=dataclasses.asdict(config)
+                project="algoarcade",
+                name=run_id,
+                group=config.experiment_id or None,
+                dir=run_dir,
+                config=dataclasses.asdict(config),
             )
         )
     logger = Logger(str(run_dir), outputs)
