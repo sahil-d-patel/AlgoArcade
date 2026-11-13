@@ -159,6 +159,42 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.rom
+def test_a_firered_archive_reset_loads_the_cell_and_pays_nothing_for_it() -> None:
+    if not FIRERED_ROM.is_file():
+        pytest.skip("Needs the local FireRed ROM")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    env_fn, _, _ = env_factory("firered", "seg_02_pallet", FIRERED.reward_weights)
+    env = env_fn(archive=True)
+    _, info = env.reset(seed=0)
+    assert info["location"] == (3, 0, 16, 14)
+    # Left twice: the first press turns the player, the second walks to (15, 14).
+    cell = [env.step(2)[4].get("cell") for _ in range(2)][-1]
+    assert cell is not None
+    # seg_02_pallet holds two milestones and no badge.
+    assert cell.key == (3, 0, 15 // 4, 14 // 4, 0, 2)
+    assert cell.visited == {(3, 0, 16, 14), (3, 0, 15, 14)}
+
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    unwrapped.set_next_start(cell)
+    _, info = env.reset(seed=1)
+    assert info["location"] == (3, 0, 15, 14)
+    assert info["archive_start"] is True
+    # B, then right until the player is back on the start tile; turning takes a step.
+    paid = [env.step(5)[1]]
+    for _ in range(3):
+        _, reward, _, _, info = env.step(3)
+        paid.append(reward)
+        if info["location"] == (3, 0, 16, 14):
+            break
+    assert info["location"] == (3, 0, 16, 14)
+    assert paid == [0.0] * len(paid)
+    env.close()
+
+
 def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path) -> None:
     checkpoints = run_dir / "checkpoints"
     assert sorted(p.name for p in checkpoints.iterdir()) == [
