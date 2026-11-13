@@ -138,6 +138,22 @@ def test_grid_sizes(maps: dict[tuple[int, int], MapGrid]) -> None:
     assert (maps[VIRIDIAN_FOREST].width, maps[VIRIDIAN_FOREST].height) == (54, 69)
 
 
+def test_a_ledge_and_a_water_tile_found_in_the_game(maps: dict[tuple[int, int], MapGrid]) -> None:
+    # On rev 1 from seg_04_route1, the player walked to Route 1 (2, 4) with the ledge in view
+    # below, held down and came out at (2, 7); from (2, 6), holding up did not move him.
+    route1 = maps[ROUTE1]
+    assert route1.ledge[5, 2]
+    assert route1.behavior[5, 2] == 0x3B  # MB_JUMP_SOUTH
+    assert route1.walkable[4, 2]
+    assert not route1.walkable[5, 2]
+    # From seg_02_pallet, the player stood at Pallet Town (7, 16) above the pond and held down
+    # without moving.
+    pallet = maps[PALLET_TOWN]
+    assert pallet.water[17, 7]
+    assert pallet.walkable[16, 7]
+    assert not pallet.walkable[17, 7]
+
+
 @pytest.mark.rom
 @pytest.mark.parametrize("entry", MANIFEST, ids=lambda entry: entry.name)
 def test_offline_collision_matches_the_live_map_buffer(
