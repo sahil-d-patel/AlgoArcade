@@ -33,7 +33,7 @@ from algoarcade.agent.server import Game, build, png
 from algoarcade.backends.base import GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.base import StateNotReady
-from algoarcade.games.fake import FakeState
+from algoarcade.games.fake import FakeField, FakeState
 from algoarcade.games.firered.reader import FireRedState, PartyPokemon
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
@@ -127,7 +127,7 @@ class NeverReady:
 def test_presses_into_a_state_that_is_not_ready_still_count() -> None:
     model = StubModel([press(["RIGHT", "DOWN"]), END])
     logged: list[Step] = []
-    server = build(lambda: Game(FakeBackend(), NeverReady()))
+    server = build(lambda: Game(FakeBackend(), NeverReady(), FakeField()))
     result = attempt(model, record=logged.append, server=server)
     assert result.actions == 2
     assert [step.buttons for step in logged] == [["RIGHT", "DOWN"], []]
