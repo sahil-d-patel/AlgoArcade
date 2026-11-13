@@ -1,7 +1,27 @@
+import hashlib
+import struct
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from algoarcade.games.firered.maps import MAP_DATA, MARKER, Connection, MapGrid, load_maps, place
+from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.games.firered.addresses import ADDRESSES
+from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1, StartState
+from algoarcade.games.firered.maps import (
+    COLLISION_MASK,
+    MAP_DATA,
+    MAPGRID_UNDEFINED,
+    MARKER,
+    Connection,
+    MapGrid,
+    load_maps,
+    place,
+)
+from algoarcade.games.firered.reader import FireRedReader
+from algoarcade.rom import identify
+
+ROOT = Path(__file__).resolve().parents[1]
 
 PALLET_TOWN = (3, 0)
 ROUTE1 = (3, 19)
@@ -116,3 +136,37 @@ def test_grid_sizes(maps: dict[tuple[int, int], MapGrid]) -> None:
     assert (maps[PALLET_TOWN].width, maps[PALLET_TOWN].height) == (24, 20)
     assert (maps[ROUTE1].width, maps[ROUTE1].height) == (24, 40)
     assert (maps[VIRIDIAN_FOREST].width, maps[VIRIDIAN_FOREST].height) == (54, 69)
+
+
+@pytest.mark.rom
+@pytest.mark.parametrize("entry", MANIFEST, ids=lambda entry: entry.name)
+def test_offline_collision_matches_the_live_map_buffer(
+    maps: dict[tuple[int, int], MapGrid], entry: StartState
+) -> None:
+    rom = ROOT / "data/roms/firered.gba"
+    path = ROOT / "data/states" / f"{entry.name}.state"
+    if not rom.is_file() or not path.is_file():
+        pytest.skip(f"Needs the local FireRed ROM and {path.name}")
+    if identify(rom).sha1 != ROM_SHA1:
+        pytest.skip("The start states were captured on rev 1")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    data = path.read_bytes()
+    assert hashlib.sha256(data).hexdigest() == entry.sha256
+    backend = MgbaBackend(rom, render=False)
+    backend.load_state(data)
+    state = FireRedReader(ROM_SHA1).read(backend)
+    tiles = maps[(state.map_group, state.map_num)]
+    # struct BackupMapLayout in include/global.fieldmap.h: Xsize, Ysize, then the map pointer.
+    # InitMapLayoutData (src/fieldmap.c) copies the map in with a MAP_OFFSET (7) border.
+    xsize, ysize, pointer = struct.unpack(
+        "<iiI", backend.read(ADDRESSES[ROM_SHA1]["VMap"].address, 12)
+    )
+    assert pointer == ADDRESSES[ROM_SHA1]["gBackupMapData"].address
+    assert (xsize, ysize) == (tiles.width + 15, tiles.height + 14)
+    cells = np.frombuffer(backend.read(pointer, xsize * ysize * 2), dtype="<u2")
+    live = cells.reshape(ysize, xsize)[7 : 7 + tiles.height, 7 : 7 + tiles.width]
+    backend.close()
+    live_blocked = (live & COLLISION_MASK != 0) | (live == MAPGRID_UNDEFINED)
+    assert (live_blocked == tiles.blocked).mean() >= 0.99
