@@ -68,8 +68,8 @@ sav = "sav"
 GAE = "GAE"
 
 [tool.typos.default]
-# A field name in the decompilation.
-extend-ignore-identifiers-re = ["otId"]
+# A field name and a misspelt function symbol in the decompilation.
+extend-ignore-identifiers-re = ["otId", "Hask_MultichoiceGridMenu_HandleInput"]
 
 [tool.poe.tasks]
 fmt = { cmd = "ruff format", help = "Format the code" }
