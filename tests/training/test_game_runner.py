@@ -1,5 +1,6 @@
 """The runner on the fake game: Parquet logs, normalisation statistics and checkpoint replay."""
 
+import csv
 import dataclasses
 import time
 from functools import partial
@@ -82,6 +83,29 @@ def test_episodes_split_training_and_evaluation(run_dir: Path) -> None:
     assert {(e["party_level_sum"], e["badge_count"], e["milestone_count"]) for e in episodes} == {
         (5, 0, 0)
     }
+
+
+def test_archive_run_logs_its_share_and_evaluates_from_the_start_state(tmp_path: Path) -> None:
+    run_dir = train(dataclasses.replace(FAKE, runs_dir=tmp_path, archive=True, archive_p=1.0))
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    validate(pq.read_table(run_dir / "episodes"), "episodes")
+    assert not any(e["archive_start"] for e in episodes if e["is_eval"])
+    # Each env's first episode starts before the archive has a cell; at p = 1 every later one
+    # loads a cell.
+    train_rows = [e for e in episodes if not e["is_eval"]]
+    assert sorted((e["episode_id"], e["archive_start"]) for e in train_rows) == [
+        (0, False),
+        (0, False),
+        *[(n, True) for n in (1, 1, 2, 2, 3, 3)],
+    ]
+    with (run_dir / "progress.csv").open() as f:
+        rows = [r for r in csv.DictReader(f) if r["rollout/archive_share"]]
+    # 2 envs, 64-step episodes, 64-step rollouts: after rollout k, 2 + 2k resets, 2k from cells.
+    assert [float(r["rollout/archive_share"]) for r in rows] == pytest.approx(
+        [2 * k / (2 + 2 * k) for k in range(1, 5)]
+    )
+    assert {float(r["rollout/archive_bytes_per_cell"]) for r in rows} == {fake.RAM_SIZE}
+    assert all(float(r["rollout/archive_cells"]) > 0 for r in rows)
 
 
 def test_a_count_changes_only_once_two_reads_agree() -> None:
@@ -170,8 +194,8 @@ class CrashOnSecondWorker(gym.Wrapper):
         return self.env.step(action)
 
 
-def crashing_env(weights: dict[str, float]) -> gym.Env:
-    return CrashOnSecondWorker(fake_env(weights))
+def crashing_env(weights: dict[str, float], archive: bool = False) -> gym.Env:
+    return CrashOnSecondWorker(fake_env(weights, archive))
 
 
 def test_a_dead_worker_raises_and_marks_the_run_crashed(
