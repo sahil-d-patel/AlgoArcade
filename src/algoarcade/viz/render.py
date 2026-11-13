@@ -104,10 +104,10 @@ def render(
                 policy_obs = normalize.normalize_obs(obs[i]) if normalize else obs[i]
                 action, _ = model.predict(policy_obs, deterministic=True)
                 obs[i], reward, _, truncated, infos[i] = env.step(action)
-                returns[i] += reward
+                returns[i] += float(reward)
                 for name, weight in weights.items():
                     totals[i][name] += weight * infos[i][f"reward/{name}"]
-                screen = env.unwrapped.backend.screen()
+                screen = env.get_wrapper_attr("backend").screen()
                 panels.append(frame(screen, step, returns[i], infos[i], totals[i]))
             image = np.hstack(panels)
             if writer is None:

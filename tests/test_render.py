@@ -1,5 +1,6 @@
 import dataclasses
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -45,10 +46,10 @@ def test_ten_frames_show_one_bar_per_enabled_component():
     for step in range(1, 11):
         # Right, then down: the walk pays explore and leaves events at zero.
         _, reward, _, _, info = env.step(RIGHT if step % 2 else DOWN)
-        episode_return += reward
+        episode_return += float(reward)
         for name, weight in WEIGHTS.items():
             totals[name] += weight * info[f"reward/{name}"]
-        screen = env.unwrapped.backend.screen()
+        screen = env.get_wrapper_attr("backend").screen()
         image = render.frame(screen, step, episode_return, info, totals)
         height, width = screen.shape[0] * render.SCALE, screen.shape[1] * render.SCALE
         assert image.shape[1] == width
@@ -65,7 +66,8 @@ def checkpoint(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def read_back(path: Path) -> tuple[int, tuple[int, int]]:
     reader = imageio_ffmpeg.read_frames(str(path))
-    size = next(reader)["size"]
+    # The first item is the metadata, typed as a frame.
+    size = cast("dict[str, Any]", next(reader))["size"]
     return sum(1 for _ in reader), size
 
 
