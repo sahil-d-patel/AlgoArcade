@@ -15,7 +15,6 @@ class Explore(RewardComponent[GameState]):
 
     @override
     def reset(self, state: GameState, visited: Iterable[tuple[Hashable, ...]] = ()) -> None:
-        """`visited`: locations an archive start's earlier episodes already paid for."""
         self._visited = {state.location, *visited}
 
     @override

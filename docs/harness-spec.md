@@ -203,7 +203,7 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 
 Super Mario Land's table, in `games/super_mario_land/rewards.py`, holds the components that read only the location: `explore`, `anti_loop` and `time`. Its default is `explore` at 0.02. Jumping is the exploit: each new y tile in a column pays once. Jumping in place pays once per tile of the jump's height on the first jump, and nothing after; a column holds at most 32 y tiles, one byte over 8. Jumping while running right pays up to that many per column instead of one. `explore` keys on the full location, so this is bounded, not prevented. `test_jumping_in_place_pays_explore_once_per_y_tile` checks it on a 48-pixel arc, which pays 6. After a game over the game returns to its title menu, and after about 27 decisions the menu plays a demo of a level on its own; `explore` would pay for the demo's tiles. So in training a game over continues: the backend loads the start state again as soon as the menu flag (`0xFF9F`) is set, before the reader sees the menu. A continue pays nothing, because the start tiles are already visited, and costs the time it took to lose three lives. It is not a terminal transition: the episode goes on, PPO bootstraps across it, and the episode still ends as `truncated`.
 
-The six scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
+The seven scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 
 Rules:
 
