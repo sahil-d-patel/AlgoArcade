@@ -45,6 +45,8 @@ The milestones are the nine predicates in `src/algoarcade/games/firered/mileston
 - `script_active`: `sGlobalScriptContextStatus` is 0 (running).
 - `controls_locked`: `sLockFieldControls` is nonzero.
 
+`games/firered/field.py` reads the overworld for the agent's L2 tools (walkability, dialogue text, open script menus, and ledges from ENV-10's map data). These are not GameState fields. Their symbols are in `ADDRESSES` and their checks are in `tests/test_firered_field.py`.
+
 `read` raises `StateNotReady` when:
 
 - `gSaveBlock1Ptr` or `gSaveBlock2Ptr` is not 0 to 0x7C bytes above its block in steps of 4.

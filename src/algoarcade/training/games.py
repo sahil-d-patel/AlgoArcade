@@ -141,11 +141,16 @@ class Continues:
 
 
 def firered_env(
-    state: bytes, start_state: str, reward_weights: Mapping[str, float], archive: bool = False
+    state: bytes,
+    start_state: str,
+    reward_weights: Mapping[str, float],
+    archive: bool = False,
+    *,
+    render: bool = False,
 ) -> gym.Env:
     entry = next(e for e in firered_manifest.MANIFEST if e.name == start_state)
     assert entry.step_budget is not None
-    backend = MgbaBackend(FIRERED_ROM, render=False)
+    backend = MgbaBackend(FIRERED_ROM, render=render)
     reader = FireRedReader(backend.rom.sha1)
     # The start state is the same on every reset, so one check covers them all.
     backend.load_state(state)
@@ -159,10 +164,15 @@ def firered_env(
 
 
 def super_mario_land_env(
-    state: bytes, start_state: str, reward_weights: Mapping[str, float], archive: bool = False
+    state: bytes,
+    start_state: str,
+    reward_weights: Mapping[str, float],
+    archive: bool = False,
+    *,
+    render: bool = False,
 ) -> gym.Env:
     entry = next(e for e in sml_manifest.MANIFEST if e.name == start_state)
-    backend = Continues(PyBoyBackend(SML_ROM, render=False), state)
+    backend = Continues(PyBoyBackend(SML_ROM, render=render), state)
     reads = LastRead(SuperMarioLandReader())
     rewards = RewardRegistry[SuperMarioLandState](sml_rewards.COMPONENTS, reward_weights)
     env = AlgoArcadeEnv(
@@ -199,10 +209,11 @@ def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.
 
 
 def env_factory(
-    env_id: str, start_state: str, reward_weights: Mapping[str, float]
+    env_id: str, start_state: str, reward_weights: Mapping[str, float], *, render: bool = False
 ) -> tuple[Callable[..., gym.Env], str, str]:
     """The worker factory, the backend name and the ROM SHA-1 for a run. The factory's
-    `archive` turns on archive resets for a training env."""
+    `archive` turns on archive resets for a training env. Training leaves rendering off; the
+    fake backend always renders."""
     if env_id == "fake":
         return partial(fake_env, dict(reward_weights)), "fake", ""
     manifest, rom_path, make, backend = {
@@ -221,4 +232,4 @@ def env_factory(
     if rom.sha1 != manifest.ROM_SHA1:
         expected = KNOWN_ROMS[manifest.ROM_SHA1].name
         raise ValueError(f"{rom_path} is {rom.name}; the start states were captured on {expected}")
-    return partial(make, state, entry.name, dict(reward_weights)), backend, rom.sha1
+    return partial(make, state, entry.name, dict(reward_weights), render=render), backend, rom.sha1

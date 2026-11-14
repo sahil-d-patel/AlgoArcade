@@ -59,6 +59,10 @@ class TrainConfig:
     them. Off in the baseline."""
     archive_p: float = 0.5
     """With archive: the chance a training reset loads an archived cell. A starting guess."""
+    experiment_id: str = ""
+    """Set by the run queue. Logged in the runs table, and the run's W&B group."""
+    arm: str = ""
+    """Set by the run queue. Logged in the runs table."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
