@@ -17,7 +17,8 @@ from algoarcade.backends.base import Button, GameBackend
 from algoarcade.envs.env import NOT_READY_FRAMES
 from algoarcade.games.base import StateNotReady, StateReader
 
-# Guesses. A path across Route 1 is about 60 presses and the rival's lab speech about 15.
+# Guesses. On rev 1 a 17-tile walk across Pallet Town took 20 presses and the rival's
+# challenge in the lab closed after 5.
 NAVIGATE_PRESSES = 400
 DIALOGUE_PRESSES = 60
 # Live collision does not show ledges or one-way tiles, so a step can fail. Each failure marks

@@ -55,7 +55,6 @@ GAMES: dict[str, Callable[[], Game]] = {
     "fake": lambda: Game(FakeBackend(), FakeReader(), FakeField()),
     "firered": firered,
 }
-LEVELS = (0, 1, 2)
 
 
 def start_state(name: str) -> bytes:
@@ -219,7 +218,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m algoarcade.agent.server")
     parser.add_argument("--game", choices=sorted(GAMES), default="fake")
     parser.add_argument("--state", help="load data/states/<STATE>.state before serving")
-    parser.add_argument("--level", type=int, choices=LEVELS, default=1)
+    parser.add_argument("--level", type=int, choices=(0, 1, 2), default=1)
     parser.add_argument("--trace", type=Path, help="write each press and the state after it here")
     args = parser.parse_args(argv)
     state = start_state(args.state) if args.state else None
