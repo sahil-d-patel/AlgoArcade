@@ -70,6 +70,8 @@ def test_baseline_v1_pins_every_field() -> None:
             "milestone": 2.0,
         },
         "step_log_every": 4,
+        "archive": False,
+        "archive_p": 0.5,
         "experiment_id": "",
         "arm": "",
     }
