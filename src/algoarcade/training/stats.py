@@ -5,9 +5,10 @@ archived, so they are rebuilt here on scipy.
 Report a result with `describe(scores)`, one score per seed: `IQM 0.62 [0.48, 0.71] (n=5)`, the
 interquartile mean and its 95% percentile bootstrap interval. To pool tasks, pass a mapping of
 task to scores; the bootstrap then resamples seeds within each task. A headline needs five seeds,
-and every estimate warns below four.
+and every estimate warns below that.
 """
 
+import sys
 import warnings
 from collections.abc import Mapping
 
@@ -17,7 +18,9 @@ from scipy.stats import mannwhitneyu, trim_mean
 
 type Scores = ArrayLike | Mapping[str, ArrayLike]
 
-MIN_SEEDS = 4
+HEADLINE_SEEDS = 5
+# trim_mean cuts int(0.25 * n) scores from each end, so below four it cuts none.
+TRIMMED = 4
 BOOTSTRAP_REPS = 10_000
 
 
@@ -26,30 +29,30 @@ def _tasks(scores: Scores) -> list[NDArray[np.float64]]:
     return [np.asarray(group, dtype=np.float64) for group in groups]
 
 
-def _warn_few(seeds: int) -> None:
-    if seeds < MIN_SEEDS:
-        warnings.warn(
-            f"{seeds} seeds is exploratory: a headline needs five", UserWarning, stacklevel=3
-        )
+def _warn_few(seeds: int, pooled: int | None = None) -> None:
+    """Warn below five seeds, and below four pooled scores for an IQM. Each warning names the
+    caller's line, however deep in this module it starts. warnings.warn's skip_file_prefixes
+    does not do this on Python 3.12: it skips no frame between this one and the caller."""
+    frame, level = sys._getframe(), 1
+    while frame is not None and frame.f_code.co_filename == __file__:
+        frame, level = frame.f_back, level + 1
+    if seeds < HEADLINE_SEEDS:
+        message = f"{seeds} seeds is exploratory: a headline needs five"
+        warnings.warn(message, UserWarning, stacklevel=level)
+    if pooled is not None and pooled < TRIMMED:
+        message = f"IQM of {pooled} seeds trims nothing: it equals the mean"
+        warnings.warn(message, UserWarning, stacklevel=level)
 
 
-def iqm(scores: Scores) -> float:
-    """The mean of the middle half. trim_mean cuts int(0.25 * n) scores from each end, so below
-    four scores it cuts none."""
-    pooled = np.concatenate(_tasks(scores))
-    if len(pooled) < MIN_SEEDS:
-        warnings.warn(
-            f"IQM of {len(pooled)} seeds trims nothing: it equals the mean",
-            UserWarning,
-            stacklevel=2,
-        )
-    return float(trim_mean(pooled, 0.25))
+def _warn_few_iqm(tasks: list[NDArray[np.float64]]) -> None:
+    _warn_few(min(len(task) for task in tasks), sum(len(task) for task in tasks))
 
 
-def interval(scores: Scores, level: float = 0.95) -> tuple[float, float]:
-    """Percentile bootstrap interval of the IQM over seeds, stratified by task when pooled."""
-    tasks = _tasks(scores)
-    _warn_few(min(len(task) for task in tasks))
+def _iqm(tasks: list[NDArray[np.float64]]) -> float:
+    return float(trim_mean(np.concatenate(tasks), 0.25))
+
+
+def _interval(tasks: list[NDArray[np.float64]], level: float) -> tuple[float, float]:
     # A fixed generator: the same scores always print the same interval.
     rng = np.random.default_rng(0)
     resamples = np.concatenate(
@@ -65,6 +68,20 @@ def interval(scores: Scores, level: float = 0.95) -> tuple[float, float]:
         float(np.clip(low, pooled.min(), pooled.max())),
         float(np.clip(high, pooled.min(), pooled.max())),
     )
+
+
+def iqm(scores: Scores) -> float:
+    """The mean of the middle half, pooled over tasks."""
+    tasks = _tasks(scores)
+    _warn_few_iqm(tasks)
+    return _iqm(tasks)
+
+
+def interval(scores: Scores, level: float = 0.95) -> tuple[float, float]:
+    """Percentile bootstrap interval of the IQM over seeds, stratified by task when pooled."""
+    tasks = _tasks(scores)
+    _warn_few_iqm(tasks)
+    return _interval(tasks, level)
 
 
 def probability_of_improvement(x: ArrayLike, y: ArrayLike) -> float:
@@ -83,11 +100,13 @@ def performance_profile(scores: ArrayLike, thresholds: ArrayLike) -> NDArray[np.
 
 
 def describe(scores: Scores, level: float = 0.95) -> str:
-    low, high = interval(scores, level)
+    """With tasks pooled, n is the seeds per task, the smallest if tasks differ."""
     tasks = _tasks(scores)
-    pooled = f", {len(tasks)} tasks" if isinstance(scores, Mapping) else ""
-    n = sum(len(task) for task in tasks)
-    return f"IQM {iqm(scores):.2f} [{low:.2f}, {high:.2f}] (n={n}{pooled})"
+    _warn_few_iqm(tasks)
+    low, high = _interval(tasks, level)
+    seeds = min(len(task) for task in tasks)
+    n = f"{seeds} per task, {len(tasks)} tasks" if isinstance(scores, Mapping) else seeds
+    return f"IQM {_iqm(tasks):.2f} [{low:.2f}, {high:.2f}] (n={n})"
 
 
 def describe_improvement(x: ArrayLike, y: ArrayLike) -> str:
