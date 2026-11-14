@@ -1,6 +1,8 @@
 """The Gymnasium environment. Contract: docs/harness-spec.md, AlgoArcadeEnv."""
 
-from collections.abc import Callable, Mapping
+import zlib
+from collections.abc import Callable, Hashable, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import gymnasium as gym
@@ -31,6 +33,25 @@ MAX_NOOP_FRAMES = 7
 NOT_READY_FRAMES = 8
 # Rows and columns of tiles around the player. A guess: FireRed shows 15 by 10 tiles.
 CROP = (9, 15)
+# Tiles per side of an archive cell. A starting guess from ENV-09.
+CELL_TILES = 4
+# zlib level 1 shrinks an mGBA save state from 528,448 bytes to about 50,000 in about 4 ms.
+CELL_COMPRESSION = 1
+
+
+@dataclass(frozen=True)
+class Cell:
+    """A cell for archive resets, from the step that first reached it: its key, the save state
+    (zlib-compressed), the episode's visited locations, each progress term's best and the env's
+    best milestone_count. The bests travel with the state because a count can sit below them:
+    FireRed's forest_exited and gym_entered stop holding off their maps, and depositing a
+    Pokemon lowers the level sum."""
+
+    key: tuple[Hashable, ...]
+    state: bytes
+    visited: frozenset[tuple[Hashable, ...]]
+    bests: Mapping[str, int]
+    milestone_count: int
 
 
 class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
@@ -38,7 +59,13 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     clips to that range. The location's last two elements are the tile x and y, and the rest name
     the map. A read that raises StateNotReady is retried one frame later, up to NOT_READY_FRAMES
     times; then it propagates out of reset and step. The env never stands in a state for one the
-    game cannot provide."""
+    game cannot provide.
+
+    With `archive`, a step that first reaches a cell in an episode puts a Cell in `info["cell"]`
+    unless `add_archived` listed its key, and `set_next_start` makes the next reset load a cell
+    instead of the start state. The key is
+    (*map, x // CELL_TILES, y // CELL_TILES, badge_flags, the episode's best milestone_count);
+    a game without a badge byte or milestones keys 0 for them."""
 
     def __init__(  # noqa: PLR0913 the inputs harness-spec lists for the env
         self,
@@ -51,12 +78,17 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         *,
         start: bool = False,
         noop: bool = False,
+        archive: bool = False,
     ) -> None:
         self.backend = backend
         self._reader = reader
         self._rewards = rewards
         self._start_state = start_state
         self._step_budget = step_budget
+        self._archive = archive
+        self._next_start: Cell | None = None
+        self._cells: set[tuple[Hashable, ...]] = set()
+        self._archived: set[tuple[Hashable, ...]] = set()
         self._features = tuple(features.values())
         self._actions = ACTIONS + ((Button.START,),) * start + ((),) * noop
         self.action_space = spaces.Discrete(len(self._actions))
@@ -75,15 +107,34 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        self.backend.load_state(self._start_state)
+        cell, self._next_start = self._next_start, None
+        self.backend.load_state(self._start_state if cell is None else zlib.decompress(cell.state))
         self.backend.step(int(self.np_random.integers(MAX_NOOP_FRAMES + 1)))
         self._state = self._read()
-        self._rewards.reset(self._state)
-        self._visited = {self._state.location}
+        if cell is None:
+            self._rewards.reset(self._state)
+            self._visited = {self._state.location}
+            self._milestone_count = 0
+        else:
+            self._rewards.reset(self._state, cell.visited, cell.bests)
+            self._visited = {self._state.location, *cell.visited}
+            self._milestone_count = cell.milestone_count
+        self._cells = set()
         self._steps = 0
-        self._milestone_count = 0
         self._last_milestone_count = None
-        return self._observe(self._state), self._info(self._state)
+        info = self._info(self._state) | {"archive_start": cell is not None}
+        return self._observe(self._state), info
+
+    def set_next_start(self, cell: Cell) -> None:
+        """The next reset loads `cell` with its visited set. Ignored without `archive`, so an
+        evaluation env always starts from the start state."""
+        if self._archive:
+            self._next_start = cell
+
+    def add_archived(self, keys: Iterable[tuple[Hashable, ...]]) -> None:
+        """Keys the archive already holds; reaching one reports no Cell, so its state is not
+        saved and sent again."""
+        self._archived.update(keys)
 
     def step(
         self, action: int | np.int64
@@ -95,6 +146,18 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._steps += 1
         truncated = self._steps >= self._step_budget
         info = components | self._info(self._state)
+        if self._archive:
+            key = self._cell_key(self._state)
+            if key not in self._cells:
+                self._cells.add(key)
+                if key not in self._archived:
+                    info["cell"] = Cell(
+                        key,
+                        zlib.compress(self.backend.save_state(), CELL_COMPRESSION),
+                        frozenset(self._visited),
+                        self._rewards.bests(),
+                        self._milestone_count,
+                    )
         return self._observe(self._state), float(reward), False, truncated, info
 
     def close(self) -> None:
@@ -107,6 +170,12 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
             except StateNotReady:
                 self.backend.step(1)
         return self._reader.read(self.backend)
+
+    def _cell_key(self, state: GameState) -> tuple[Hashable, ...]:
+        location: tuple[Any, ...] = state.location
+        *place, x, y = location
+        badges = getattr(state, "badge_flags", 0)
+        return (*place, x // CELL_TILES, y // CELL_TILES, badges, self._milestone_count)
 
     def _observe(self, state: GameState) -> dict[str, Any]:
         vector = np.array([feature(state) for feature in self._features], dtype=np.float32)

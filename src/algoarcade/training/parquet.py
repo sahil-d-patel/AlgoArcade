@@ -61,13 +61,16 @@ class ParquetLog(VecEnvWrapper):
         self._totals: list[Counter[str]] = [Counter() for _ in range(n)]
         self._tiles: list[set[tuple[Hashable, ...]]] = [set() for _ in range(n)]
         self._goal_step: list[int | None] = [None] * n
+        self._archive_start = [False] * n
 
     def _begin_episodes(self, envs: Iterable[int]) -> None:
         for i in envs:
             self._episode_step[i] = 0
             self._return[i] = 0.0
             self._totals[i] = Counter()
-            self._tiles[i] = {tuple(self.venv.reset_infos[i]["location"])}
+            reset_info = self.venv.reset_infos[i]
+            self._tiles[i] = {tuple(reset_info["location"])}
+            self._archive_start[i] = reset_info["archive_start"]
             self._goal_step[i] = None
 
     def reset(self) -> Any:
@@ -152,7 +155,7 @@ class ParquetLog(VecEnvWrapper):
                 "unique_tiles": len(self._tiles[i]),
                 "milestone_count": info["milestone_count"],
                 "start_state": self._start_state,
-                "archive_start": False,
+                "archive_start": self._archive_start[i],
                 # AlgoArcadeEnv ends episodes on the step budget only. A Super Mario Land
                 # continue after a game over is not an end: the episode goes on.
                 "end_reason": "truncated",
