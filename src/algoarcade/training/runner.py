@@ -162,9 +162,8 @@ def run_row(
     """The per-run table's fields that do not change between the start and end rows."""
     return {
         "run_id": run_id,
-        # Set by the run queue (OPS-04); a run launched by hand has neither.
-        "experiment_id": "",
-        "arm": "",
+        "experiment_id": config.experiment_id,
+        "arm": config.arm,
         "algorithm": "ppo",
         "trainer": "sb3",
         "seed": config.seed,
@@ -194,7 +193,11 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
 
 
 def train(config: TrainConfig) -> Path:
-    name = f"{config.env_id}-{config.start_state}" if config.start_state else config.env_id
+    name = (
+        f"{config.experiment_id}-{config.arm}"
+        if config.experiment_id
+        else "-".join(filter(None, (config.env_id, config.start_state)))
+    )
     run_id = f"{name}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
     run_dir = config.runs_dir / f"run_id={run_id}"
     game = config.env_id in GAMES
@@ -244,7 +247,11 @@ def train(config: TrainConfig) -> Path:
     if config.track:
         outputs.append(
             WandbOutput(
-                project="algoarcade", name=run_id, dir=run_dir, config=dataclasses.asdict(config)
+                project="algoarcade",
+                name=run_id,
+                group=config.experiment_id or None,
+                dir=run_dir,
+                config=dataclasses.asdict(config),
             )
         )
     logger = Logger(str(run_dir), outputs)

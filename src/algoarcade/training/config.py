@@ -54,6 +54,10 @@ class TrainConfig:
     """With a game env_id: component name to weight."""
     step_log_every: int = 4
     """With a game env_id: log every Nth decision of each episode to the steps table."""
+    experiment_id: str = ""
+    """Set by the run queue. Logged in the runs table, and the run's W&B group."""
+    arm: str = ""
+    """Set by the run queue. Logged in the runs table."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:

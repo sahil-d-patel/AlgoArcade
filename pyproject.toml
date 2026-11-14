@@ -45,6 +45,8 @@ ignore = ["E501"]
 "tools/**" = ["T20"]
 ".claude/hooks/**" = ["T20"]
 "scripts/**" = ["T20"]
+# A command line tool: printing is its output.
+"src/algoarcade/runqueue/**" = ["T20"]
 "tests/**" = ["ARG", "PLR2004"]
 
 [tool.pyrefly]
