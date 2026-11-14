@@ -20,7 +20,7 @@ Every run records its seed, git commit, ROM SHA-1, reward config hash and resolv
 
 Evaluate from the fixed start state with the archive off, whatever the training used.
 
-Debug locally with one environment and 1,000 steps. Nothing interactive happens on the training box. Once the queue exists, a run on the box goes through the queue, never a terminal.
+Debug locally with one environment and 1,000 steps. Nothing interactive happens on the training box. A run on the box goes through the run queue, never a terminal.
 
 Never change the logging schema to suit a run. It freezes on November 8.
 
@@ -50,6 +50,8 @@ data/runs/run_id=<env_id>-seed<seed>-<YYYYmmdd-HHMMSS>/
 ├── eval.csv                  one row per checkpoint: step, mean_return, std_return, wall_time_s
 └── progress.csv              SB3's rollout and train scalars
 ```
+
+A run from the queue is `run_id=<experiment>-<arm>-seed<n>-<YYYYmmdd-HHMMSS>` and has `experiment_id` and `arm` set in its runs table.
 
 Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an env reseeded to `seed + 1000` first, so every checkpoint plays the same episodes. The last row is the final result. `uv run python scripts/summarize_runs.py --out-dir <dir>` prints the table of runs and saves one learning-curve PNG per env.
 
@@ -95,5 +97,17 @@ for seed in 0 1 2; do
   WANDB_MODE=offline uv run python -m algoarcade.training.runner super_mario_land --seed $seed --track
 done
 ```
+
+## The run queue
+
+On the box, runs go through `algoarcade.runqueue`. An experiment file under `experiments/` sets `EXPERIMENT`, `BASE` (a `TrainConfig`), `ARMS` (arm name to the fields it replaces) and `SEEDS`; commit it, then:
+
+```
+uv run python -m algoarcade.runqueue submit experiments/<file>.py --dry-run
+uv run python -m algoarcade.runqueue submit experiments/<file>.py
+uv run python -m algoarcade.runqueue status
+```
+
+The nightly task runs `uv run python -m algoarcade.runqueue run`. A crash is retried once from step 0, then marked failed and posted to the channel. Set `track=True` in `BASE` for W&B, where the experiment id is the group. The file format, queue directory, webhook variable and nightly task are in docs/setup.md, Training box.
 
 The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.
