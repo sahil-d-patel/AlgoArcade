@@ -9,10 +9,16 @@ class Address:
 
 SOURCE_COMMIT = "3b401eaf14f193946899eb7c056d5ac02a470126"
 
-# From pokefirered.sym and pokefirered_rev1.sym at SOURCE_COMMIT. WaitForAorBPress is a ROM
-# function, so it is the one entry that differs between the revisions.
+# From pokefirered.sym and pokefirered_rev1.sym at SOURCE_COMMIT. The ROM functions, listed per
+# revision at the bottom, are the only entries that differ between the revisions.
 ADDRESSES = {
     sha1: {
+        # The overworld for the agent's tools (games/firered/field.py).
+        "gObjectEvents": Address(0x02036E38, SOURCE_COMMIT),
+        "gStringVar4": Address(0x02021D18, SOURCE_COMMIT),
+        "gDisplayedStringBattle": Address(0x0202298C, SOURCE_COMMIT),
+        "gTasks": Address(0x03005090, SOURCE_COMMIT),
+        **{name: Address(address, SOURCE_COMMIT) for name, address in functions.items()},
         "gSaveBlock1": Address(0x0202552C, SOURCE_COMMIT),
         "gSaveBlock1Ptr": Address(0x03005008, SOURCE_COMMIT),
         "gSaveBlock2": Address(0x02024588, SOURCE_COMMIT),
@@ -28,13 +34,28 @@ ADDRESSES = {
         "sLockFieldControls": Address(0x03000F9C, SOURCE_COMMIT),
         "sTextPrinters": Address(0x02020034, SOURCE_COMMIT),
         "sGlobalScriptContext": Address(0x03000EB0, SOURCE_COMMIT),
-        "WaitForAorBPress": Address(wait_for_a_or_b, SOURCE_COMMIT),
         "VMap": Address(0x03005040, SOURCE_COMMIT),
         "gBackupMapData": Address(0x02031DFC, SOURCE_COMMIT),
     }
-    for sha1, wait_for_a_or_b in (
-        ("41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc", 0x0806B898),
-        ("dd5945db9b930750cb39d00c84da8571feebf417", 0x0806B8AC),
+    for sha1, functions in (
+        (
+            "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc",
+            {
+                "WaitForAorBPress": 0x0806B898,
+                "Task_YesNoMenu_HandleInput": 0x0809CE54,
+                "Task_MultichoiceMenu_HandleInput": 0x0809CC98,
+                "Hask_MultichoiceGridMenu_HandleInput": 0x0809CFDC,
+            },
+        ),
+        (
+            "dd5945db9b930750cb39d00c84da8571feebf417",
+            {
+                "WaitForAorBPress": 0x0806B8AC,
+                "Task_YesNoMenu_HandleInput": 0x0809CE68,
+                "Task_MultichoiceMenu_HandleInput": 0x0809CCAC,
+                "Hask_MultichoiceGridMenu_HandleInput": 0x0809CFF0,
+            },
+        ),
     )
 }
 

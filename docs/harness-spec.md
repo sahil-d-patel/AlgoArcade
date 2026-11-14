@@ -104,11 +104,16 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 | sLockFieldControls | 0x03000F9C | |
 | sTextPrinters | 0x02020034 | 32 TextPrinters of 0x24 bytes, indexed by window id |
 | sGlobalScriptContext | 0x03000EB0 | The overworld script's context: mode at +1, nativePtr at +4 |
-| WaitForAorBPress | 0x0806B898 (rev 1: 0x0806B8AC) | ROM function; the only address that differs between the revisions |
+| WaitForAorBPress | 0x0806B898 (rev 1: 0x0806B8AC) | ROM function. ROM functions are the only addresses that differ between the revisions |
 | gBattlerPartyIndexes | 0x02023BCE | Four u16 party slots, one per battler |
 | gEnemyParty | 0x0202402C | Six entries of 100 bytes |
 | VMap | 0x03005040 | The live map: Xsize and Ysize (s32), then a pointer to gBackupMapData |
 | gBackupMapData | 0x02031DFC | One map.bin cell per tile: the current map inside a 7-tile border of its neighbours |
+| gObjectEvents | 0x02036E38 | 16 `struct ObjectEvent` of 0x24 bytes: flags (active bit 0, isPlayer bit 16), currentElevation in the low nibble of +0x0B, currentCoords +0x10, previousCoords +0x14, each 7 above map-local |
+| gStringVar4 | 0x02021D18 | 0x3E8 bytes. `ShowFieldMessage` expands every field message here |
+| gDisplayedStringBattle | 0x0202298C | 0x12C bytes. The battle message |
+| gTasks | 0x03005090 | 16 `struct Task` of 0x28 bytes: func (+0), isActive (+4) |
+| Task_YesNoMenu_HandleInput, Task_MultichoiceMenu_HandleInput, Hask_MultichoiceGridMenu_HandleInput | 0x0809CE54, 0x0809CC98, 0x0809CFDC (rev 1: 0x0809CE68, 0x0809CCAC, 0x0809CFF0) | ROM functions: the input tasks of the script menus. The third is the decomp's own spelling |
 
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
@@ -336,7 +341,7 @@ Written every Nth step: each environment writes the row of a decision whose `epi
 | wall_clock_s | Decimal | Seconds since the run started |
 | episode_id | Integer | Counts from 0 within each environment |
 | episode_step | Integer | Counts from 1 at the episode's first decision |
-| action | Small integer | Index into the environment's action set |
+| action | Small integer | Index into the environment's action set. LLM rows hold the Button value instead (A 0 to L 9), so pooled analyses filter by `algorithm` (decisions, 2026-11-13) |
 | map_group, map_num, x, y | Small integer | The location after the decision |
 | in_battle | Boolean | |
 | milestone_count | Small integer | The env's episode best after this decision, as in `info` |
@@ -374,7 +379,7 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 | milestone_count | Small integer | At the episode's end: the env's episode best, as in `info` |
 | start_state | Text | The manifest name |
 | archive_start | Boolean | Whether the start came from the archive |
-| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap` |
+| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap`, and `truncated` when the model stops calling tools (decisions, 2026-11-13) |
 | goal_reached | Boolean | Whether the start state's goal became true at any point in the episode. False when the start state has no goal |
 | goal_step | Integer, nullable | The `episode_step` at which the goal first became true. Null when it never did |
 | is_eval | Boolean | An evaluation episode: fixed start state, archive off |
@@ -434,20 +439,27 @@ The MCP server exposes the same harness to a language model. It uses the officia
 
 | Tool | Arguments | Returns | Level |
 |---|---|---|---|
-| press | `buttons`: a list of button names, each one of A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L. `screenshot`: optional, default false | The GameState after pressing them in order, one decision each | L0 |
-| get_state | `screenshot`: optional, default false | The GameState | L1 |
-| navigate_to | — (AGT-04) | The state after walking to a tile on the current map by A*. Stops on a battle, dialogue or warp and says which. | L2 |
-| advance_dialogue | — (AGT-04) | The text shown, after pressing A until the box closes or a choice appears | L2 |
+| press | `buttons`: a list of button names, each one of A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L. `screenshot`: optional, default false, L1 and up | The GameState after pressing them in order, one decision each. At L0, only the screenshot | L0 |
+| get_state | `screenshot`: optional, default false, L1 and up | The GameState. At L0, only the screenshot | L0 |
+| navigate_to | `x`, `y`: a tile of the current map, in the GameState's x and y. `max_presses`: default 400. `screenshot` | `reason`, `presses`, then the GameState | L2 |
+| advance_dialogue | `max_presses`: default 60. `screenshot` | `reason`, `presses`, `text`, then the GameState | L2 |
 
-`get_state` and `press` return the GameState twice: as structured content and as one compact JSON text block, one field per name. On the fake backend that is `room`, `x`, `y`, `chest_opened` and `frame`. With `screenshot` true, a PNG of the screen upscaled 2x (480x320 on FireRed) follows the text. When the reader raises `StateNotReady`, the text is `State not ready: <reason>`, there is no structured content, and the result is not a tool error: a `press` has already pressed its buttons. The server takes the game as a launch option, `--game`: `fake`, or `firered` on MgbaBackend with ENV-05's reader. `--state NAME` loads `data/states/NAME.state` before the first call, and refuses it when the manifest lists NAME with a different SHA-256, or when the ROM is not rev 1, the revision the states were captured on. The loop grades a FireRed segment with the manifest's goal.
+The server takes the level as `--level` (default 1). L0 serves `press` and `get_state` with no `screenshot` argument; each returns only a PNG of the screen, with no text block and no structured content. L1 serves the same two tools with the GameState. L2 adds `navigate_to` and `advance_dialogue`. A level includes every tool below it, so the same code serves all three rungs of the ladder.
 
-The loop in `src/algoarcade/agent/loop.py` drives one attempt: it lists the tools once, keeps an append-only history with a cache breakpoint on the system prompt and the automatic one on the last turn, prices every response from `usage`, and stops at the goal, at the action cap, before a request whose upper-bound cost would pass the dollar cap, or when the model stops calling tools. The bound is the last request's prompt tokens plus the bytes appended since, at the dearer of the input and cache-write prices, plus `max_tokens` at the output price, on the long-prompt card when that prompt bound is past 100K tokens. One action is one button press the server accepted; a rejected `press` counts nothing. Each request is one line of `steps.jsonl` under `data/llm/<name>/`: tokens by kind, dollars, buttons pressed, the model's text and the state after.
+At L1 and L2, `get_state` and `press` return the GameState twice: as structured content and as one compact JSON text block, one field per name. On the fake backend that is `room`, `x`, `y`, `chest_opened` and `frame`. With `screenshot` true, a PNG of the screen upscaled 2x (480x320 on FireRed) follows the text. When the reader raises `StateNotReady`, the text is `State not ready: <reason>`, there is no structured content, and the result is not a tool error: a `press` has already pressed its buttons. The server takes the game as a launch option, `--game`: `fake`, or `firered` on MgbaBackend with ENV-05's reader. `--state NAME` loads `data/states/NAME.state` before the first call, and refuses it when the manifest lists NAME with a different SHA-256, or when the ROM is not rev 1, the revision the states were captured on. The loop grades a FireRed segment with the manifest's goal.
 
-A level includes every tool below it. The server takes the level as a launch option, so the same code serves all three rungs of the ladder.
+`navigate_to` and `advance_dialogue` return a JSON text block with what they did, then the GameState as `get_state` does; their structured content is that object with the GameState under `state`. Both press through the same 24-frame decisions as `press`.
 
-`.mcp.json` at the repo root launches the server through `uv`, so Claude Code and VS Code list the tools after `uv sync`.
+- `navigate_to` plans with A* over the current map: the fewest steps, then the fewest turns, because a press in a new direction can only turn the player. A tile is open when its live collision bits are 0, its elevation suits the player's, and no other object stands on it or is leaving it (`games/firered/field.py`). The goal counts as open, because a door block carries collision 1 and warps the player who walks into it: a door goal ends `arrived` on the door, and the game warps about 70 frames later with no press. A ledge block carries collision 1, so live collision alone makes it a wall. With ENV-10's map data fetched, the planner also jumps each ledge in its direction, one press landing two tiles on; without it (CI), ledges stay walls. Water needs no map data: the elevation rule closes it, and on all nine FireRed manifest states it closes every water tile the map data lists. A step that moves nothing after two presses marks its tile closed and plans again, up to 8 plans. It stops with `reason` arrived, battle (in_battle), dialogue (text_box_open), warp (the map changed), no_path, or press_cap. One map only: routes across maps are the model's job.
+- `advance_dialogue` presses A while the text box is open and no script menu (yes/no, multichoice or grid) is waiting, so it never answers a choice. `reason` is closed, choice or press_cap. `text` is each distinct message the box held, one per line, read from `gStringVar4` in the field and `gDisplayedStringBattle` in battle, decoded with the decomp's `charmap.txt` and control codes left out.
 
-Jayden updates this section when AGT-04 lands.
+Both press caps and the 8 plans are guesses. With `--trace FILE` the server writes one JSON line per press, `{"button", "time", "state"}`, the state after the press or null when not ready, after a first line with button null and the start state. The loop counts and grades from it at every level, so presses inside a tool count, and an L0 attempt is graded though the model never sees the state.
+
+The loop in `src/algoarcade/agent/loop.py` drives one attempt at a level from config (default 1), with one system prompt for every level. It lists the tools once, keeps an append-only history with a cache breakpoint on the system prompt and the automatic one on the last turn, prices every response from `usage`, and stops at the goal, at the action cap, before a request whose upper-bound cost would pass the dollar cap, or when the model stops calling tools. The bound is the last request's prompt tokens plus the bytes appended since, at the dearer of the input and cache-write prices, plus `max_tokens` at the output price, on the long-prompt card when that prompt bound is past 100K tokens. One action is one button press in the trace, whichever tool made it; a rejected call counts nothing. Before each call the loop cuts `press`'s buttons, or lowers `max_presses`, to the presses left. The goal holds when any press's state meets it. Each request is one line of `steps.jsonl` under `data/llm/<name>/`, with `presses.jsonl` the trace: tokens by kind, dollars, buttons pressed, the model's text and the last state.
+
+Each attempt is also run `<name>` in the logging schema under `data/runs/`, so it joins the RL runs on `start_state`, the segment's manifest name. The runs table has algorithm `llm`, seed 0, `step_log_every` 1 and empty reward weights. Every press is a decision: a per-step row and a visit, with `action` the Button value (A 0 to L 9), not the RL env's action index, so a pooled analysis of actions filters by `algorithm` (decided 2026-11-13), and the last ready state for a press read while not ready. The one episode has return 0, null reward columns, the `llm_` columns filled, and `end_reason` goal, action_cap or dollar_cap; an attempt whose model stopped calling tools logs `truncated`, as the frozen set has no other value for it (decided 2026-11-13).
+
+`.mcp.json` at the repo root launches the server through `uv` at L1, so Claude Code and VS Code list `get_state` and `press` after `uv sync`.
 
 ## Defaults at the freeze
 

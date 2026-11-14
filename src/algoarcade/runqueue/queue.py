@@ -329,12 +329,13 @@ def kill(process: subprocess.Popen[bytes], job: Any) -> None:
         kernel32.CloseHandle(job)
     else:
         # The trainer's process group outlives it while one of its workers is alive. SIGINT
-        # first, so a trainer that is still responsive writes its `crashed` end row.
-        with contextlib.suppress(ProcessLookupError):
+        # first, so a trainer that is still responsive writes its `crashed` end row. macOS
+        # answers EPERM, not ESRCH, for a group whose members are all exiting.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGINT)
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=GRACE_S)
-        with contextlib.suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGKILL)
     process.wait()
 
