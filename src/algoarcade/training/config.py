@@ -213,9 +213,7 @@ PQN_CLEANRL = PQNConfig(
 )
 
 # CleanRL's CartPole run: 4 envs and 500,000 steps. TRN-09's bar is a mean return of 400.
-PQN_CARTPOLE = dataclasses.replace(
-    CARTPOLE, total_timesteps=500_000, n_envs=4, checkpoint_every=50_000, pqn=PQN_CLEANRL
-)
+PQN_CARTPOLE = dataclasses.replace(CARTPOLE, total_timesteps=500_000, n_envs=4, pqn=PQN_CLEANRL)
 
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
