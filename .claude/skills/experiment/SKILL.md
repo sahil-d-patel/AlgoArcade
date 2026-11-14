@@ -12,7 +12,7 @@ Change one factor. An experiment names the baseline config and the single factor
 
 Set gamma explicitly. The library default of 0.99 gives a horizon of about 100 steps, and our episodes are thousands of steps long. An agent at the default does not crash. It does not learn. We start at 0.997.
 
-Use five seeds for anything you will claim, on the same seed set as the arm you compare against. Three seeds is exploratory and must be labeled that way. Report the interquartile mean with a bootstrap interval, and print the seed count next to it.
+Use five seeds for anything you will claim, on the same seed set as the arm you compare against. Fewer than five is exploratory and must be labeled that way. Report every result as the interquartile mean over seeds with its 95% percentile bootstrap interval and the seed count, n. `algoarcade.training.stats.describe(scores)` prints it as `IQM 0.62 [0.48, 0.71] (n=5)` and warns below four seeds.
 
 Treat a step-budget end as truncation, not termination, and bootstrap the value there.
 
