@@ -157,6 +157,10 @@ def navigate_to(  # noqa: C901 a loop per plan, per step and per press
         if reason := stopped(game, state, start_map, (x, y)):
             return Navigation(reason, presses)
         walkable = game.field.walkable(game.backend)
+        # FireRed's doors carry collision 1 and warp the player who walks into them, so the goal
+        # counts as open until a step into it fails.
+        if 0 <= y < walkable.shape[0] and 0 <= x < walkable.shape[1]:
+            walkable[y, x] = True
         for fx, fy in failed:
             walkable[fy, fx] = False
         path = shortest_path(walkable, state.location[-2:], (x, y))

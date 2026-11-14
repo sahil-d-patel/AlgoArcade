@@ -71,10 +71,18 @@ def test_the_path_turns_as_little_as_a_shortest_path_can() -> None:
 
 
 @pytest.mark.usefixtures("walled")
-@pytest.mark.parametrize("goal", [(1, 4), (4, 1), (20, 1)], ids=["walled in", "wall", "off map"])
+@pytest.mark.parametrize("goal", [(1, 4), (20, 1)], ids=["walled in", "off map"])
 def test_no_path_presses_nothing(goal: tuple[int, int]) -> None:
     result = navigate_to(game(), *goal)
     assert (result.reason, result.presses) == ("no_path", 0)
+
+
+@pytest.mark.usefixtures("walled")
+def test_a_wall_goal_is_tried_twice_then_has_no_path() -> None:
+    played = game()
+    result = navigate_to(played, 4, 1)
+    assert (result.reason, result.presses) == ("no_path", 4)
+    assert FakeReader().read(played.backend).x == 3
 
 
 @pytest.mark.usefixtures("walled")
