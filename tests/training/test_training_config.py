@@ -39,7 +39,7 @@ def test_baseline_v1_pins_every_field() -> None:
     assert PRESETS["baseline_v1"][1] is BASELINE_V1
     assert dataclasses.asdict(BASELINE_V1) == {
         "env_id": "firered",
-        "total_timesteps": 1_000_000,
+        "total_timesteps": 15_000_000,
         "n_envs": 16,
         "checkpoint_every": 500_000,
         "ppo": {
@@ -54,6 +54,7 @@ def test_baseline_v1_pins_every_field() -> None:
         },
         "norm_obs": True,
         "norm_reward": False,
+        "eval_deterministic": False,
         "seed": 0,
         "eval_episodes": 20,
         "runs_dir": Path("data/runs"),
@@ -67,4 +68,11 @@ def test_baseline_v1_pins_every_field() -> None:
             "milestone": 2.0,
         },
         "step_log_every": 4,
+        "experiment_id": "",
+        "arm": "",
     }
+
+
+@pytest.mark.parametrize("name", [n for n in PRESETS if n != "baseline_v1"])
+def test_other_presets_evaluate_deterministically(name: str) -> None:
+    assert PRESETS[name][1].eval_deterministic is True

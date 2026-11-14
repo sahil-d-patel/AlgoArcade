@@ -135,6 +135,24 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(("deterministic", "distinct"), [(True, 1), (False, 4)])
+def test_a_sampled_evaluation_plays_different_episodes(
+    tmp_path: Path, deterministic: bool, distinct: int
+) -> None:
+    # One rollout, then one evaluation of four episodes. The untrained policy is near uniform,
+    # so its argmax replays one episode and its samples do not.
+    config = dataclasses.replace(
+        FAKE,
+        runs_dir=tmp_path,
+        total_timesteps=FAKE.n_envs * FAKE_STEP_BUDGET,
+        eval_episodes=4,
+        eval_deterministic=deterministic,
+    )
+    episodes = pq.read_table(train(config) / "episodes").to_pylist()
+    evals = {(e["episode_return"], e["unique_tiles"]) for e in episodes if e["is_eval"]}
+    assert len(evals) == distinct
+
+
 def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path) -> None:
     checkpoints = run_dir / "checkpoints"
     assert sorted(p.name for p in checkpoints.iterdir()) == [

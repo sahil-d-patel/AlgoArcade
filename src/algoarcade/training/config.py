@@ -42,6 +42,9 @@ class TrainConfig:
     norm_obs: bool
     norm_reward: bool
     """VecNormalize's switches. The plan normalizes observations and never the reward."""
+    eval_deterministic: bool
+    """Evaluate with the policy's argmax instead of sampled actions. From a segment's start state
+    the argmax replays one episode, so success rates sample (decisions.md, 2026-11-14)."""
     seed: int = 0
     eval_episodes: int = 10
     runs_dir: Path = Path("data/runs")
@@ -90,6 +93,7 @@ BASELINE = TrainConfig(
     ),
     norm_obs=True,
     norm_reward=False,
+    eval_deterministic=True,
 )
 
 # TRN-05's FireRed runs, on the default reward: the five positive terms at their starting
@@ -105,8 +109,12 @@ FIRERED = dataclasses.replace(
 )
 
 # TRN-08's baseline: experiments import it and change one field. The 20 evaluation episodes per
-# seed are TRN-08's; tests/training/test_training_config.py pins every field.
-BASELINE_V1 = dataclasses.replace(FIRERED, eval_episodes=20)
+# seed are TRN-08's. 15M steps is the experiment run length in docs/technical-plan.md, Compute
+# budget (the E1 to E4 row); at 1M every segment scored 0 of 100 (#29). Sampled evaluation is the
+# PM decision of 2026-11-14. tests/training/test_training_config.py pins every field.
+BASELINE_V1 = dataclasses.replace(
+    FIRERED, total_timesteps=15_000_000, eval_episodes=20, eval_deterministic=False
+)
 
 # TRN-05's Super Mario Land runs: the same PPO values as FireRed, explore on the location, from the
 # first frame of 1-1. 2M steps is the top of TRN-05's 1M to 2M guess; PyBoy runs about 7,000 env
@@ -142,6 +150,7 @@ CARTPOLE = TrainConfig(
     ),
     norm_obs=False,
     norm_reward=False,
+    eval_deterministic=True,
 )
 
 ACROBOT = TrainConfig(
@@ -162,6 +171,7 @@ ACROBOT = TrainConfig(
     ),
     norm_obs=False,
     norm_reward=False,
+    eval_deterministic=True,
 )
 
 PRESETS = {

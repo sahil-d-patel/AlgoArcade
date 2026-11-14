@@ -64,7 +64,8 @@ class CheckpointEval(BaseCallback):
 
     With VecNormalize, its statistics are saved beside the checkpoint as step_<n>.pkl and copied
     to the eval env, which never updates them. The eval env is reseeded before each evaluation,
-    so every checkpoint plays the same episodes.
+    so with eval_deterministic every checkpoint plays the same episodes. Sampled actions come from
+    torch's generator, which training advances too, so a run replays only as a whole.
     _on_step runs during a rollout, before that rollout's update, so the final checkpoint waits
     for _on_training_end; a periodic one in the last rollout would miss the last update.
 
@@ -110,7 +111,7 @@ class CheckpointEval(BaseCallback):
             self.model,
             self.eval_env,
             n_eval_episodes=self.config.eval_episodes,
-            deterministic=True,
+            deterministic=self.config.eval_deterministic,
             return_episode_rewards=True,
         )
         mean = float(np.mean(returns))
