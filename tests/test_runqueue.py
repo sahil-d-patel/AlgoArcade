@@ -1,6 +1,8 @@
 """The run queue: submit, run and status on the fake game."""
 
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -357,3 +359,31 @@ def test_a_malformed_webhook_url_neither_stops_the_queue_nor_prints(
     out = capsys.readouterr().out
     assert "Webhook post failed" in out
     assert "SECRET" not in out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows ends the trainer through its job")
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGHUP])
+def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, number: int) -> None:
+    queue_dir = queued(tmp_path, "queued", 0)
+    pid_file = tmp_path / "trainer.pid"
+    trainer = (
+        f"import os, time; open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(120)"
+    )
+    driver = (
+        "import sys\nfrom pathlib import Path\nfrom algoarcade.runqueue import queue\n"
+        f"queue.TRAIN = [sys.executable, '-c', {trainer!r}]\n"
+        f"queue.run(Path({str(queue_dir)!r}))\n"
+    )
+    run = subprocess.Popen([sys.executable, "-c", driver])
+    deadline = time.monotonic() + 30
+    while not (pid_file.exists() and pid_file.read_text()):
+        assert time.monotonic() < deadline, "the trainer never started"
+        time.sleep(0.05)
+    trainer_pid = int(pid_file.read_text())
+
+    run.send_signal(number)
+    run.wait(timeout=30)
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(trainer_pid, 0)
+    assert statuses(queue_dir) == [("running", 1)]

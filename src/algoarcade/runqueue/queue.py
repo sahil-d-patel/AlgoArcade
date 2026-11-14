@@ -92,6 +92,7 @@ TRAIN = [sys.executable, "-m", "algoarcade.runqueue.train"]
 # An attempt still running after STARTUP_S + total_timesteps / min_steps_per_s is killed. The
 # floor is a fifth of the 500 steps/s planning figure; it allows 43 hours for a 15M-step run.
 STARTUP_S = 3600.0
+GRACE_S = 10
 MIN_STEPS_PER_S = 100.0
 MAX_ATTEMPTS = 2
 WEBHOOK_ENV = "ALGOARCADE_WEBHOOK_URL"
@@ -224,10 +225,15 @@ def run(queue_dir: Path, min_steps_per_s: float = MIN_STEPS_PER_S) -> None:
         if not held:
             print("Another `run` is working through the queue. Exiting.")
             return
+        if sys.platform != "win32":
+            # Without these, SIGTERM or SIGHUP (a closed terminal) would end `run` without its
+            # `finally` killing the trainer, which has its own session.
+            for number in (signal.SIGTERM, signal.SIGHUP):
+                signal.signal(number, stop)
         with edit(queue_dir) as runs:
             # The run lock was free, so the `run` that started these has exited. On Windows its
             # trainer died with it (see start). On macOS and Linux a trainer outlives a `run`
-            # killed with SIGKILL.
+            # killed with SIGKILL, the one signal `run` cannot catch.
             stale = [r for r in runs if r["status"] == "running"]
             for entry in stale:
                 settle(entry, ok=False)
@@ -235,6 +241,10 @@ def run(queue_dir: Path, min_steps_per_s: float = MIN_STEPS_PER_S) -> None:
             report(entry, queue_dir)
         while attempt(queue_dir, min_steps_per_s):
             pass
+
+
+def stop(number: int, _frame: object) -> None:
+    raise SystemExit(128 + number)
 
 
 def attempt(queue_dir: Path, min_steps_per_s: float) -> bool:
@@ -318,7 +328,12 @@ def kill(process: subprocess.Popen[bytes], job: Any) -> None:
         kernel32.TerminateJobObject(job, 1)
         kernel32.CloseHandle(job)
     else:
-        # The trainer's process group outlives it while one of its workers is alive.
+        # The trainer's process group outlives it while one of its workers is alive. SIGINT
+        # first, so a trainer that is still responsive writes its `crashed` end row.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGINT)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=GRACE_S)
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
     process.wait()

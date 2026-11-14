@@ -144,7 +144,7 @@ uv run python -m algoarcade.runqueue run
 
 Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
 
-The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash. On Windows a trainer dies with its `run`, however `run` ends. On macOS and Linux, Ctrl+C or an error in `run` kills the trainer, but a `run` killed with SIGKILL leaves it training.
+The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash. On Windows a trainer dies with its `run`, however `run` ends. On macOS and Linux, Ctrl+C, SIGTERM, a closed terminal (SIGHUP) or an error in `run` stops the trainer: SIGINT to its process group, then SIGKILL after 10 seconds. A `run` killed with SIGKILL leaves it training.
 
 A failed run posts its experiment id, run name, the exception line of each traceback (each once) and the end of its log to the team channel, in at most 1,900 characters. The message carries both Discord's `content` and Slack's `text`. The webhook URL is a secret: set it as a user environment variable on the box, never in a file in the repo. The trainer does not get it, and a failed post prints only the error type. Without the variable, `run` prints a line and goes on.
 
