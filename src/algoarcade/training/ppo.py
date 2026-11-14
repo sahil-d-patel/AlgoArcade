@@ -47,12 +47,12 @@ What we changed, and why:
 import time
 import warnings
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import gymnasium as gym
 import numpy as np
@@ -60,7 +60,8 @@ import torch
 import tyro
 from gymnasium import spaces
 from stable_baselines3.common.running_mean_std import RunningMeanStd
-from stable_baselines3.common.vec_env import VecNormalize
+from stable_baselines3.common.type_aliases import PolicyPredictor
+from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 from torch import nn
 from torch.distributions.categorical import Categorical
 from torch.nn import functional as F
@@ -91,6 +92,26 @@ def layer_init(layer: nn.Linear, std: float = np.sqrt(2), bias_const: float = 0.
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
+
+
+class Policy(Protocol):
+    """What collect() needs: an action and V(obs) per env, and V(final_obs) at a truncation. PQN's
+    network is the other implementation, with max_a Q(obs, a) as its value."""
+
+    def parameters(self) -> Iterator[nn.Parameter]: ...
+
+    def get_value(self, x: torch.Tensor) -> torch.Tensor: ...
+
+    def get_action_and_value(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: ...
+
+
+ObsRms = dict[str, RunningMeanStd] | None
+Checkpoint = Callable[[nn.Module, ObsRms, int], None]
+Learn = Callable[[TrainConfig, gym.vector.VectorEnv, Checkpoint, RunLog | None, Any], None]
+# Writes the network to path's checkpoint file(s) and returns what evaluate() plays.
+Save = Callable[[nn.Module, Path, int], PolicyPredictor]
 
 
 class Agent(nn.Module):
@@ -181,8 +202,8 @@ def observe(
 
 def collect(  # noqa: PLR0913 - CleanRL's rollout loop, with its state passed in
     envs: gym.vector.VectorEnv,
-    agent: Agent,
-    obs_rms: dict[str, RunningMeanStd] | None,
+    agent: Policy,
+    obs_rms: ObsRms,
     obs: np.ndarray,
     n_steps: int,
     after_step: Callable[[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]], None] | None = None,
@@ -356,20 +377,11 @@ class Progress:
             logger.record("rollout/continues", sum(self.continues.values()))
 
 
-def learn(
-    config: TrainConfig,
-    envs: gym.vector.VectorEnv,
-    checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int], None],
-    log: RunLog | None,
-    logger: Any,
-) -> None:
-    """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A checkpoint falls every checkpoint_every steps inside a rollout, before
-    its update, as the SB3 runner's does, and once more after the last update."""
-    ppo = config.ppo
-    n = config.n_envs
-    torch.manual_seed(config.seed)
-    rng = np.random.default_rng(config.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def begin(
+    config: TrainConfig, envs: gym.vector.VectorEnv, log: RunLog | None
+) -> tuple[ObsRms, np.ndarray]:
+    """Reset the envs on the run's seed. Returns the observation statistics (None without
+    norm_obs) and the policy's first input."""
     space = envs.single_observation_space
     obs_rms = (
         {k: RunningMeanStd(shape=s.shape) for k, s in by_key(space, space).items()}
@@ -377,74 +389,130 @@ def learn(
         else None
     )
     raw, infos = envs.reset(seed=config.seed)
-    obs = observe(raw, space, obs_rms, update=True)
     if log is not None:
-        log.begin(range(n), unbatch(infos, n))
+        log.begin(range(config.n_envs), unbatch(infos, config.n_envs))
+    return obs_rms, observe(raw, space, obs_rms, update=True)
+
+
+class Steps:
+    """collect()'s after_step: counts env steps, logs each step to the Parquet tables and the
+    progress scalars, and calls `save(steps)` every checkpoint_every steps before the last."""
+
+    def __init__(self, config: TrainConfig, log: RunLog | None, save: Callable[[int], None]):
+        self.config = config
+        self.log = log
+        self.save = save
+        self.n = 0
+        self.next_checkpoint = config.checkpoint_every
+        self.progress = Progress(config.n_envs)
+        self.start = time.time()
+
+    def __call__(
+        self, actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: dict[str, Any]
+    ) -> None:
+        n_envs = self.config.n_envs
+        self.n += n_envs
+        current = unbatch(infos, n_envs)
+        # For an env that finished, `infos` holds its reset info and final_info its last step's.
+        final = unbatch(infos["final_info"], n_envs) if "final_info" in infos else current
+        step_infos = [final[i] if done else current[i] for i, done in enumerate(dones)]
+        if self.log is not None:
+            self.log.step(actions, rewards, dones, step_infos)
+            self.log.begin(np.flatnonzero(dones), current)
+        self.progress.step(rewards, dones, step_infos)
+        if self.next_checkpoint <= self.n < self.config.total_timesteps:
+            self.next_checkpoint += self.config.checkpoint_every
+            self.save(self.n)
+
+    @property
+    def done(self) -> bool:
+        return self.n >= self.config.total_timesteps
+
+    def dump(self, logger: Any) -> None:
+        """End an update: the final checkpoint if the budget is spent, then progress.csv's row."""
+        if self.done:
+            self.save(self.n)
+        self.progress.record(logger)
+        logger.record("time/fps", int(self.n / (time.time() - self.start)))
+        logger.record("time/total_timesteps", self.n)
+        logger.dump(self.n)
+
+
+def learn(
+    config: TrainConfig,
+    envs: gym.vector.VectorEnv,
+    checkpoint: Checkpoint,
+    log: RunLog | None,
+    logger: Any,
+) -> None:
+    """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A
+    checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
+    runner's does, and once more after the last update."""
+    ppo = config.ppo
+    torch.manual_seed(config.seed)
+    rng = np.random.default_rng(config.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    obs_rms, obs = begin(config, envs, log)
     action_space = envs.single_action_space
     assert isinstance(action_space, spaces.Discrete)
     agent = Agent(obs.shape[1], int(action_space.n), config.second_value_head).to(device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=ppo.learning_rate, eps=ADAM_EPS)
-
-    steps = 0
-    next_checkpoint = config.checkpoint_every
-    progress = Progress(n)
-
-    def after_step(
-        actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: dict[str, Any]
-    ) -> None:
-        nonlocal steps, next_checkpoint
-        steps += n
-        current = unbatch(infos, n)
-        # For an env that finished, `infos` holds its reset info and final_info its last step's.
-        final = unbatch(infos["final_info"], n) if "final_info" in infos else current
-        step_infos = [final[i] if done else current[i] for i, done in enumerate(dones)]
-        if log is not None:
-            log.step(actions, rewards, dones, step_infos)
-            log.begin(np.flatnonzero(dones), current)
-        progress.step(rewards, dones, step_infos)
-        if next_checkpoint <= steps < config.total_timesteps:
-            next_checkpoint += config.checkpoint_every
-            checkpoint(agent, obs_rms, steps)
-
-    start = time.time()
-    while steps < config.total_timesteps:
-        rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, after_step)
+    steps = Steps(config, log, lambda step: checkpoint(agent, obs_rms, step))
+    while not steps.done:
+        rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, steps)
         with torch.no_grad():
             last_value = agent.get_value(torch.as_tensor(obs, device=device))[:, 0]
         advantages = gae(rollout, last_value, ppo.gamma, ppo.gae_lambda)
         for key, value in update(agent, optimizer, rollout, advantages, ppo, rng).items():
             logger.record(key, value)
-        if steps >= config.total_timesteps:
-            checkpoint(agent, obs_rms, steps)
-        progress.record(logger)
-        logger.record("time/fps", int(steps / (time.time() - start)))
-        logger.record("time/total_timesteps", steps)
-        logger.dump(steps)
+        steps.dump(logger)
 
 
-def train(config: TrainConfig) -> Path:
-    if config.norm_reward:
-        raise ValueError("The owned trainer does not normalise rewards; the plan never does")
-    run_dir, env_fn, backend, rom_sha1, commit = runner.prepare(config, "owned")
-    game = config.env_id in runner.GAMES
-    # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
-    start = time.time()
-    envs = make_envs(env_fn if game else partial(gym.make, config.env_id), config.n_envs)
-    log = RunLog(config.n_envs, config, run_dir, start) if game else None
-    eval_env = runner.make_eval_env(config, env_fn, run_dir, start, log)
+def sb3_saver(config: TrainConfig, eval_env: VecEnv) -> Save:
+    """Checkpoints as SB3 PPO zips, which PPO.load reads like the runner's."""
     # The SB3 model only carries our weights to disk and through evaluation, so its one-env
     # rollout buffer, smaller than a minibatch, is never used. It seeds the global RNGs, so it
     # is built before learn() seeds ours.
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="You have specified a mini-batch size")
         model = runner.build_model(config, eval_env)
-    logger = runner.make_logger(config, run_dir)
 
-    def checkpoint(agent: Agent, obs_rms: dict[str, RunningMeanStd] | None, step: int) -> None:
-        path = run_dir / "checkpoints" / f"step_{step}"
+    def save(agent: nn.Module, path: Path, step: int) -> PolicyPredictor:
+        assert isinstance(agent, Agent)
         model.policy.load_state_dict(sb3_state_dict(agent))
         model.num_timesteps = step
         model.save(path.with_suffix(".zip"))
+        return model
+
+    return save
+
+
+def run(
+    config: TrainConfig,
+    tag: str,
+    algorithm: str,
+    learn: Learn,
+    saver: Callable[[TrainConfig, VecEnv], Save],
+) -> Path:
+    """Train with `learn` into a run directory laid out as the SB3 runner's: config, Parquet
+    tables, progress.csv, eval.csv and checkpoints. `saver` writes each checkpoint, and the
+    runner's evaluate() plays it. The run id carries `tag`; the runs table logs `algorithm` and
+    trainer "owned"."""
+    if config.norm_reward:
+        raise ValueError("The owned trainers do not normalise rewards; the plan never does")
+    run_dir, env_fn, backend, rom_sha1, commit = runner.prepare(config, tag)
+    game = config.env_id in runner.GAMES
+    # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
+    start = time.time()
+    envs = make_envs(env_fn if game else partial(gym.make, config.env_id), config.n_envs)
+    log = RunLog(config.n_envs, config, run_dir, start) if game else None
+    eval_env = runner.make_eval_env(config, env_fn, run_dir, start, log)
+    save = saver(config, eval_env)
+    logger = runner.make_logger(config, run_dir)
+
+    def checkpoint(agent: nn.Module, obs_rms: ObsRms, step: int) -> None:
+        path = run_dir / "checkpoints" / f"step_{step}"
+        model = save(agent, path, step)
         if obs_rms is not None:
             assert isinstance(eval_env, VecNormalize)
             dict_obs = isinstance(eval_env.observation_space, spaces.Dict)
@@ -454,7 +522,7 @@ def train(config: TrainConfig) -> Path:
         logger.record("eval/mean_return", mean)
 
     fixed = runner.run_row(config, run_dir.name.removeprefix("run_id="), backend, rom_sha1, commit)
-    fixed["trainer"] = "owned"
+    fixed |= {"algorithm": algorithm, "trainer": "owned"}
     if log is not None:
         runner.write_run_row(
             run_dir, fixed | {"status": "running", "env_steps": 0, "wall_clock_s": 0.0}
@@ -477,6 +545,12 @@ def train(config: TrainConfig) -> Path:
             log.close()
         eval_env.close()
     return run_dir
+
+
+def train(config: TrainConfig) -> Path:
+    if config.pqn is not None:
+        raise ValueError("This config trains PQN: algoarcade.training.pqn")
+    return run(config, "owned", "ppo", learn, sb3_saver)
 
 
 def main() -> None:
