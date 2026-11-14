@@ -8,7 +8,7 @@ paths: src/algoarcade/training/**, src/algoarcade/runqueue/**, experiments/**
 
 A result we cannot reproduce or compare is not a result. These rules exist so that every number in the writeup traces to runs that differ in exactly one way.
 
-Change one factor. An experiment names the baseline config and the single factor it varies. If you need to change two things, that is two experiments.
+Change one factor from the baseline. The baseline is `BASELINE_V1` in `src/algoarcade/training/config.py` (preset `baseline_v1`): the `firered` preset with 20 evaluation episodes per checkpoint. An experiment imports it by name, `from algoarcade.training.config import BASELINE_V1`, and changes one field. If you need to change two things, that is two experiments. A test pins every field, so changing the baseline fails CI until the test changes too; say why in the pull request.
 
 Set gamma explicitly. The library default of 0.99 gives a horizon of about 100 steps, and our episodes are thousands of steps long. An agent at the default does not crash. It does not learn. We start at 0.997.
 
@@ -55,7 +55,7 @@ Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an
 
 ## The games
 
-With `env_id` set to `firered`, `super_mario_land` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset is the baseline at 1M steps on the default reward: events, explore, level, badge and milestone at `DEFAULT_WEIGHTS`, penalties off (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers, and each worker checks the state's options.
+With `env_id` set to `firered`, `super_mario_land` or `fake`, the runner trains through `AlgoArcadeEnv` with MultiInputPolicy and 16 SubprocVecEnv workers (spawn), each building its own emulator. Evaluation runs in a seventeenth process. The `firered` preset uses `BASELINE`'s PPO values for 1M steps on the default reward: events, explore, level, badge and milestone at `DEFAULT_WEIGHTS`, penalties off (`--reward-weights` changes it). The ROM is `data/roms/firered.gba` and the start state comes from the manifest; the runner checks both hashes before starting workers, and each worker checks the state's options.
 
 The TRN-05 runs, launched one after another so a stop loses only the run in progress:
 
