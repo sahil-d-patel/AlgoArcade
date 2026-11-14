@@ -36,7 +36,10 @@ class NewMaximum(RewardComponent[Progress]):
     `prev` and the next step pays nothing, so re-establishing the best never pays; a real rise
     inside that pair is lost with it, at most `max_rise`. A bad read
     repeated on two consecutive steps becomes the best this way and can silence the term for the
-    episode; only reader validation (ENV-05, ENV-08) prevents that."""
+    episode; only reader validation (ENV-05, ENV-08) prevents that.
+
+    An archive reset passes `best`, the term's best when the cell was reached, so the episode
+    starts from it: the loaded count can sit below it, and climbing back pays nothing."""
 
     def __init__(  # noqa: PLR0913 two bounds on reads and two on payment
         self,
@@ -57,9 +60,13 @@ class NewMaximum(RewardComponent[Progress]):
         self._first_step = True
         self._settling = False
 
+    @property
+    def best(self) -> int | None:
+        return self._best
+
     @override
-    def reset(self, state: Progress) -> None:
-        self._best = None
+    def reset(self, state: Progress, best: int | None = None) -> None:
+        self._best = best
         self._first_step = True
         self._settling = False
 

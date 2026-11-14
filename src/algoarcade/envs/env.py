@@ -1,6 +1,7 @@
 """The Gymnasium environment. Contract: docs/harness-spec.md, AlgoArcadeEnv."""
 
-from collections.abc import Callable, Hashable, Mapping
+import zlib
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,16 +35,23 @@ NOT_READY_FRAMES = 8
 CROP = (9, 15)
 # Tiles per side of an archive cell. A starting guess from ENV-09.
 CELL_TILES = 4
+# zlib level 1 shrinks an mGBA save state from 528,448 bytes to about 50,000 in about 4 ms.
+CELL_COMPRESSION = 1
 
 
 @dataclass(frozen=True)
 class Cell:
-    """A cell for archive resets: its key, the save state from the step that first reached it,
-    and the episode's visited locations at that step."""
+    """A cell for archive resets, from the step that first reached it: its key, the save state
+    (zlib-compressed), the episode's visited locations, each progress term's best and the env's
+    best milestone_count. The bests travel with the state because a count can sit below them:
+    FireRed's forest_exited and gym_entered stop holding off their maps, and depositing a
+    Pokemon lowers the level sum."""
 
     key: tuple[Hashable, ...]
     state: bytes
     visited: frozenset[tuple[Hashable, ...]]
+    bests: Mapping[str, int]
+    milestone_count: int
 
 
 class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
@@ -53,8 +61,9 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     times; then it propagates out of reset and step. The env never stands in a state for one the
     game cannot provide.
 
-    With `archive`, a step that first reaches a cell in an episode puts a Cell in `info["cell"]`,
-    and `set_next_start` makes the next reset load a cell instead of the start state. The key is
+    With `archive`, a step that first reaches a cell in an episode puts a Cell in `info["cell"]`
+    unless `add_archived` listed its key, and `set_next_start` makes the next reset load a cell
+    instead of the start state. The key is
     (*map, x // CELL_TILES, y // CELL_TILES, badge_flags, the episode's best milestone_count);
     a game without a badge byte or milestones keys 0 for them."""
 
@@ -79,6 +88,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._archive = archive
         self._next_start: Cell | None = None
         self._cells: set[tuple[Hashable, ...]] = set()
+        self._archived: set[tuple[Hashable, ...]] = set()
         self._features = tuple(features.values())
         self._actions = ACTIONS + ((Button.START,),) * start + ((),) * noop
         self.action_space = spaces.Discrete(len(self._actions))
@@ -98,15 +108,19 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         super().reset(seed=seed, options=options)
         cell, self._next_start = self._next_start, None
-        self.backend.load_state(self._start_state if cell is None else cell.state)
+        self.backend.load_state(self._start_state if cell is None else zlib.decompress(cell.state))
         self.backend.step(int(self.np_random.integers(MAX_NOOP_FRAMES + 1)))
         self._state = self._read()
-        visited = frozenset() if cell is None else cell.visited
-        self._rewards.reset(self._state, visited)
-        self._visited = {self._state.location, *visited}
+        if cell is None:
+            self._rewards.reset(self._state)
+            self._visited = {self._state.location}
+            self._milestone_count = 0
+        else:
+            self._rewards.reset(self._state, cell.visited, cell.bests)
+            self._visited = {self._state.location, *cell.visited}
+            self._milestone_count = cell.milestone_count
         self._cells = set()
         self._steps = 0
-        self._milestone_count = 0
         self._last_milestone_count = None
         info = self._info(self._state) | {"archive_start": cell is not None}
         return self._observe(self._state), info
@@ -116,6 +130,11 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         evaluation env always starts from the start state."""
         if self._archive:
             self._next_start = cell
+
+    def add_archived(self, keys: Iterable[tuple[Hashable, ...]]) -> None:
+        """Keys the archive already holds; reaching one reports no Cell, so its state is not
+        saved and sent again."""
+        self._archived.update(keys)
 
     def step(
         self, action: int | np.int64
@@ -131,7 +150,14 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
             key = self._cell_key(self._state)
             if key not in self._cells:
                 self._cells.add(key)
-                info["cell"] = Cell(key, self.backend.save_state(), frozenset(self._visited))
+                if key not in self._archived:
+                    info["cell"] = Cell(
+                        key,
+                        zlib.compress(self.backend.save_state(), CELL_COMPRESSION),
+                        frozenset(self._visited),
+                        self._rewards.bests(),
+                        self._milestone_count,
+                    )
         return self._observe(self._state), float(reward), False, truncated, info
 
     def close(self) -> None:

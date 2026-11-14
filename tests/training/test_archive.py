@@ -80,7 +80,7 @@ def test_200_resets_load_the_fixed_start_at_p_0_and_in_evaluation(p: float, arch
 def test_draws_are_weighted_one_over_root_one_plus_selections() -> None:
     archive = Archive()
     for x, selections in enumerate((0, 3, 8)):
-        cell = Cell((x,), b"", frozenset())
+        cell = Cell((x,), b"", frozenset(), {}, 0)
         archive.add(cell)
         archive.selections[cell.key] = selections
     rng = np.random.default_rng(0)
@@ -98,9 +98,23 @@ def test_at_p_half_the_share_over_1000_resets_is_near_half() -> None:
 
 def test_a_cell_keeps_the_first_state_that_reached_it() -> None:
     archive = Archive()
-    archive.add(Cell((0,), b"first", frozenset()))
-    archive.add(Cell((0,), b"second", frozenset()))
+    archive.add(Cell((0,), b"first", frozenset(), {}, 0))
+    archive.add(Cell((0,), b"second", frozenset(), {}, 0))
     assert archive.cells[(0,)].state == b"first"
+
+
+def test_a_key_the_archive_holds_is_not_sent_again() -> None:
+    # Two envs walk the same row in lockstep at p = 0, three 4-step episodes each. Both find each
+    # cell on the same step, so both send it then; no later episode sends it again.
+    venv = ArchiveResets(DummyVecEnv([partial(fake_env, 4), partial(fake_env, 4)]), 0.0, seed=0)
+    venv.seed(0)
+    venv.reset()
+    sent = []
+    for _ in range(12):
+        _, _, _, infos = venv.step(np.array([3, 3]))
+        sent.append([info["cell"].key for info in infos if "cell" in info])
+    assert sent[:4] == [[(0, 0, 0, 0, 0)] * 2, [], [(0, 1, 0, 0, 0)] * 2, []]
+    assert sent[4:] == [[]] * 8
 
 
 def test_p_outside_0_to_1_raises() -> None:

@@ -104,7 +104,10 @@ def test_archive_run_logs_its_share_and_evaluates_from_the_start_state(tmp_path:
     assert [float(r["rollout/archive_share"]) for r in rows] == pytest.approx(
         [2 * k / (2 + 2 * k) for k in range(1, 5)]
     )
-    assert {float(r["rollout/archive_bytes_per_cell"]) for r in rows} == {fake.RAM_SIZE}
+    # Compressed: zlib's header and checksum make the 17-byte fake state about 25 bytes.
+    assert all(
+        fake.RAM_SIZE < float(r["rollout/archive_bytes_per_cell"]) < 2 * fake.RAM_SIZE for r in rows
+    )
     assert all(float(r["rollout/archive_cells"]) > 0 for r in rows)
 
 

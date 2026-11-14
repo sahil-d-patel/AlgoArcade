@@ -96,13 +96,30 @@ class RewardRegistry[S: GameState]:
         self._weights = dict(weights)
         self._components = [components[name]() for name in weights]
 
-    def reset(self, state: S, visited: Iterable[tuple[Hashable, ...]] = ()) -> None:
-        """`visited` is an archive start's visited set; explore does not pay those locations."""
+    def reset(
+        self,
+        state: S,
+        visited: Iterable[tuple[Hashable, ...]] = (),
+        bests: Mapping[str, int] | None = None,
+    ) -> None:
+        """An archive start passes its cell's visited set and `bests`: explore does not pay the
+        visited locations, and a progress term pays nothing up to its best."""
+        bests = bests or {}
         for component in self._components:
             if isinstance(component, Explore):
                 component.reset(state, visited)
+            elif isinstance(component, NewMaximum):
+                component.reset(state, bests.get(component.name))
             else:
                 component.reset(state)
+
+    def bests(self) -> dict[str, int]:
+        """Each progress term's best so far this episode, by name, for an archive cell."""
+        return {
+            c.name: c.best
+            for c in self._components
+            if isinstance(c, NewMaximum) and c.best is not None
+        }
 
     def step(self, prev: S, curr: S) -> tuple[float, dict[str, float]]:
         """The weighted reward, and each component's raw value as `reward/<name>`."""

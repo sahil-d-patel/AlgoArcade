@@ -33,7 +33,8 @@ class Archive:
 
 class ArchiveResets(VecEnvWrapper):
     """Adds every cell the envs report to the archive, and starts each training episode from an
-    archived cell with probability `p`, otherwise from the fixed start state.
+    archived cell with probability `p`, otherwise from the fixed start state. Each new key goes
+    to every env with `add_archived`, so no env sends that cell's state again.
 
     A vector env resets a worker inside the worker, so each worker's next start is chosen ahead
     of time and sent with `set_next_start`: as soon as the archive has a cell, and again after
@@ -64,9 +65,14 @@ class ArchiveResets(VecEnvWrapper):
 
     def step_wait(self) -> Any:
         obs, rewards, dones, infos = self.venv.step_wait()
+        new = []
         for info in infos:
-            if "cell" in info:
-                self.archive.add(info["cell"])
+            cell = info.get("cell")
+            if cell is not None and cell.key not in self.archive.cells:
+                self.archive.add(cell)
+                new.append(cell.key)
+        if new:
+            self.venv.env_method("add_archived", new)
         self._started(np.flatnonzero(dones))
         return obs, rewards, dones, infos
 

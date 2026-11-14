@@ -1,4 +1,5 @@
 import json
+import zlib
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -313,7 +314,7 @@ def test_a_step_reports_a_cell_the_first_time_the_episode_reaches_it() -> None:
     cell = cells[2]
     assert cell is not None
     assert cell.visited == {(0, x, 1) for x in range(1, 5)}
-    backend.load_state(cell.state)
+    backend.load_state(zlib.decompress(cell.state))
     assert FakeReader().read(backend).location == (0, 4, 1)
     env.reset(seed=0)
     assert [cell and cell.key for cell in walk_right(env, 1)] == [(0, 0, 0, 0, 0)]
@@ -371,3 +372,44 @@ def test_an_archive_reset_and_a_step_onto_a_visited_tile_pay_nothing() -> None:
         # time charges every step by design (docs/harness-spec.md, Reward registry).
         assert raw == dict.fromkeys(WEIGHTS, 0.0) | {"time": 1.0}
     assert info["location"] == (0, 3, 1)
+
+
+COUNTS = (fake.FLAGS, fake.LEVEL_SUM, fake.BADGES, fake.MILESTONES)
+
+
+def test_a_reload_does_not_repay_counts_that_dropped_before_the_cell() -> None:
+    # A FireRed count can fall below the episode's best: forest_exited and gym_entered stop
+    # holding off their maps, and depositing a Pokemon lowers the level sum. A cell reached after
+    # the drop must not let a reload pay the climb back to the best.
+    high = (0b11, 9, 0b11, 4)
+    low = (0b01, 7, 0b01, 2)
+    backend = FakeBackend()
+    for offset, value in zip(COUNTS, high, strict=True):
+        poke(backend, offset, value)
+    env = AlgoArcadeEnv(
+        backend,
+        FakeReader(),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    walk_right(env, 1)
+    for offset, value in zip(COUNTS, low, strict=True):
+        poke(backend, offset, value)
+    cell = walk_right(env, 2)[-1]
+    assert cell is not None
+    assert cell.key == (0, 1, 0, 0, 4)
+
+    for episode in range(3):
+        env.set_next_start(cell)
+        _, info = env.reset(seed=episode)
+        assert info["milestone_count"] == 4
+        for offset, value in zip(COUNTS, high, strict=True):
+            poke(backend, offset, value)
+        for action in (5, 5, 5):
+            _, reward, _, _, info = env.step(action)
+            assert reward == WEIGHTS["time"]
+        assert info["milestone_count"] == 4
