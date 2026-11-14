@@ -1,4 +1,5 @@
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -85,3 +86,19 @@ def test_other_presets_evaluate_deterministically_at_every_checkpoint(name: str)
 def test_eval_every_must_be_a_positive_multiple_of_checkpoint_every(eval_every: int) -> None:
     with pytest.raises(ValueError, match="eval_every"):
         dataclasses.replace(BASELINE_V1, eval_every=eval_every)
+
+
+def test_a_config_saved_before_eval_every_loads_as_it_ran(tmp_path: Path) -> None:
+    # Runs before 2026-11-14 evaluated every checkpoint with the argmax, and wrote neither field.
+    config = dataclasses.replace(
+        PRESETS["firered"][1],
+        start_state="seg_01_house",
+        checkpoint_every=250_000,
+        eval_every=250_000,
+    )
+    path = tmp_path / "config.json"
+    save_config(config, path)
+    raw = json.loads(path.read_text())
+    del raw["eval_every"], raw["eval_deterministic"]
+    path.write_text(json.dumps(raw))
+    assert load_config(path) == config

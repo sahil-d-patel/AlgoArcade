@@ -81,6 +81,9 @@ def load_config(path: Path) -> TrainConfig:
     raw = json.loads(path.read_text())
     raw["ppo"] = PPOConfig(**raw["ppo"])
     raw["runs_dir"] = Path(raw["runs_dir"])
+    # Runs saved before 2026-11-14 wrote neither field; they evaluated every checkpoint, argmax.
+    raw.setdefault("eval_every", raw["checkpoint_every"])
+    raw.setdefault("eval_deterministic", True)
     return TrainConfig(**raw)
 
 
@@ -119,12 +122,9 @@ FIRERED = dataclasses.replace(
     reward_weights=dict(DEFAULT_WEIGHTS),
 )
 
-# TRN-08's baseline: experiments import it and change one field. The 20 evaluation episodes per
-# seed are TRN-08's. 15M steps is the experiment run length in docs/technical-plan.md, Compute
-# budget (the E1 to E4 row); at 1M every segment scored 0 of 100 (#29). Sampled evaluation is the
-# PM decision of 2026-11-14, as is evaluating every third checkpoint: ten evaluations per run
-# instead of thirty, with a checkpoint still saved every 500,000 steps.
-# tests/training/test_training_config.py pins every field.
+# TRN-08's baseline, which experiments import and change one field of: 15M steps, 20 sampled
+# evaluation episodes every 1.5M steps. tests/training/test_training_config.py pins every field;
+# why each value: docs/decisions.md, 2026-11-14.
 BASELINE_V1 = dataclasses.replace(
     FIRERED,
     total_timesteps=15_000_000,
