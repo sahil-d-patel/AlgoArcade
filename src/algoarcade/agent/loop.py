@@ -200,6 +200,7 @@ class Attempt:
     dollars: float
     steps: list[Step]
     goal_step: int | None = None  # the press after which the goal first held
+    messages: list[MessageParam] = field(default_factory=list)
 
     def per_action(self) -> dict[str, float] | None:
         """Mean tokens of each kind and dollars per button press; None if nothing was pressed."""
@@ -310,7 +311,7 @@ async def run_attempt(  # noqa: PLR0913 the attempt's model, server, config, tas
             # API reported, so this bounds the next request before it is paid for.
             prompt_tokens += json_bytes(messages[sent:])
             if dollars + config.prices.most(prompt_tokens, config.max_tokens) > config.max_dollars:
-                return Attempt("dollar_cap", actions, dollars, steps)
+                return Attempt("dollar_cap", actions, dollars, steps, messages=messages)
             sent = len(messages)
             response = await create(
                 model=config.model,
@@ -360,7 +361,7 @@ async def run_attempt(  # noqa: PLR0913 the attempt's model, server, config, tas
                 outcome = response.stop_reason or "end_turn"
             else:
                 continue
-            return Attempt(outcome, actions, dollars, steps, goal_step)
+            return Attempt(outcome, actions, dollars, steps, goal_step, messages)
 
 
 def server(args: tuple[str, ...]) -> StdioServerParameters:
@@ -377,12 +378,27 @@ def server(args: tuple[str, ...]) -> StdioServerParameters:
 @dataclass(frozen=True, kw_only=True)
 class Run(AttemptConfig):
     """One attempt, logged under data/llm/<name>/ as steps.jsonl, presses.jsonl (the server's
-    trace) and attempt.json, and in the logging schema as run <name> under data/runs/."""
+    trace), transcript.json (the messages, images left out) and attempt.json, and in the logging
+    schema as run <name> under data/runs/."""
 
     name: str
     segment: str = "fake"
+    experiment_id: str = ""
+    arm: str = ""
     out: Path = Path("data/llm")
     runs: Path = Path("data/runs")
+
+
+def without_images(value: Any) -> Any:
+    """`value` with each base64 image's data replaced by its length. The trace replays the
+    screen."""
+    if isinstance(value, list):
+        return [without_images(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if value.get("type") == "base64":
+        return value | {"data": f"<{len(value['data'])} base64 characters>"}
+    return {key: without_images(item) for key, item in value.items()}
 
 
 def git_commit() -> str:
@@ -403,8 +419,8 @@ async def run(settings: Run, create: Create) -> Attempt:
     backend, rom_sha1, parse = GAMES[segment.game]
     ids = {"run_id": settings.name, "seed": 0}
     fixed = ids | {
-        "experiment_id": "",
-        "arm": "",
+        "experiment_id": settings.experiment_id,
+        "arm": settings.arm,
         "algorithm": "llm",
         "trainer": "algoarcade.agent.loop",
         "env_id": segment.game,
@@ -462,7 +478,10 @@ async def run(settings: Run, create: Create) -> Attempt:
         "per_action": attempt.per_action(),
         "projection_300_actions": asdict(projection) if projection else None,
     }
-    del summary["steps"]
+    summary |= {"server_pid": presses[0]["pid"], "start_sha256": presses[0]["start_sha256"]}
+    del summary["steps"], summary["messages"]
+    transcript = without_images(to_jsonable_python(attempt.messages))
+    (folder / "transcript.json").write_text(json.dumps(transcript, indent=1))
     (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
     return attempt
 
