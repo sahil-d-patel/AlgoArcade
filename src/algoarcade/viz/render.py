@@ -7,13 +7,13 @@
 reward weights come from the run's config.json, two folders above the checkpoint, and the frozen
 normalisation statistics from step_<n>.pkl beside it. The policy acts deterministically on the
 CPU from the manifest start state, reset with `seed`, so a checkpoint and seed always play the
-same episode.
+same episode. Each decision is one video frame, the screen after it, with the step, the return,
+the location, the badge count and one bar per reward component's weighted episode total.
 
 `--eval-episode k` replays instead the k-th episode the runner evaluated at this checkpoint: the
 eval seed, the run's eval_deterministic and the runner's eval_rng, with episodes 0 to k-1 played
 first and not recorded. A sampled episode replays exactly only on the device the run trained on,
-so this mode loads the model as training did (CUDA when present). Each decision is one video frame, the screen after it, with the step, the return,
-the location, the badge count and one bar per reward component's weighted episode total.
+so this mode loads the model as training did (CUDA when present).
 """
 
 import contextlib
