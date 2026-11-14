@@ -12,12 +12,15 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from algoarcade.games.firered.addresses import LAYOUT_COMMIT
+
 MAP_DATA = Path(__file__).resolve().parents[4] / "data" / "pokefirered"
 MARKER = "maps.commit"
 PALLET_TOWN = (3, 0)
 # include/global.fieldmap.h at LAYOUT_COMMIT: bits 10 and 11 of a map.bin cell are collision, and
 # MapGridGetCollisionAt treats MAPGRID_UNDEFINED as blocked.
 COLLISION_MASK = 0x0C00
+METATILE_ID_MASK = 0x03FF  # MAPGRID_METATILE_ID_MASK
 MAPGRID_UNDEFINED = 0x03FF
 # GetAttributeByMetatileIdAndMapLayout in src/fieldmap.c: ids below NUM_METATILES_IN_PRIMARY (640)
 # index the primary tileset's attributes, the rest the secondary's. Behaviour is bits 0 to 8.
@@ -72,8 +75,11 @@ class MapGrid:
 
 def load_maps(root: Path = MAP_DATA) -> dict[tuple[int, int], MapGrid]:
     """Every map in map_groups.json, keyed by (map_group, map_num)."""
-    if not (root / MARKER).is_file():
-        raise FileNotFoundError(f"No map data in {root}: run uv run python scripts/fetch_maps.py")
+    marker = root / MARKER
+    if not marker.is_file() or marker.read_text() != LAYOUT_COMMIT:
+        raise FileNotFoundError(
+            f"No map data from {LAYOUT_COMMIT} in {root}: run uv run python scripts/fetch_maps.py"
+        )
     groups = json.loads((root / "data/maps/map_groups.json").read_text())
     layouts = {
         layout["id"]: layout
@@ -105,7 +111,7 @@ def load_maps(root: Path = MAP_DATA) -> dict[tuple[int, int], MapGrid]:
             raise ValueError(f"{layout['primary_tileset']} has {primary.size} metatiles, not 640")
         secondary = np.fromfile(tilesets[layout["secondary_tileset"]], dtype="<u4")
         attributes = np.concatenate([primary, secondary])
-        behavior = (attributes[blocks & MAPGRID_UNDEFINED] & BEHAVIOR_MASK).astype(np.uint16)
+        behavior = (attributes[blocks & METATILE_ID_MASK] & BEHAVIOR_MASK).astype(np.uint16)
         connections = tuple(
             Connection(connection["direction"], connection["offset"], ids[connection["map"]])
             for connection in header["connections"] or ()

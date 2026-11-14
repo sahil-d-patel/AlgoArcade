@@ -121,6 +121,8 @@ def test_both_sides_of_each_connection_agree(
         ("MAP_SAFFRON_CITY_CONNECTION", "MAP_ROUTE6"),
         ("MAP_ROUTE6", "MAP_SAFFRON_CITY_CONNECTION"),
     ]
+    # Route 6 is (3, 24), placed from the city side.
+    assert offsets[(3, 24)] == (216, -100)
 
 
 def test_warp_only_maps_are_not_placed(
@@ -171,18 +173,20 @@ def test_offline_collision_matches_the_live_map_buffer(
     data = path.read_bytes()
     assert hashlib.sha256(data).hexdigest() == entry.sha256
     backend = MgbaBackend(rom, render=False)
-    backend.load_state(data)
-    state = FireRedReader(ROM_SHA1).read(backend)
-    tiles = maps[(state.map_group, state.map_num)]
-    # struct BackupMapLayout in include/global.fieldmap.h: Xsize, Ysize, then the map pointer.
-    # InitMapLayoutData (src/fieldmap.c) copies the map in with a MAP_OFFSET (7) border.
-    xsize, ysize, pointer = struct.unpack(
-        "<iiI", backend.read(ADDRESSES[ROM_SHA1]["VMap"].address, 12)
-    )
-    assert pointer == ADDRESSES[ROM_SHA1]["gBackupMapData"].address
-    assert (xsize, ysize) == (tiles.width + 15, tiles.height + 14)
-    cells = np.frombuffer(backend.read(pointer, xsize * ysize * 2), dtype="<u2")
-    live = cells.reshape(ysize, xsize)[7 : 7 + tiles.height, 7 : 7 + tiles.width]
-    backend.close()
+    try:
+        backend.load_state(data)
+        state = FireRedReader(ROM_SHA1).read(backend)
+        tiles = maps[(state.map_group, state.map_num)]
+        # struct BackupMapLayout in include/global.fieldmap.h: Xsize, Ysize, then the map pointer.
+        # InitMapLayoutData (src/fieldmap.c) copies the map in with a MAP_OFFSET (7) border.
+        xsize, ysize, pointer = struct.unpack(
+            "<iiI", backend.read(ADDRESSES[ROM_SHA1]["VMap"].address, 12)
+        )
+        assert pointer == ADDRESSES[ROM_SHA1]["gBackupMapData"].address
+        assert (xsize, ysize) == (tiles.width + 15, tiles.height + 14)
+        cells = np.frombuffer(backend.read(pointer, xsize * ysize * 2), dtype="<u2")
+        live = cells.reshape(ysize, xsize)[7 : 7 + tiles.height, 7 : 7 + tiles.width]
+    finally:
+        backend.close()
     live_blocked = (live & COLLISION_MASK != 0) | (live == MAPGRID_UNDEFINED)
     assert (live_blocked == tiles.blocked).mean() >= 0.99
