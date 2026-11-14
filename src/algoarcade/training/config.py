@@ -54,6 +54,11 @@ class TrainConfig:
     """With a game env_id: component name to weight."""
     step_log_every: int = 4
     """With a game env_id: log every Nth decision of each episode to the steps table."""
+    archive: bool = False
+    """With a game env_id: archive resets (ENV-09) for training episodes. Evaluation never uses
+    them. Off in the baseline."""
+    archive_p: float = 0.5
+    """With archive: the chance a training reset loads an archived cell. A starting guess."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:

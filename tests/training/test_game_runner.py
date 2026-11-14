@@ -1,5 +1,6 @@
 """The runner on the fake game: Parquet logs, normalisation statistics and checkpoint replay."""
 
+import csv
 import dataclasses
 import time
 from functools import partial
@@ -84,6 +85,29 @@ def test_episodes_split_training_and_evaluation(run_dir: Path) -> None:
     }
 
 
+def test_archive_run_logs_its_share_and_evaluates_from_the_start_state(tmp_path: Path) -> None:
+    run_dir = train(dataclasses.replace(FAKE, runs_dir=tmp_path, archive=True, archive_p=1.0))
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    validate(pq.read_table(run_dir / "episodes"), "episodes")
+    assert not any(e["archive_start"] for e in episodes if e["is_eval"])
+    # Each env's first episode starts before the archive has a cell; at p = 1 every later one
+    # loads a cell.
+    train_rows = [e for e in episodes if not e["is_eval"]]
+    assert sorted((e["episode_id"], e["archive_start"]) for e in train_rows) == [
+        (0, False),
+        (0, False),
+        *[(n, True) for n in (1, 1, 2, 2, 3, 3)],
+    ]
+    with (run_dir / "progress.csv").open() as f:
+        rows = [r for r in csv.DictReader(f) if r["rollout/archive_share"]]
+    # 2 envs, 64-step episodes, 64-step rollouts: after rollout k, 2 + 2k resets, 2k from cells.
+    assert [float(r["rollout/archive_share"]) for r in rows] == pytest.approx(
+        [2 * k / (2 + 2 * k) for k in range(1, 5)]
+    )
+    assert {float(r["rollout/archive_bytes_per_cell"]) for r in rows} == {fake.RAM_SIZE}
+    assert all(float(r["rollout/archive_cells"]) > 0 for r in rows)
+
+
 def test_a_count_changes_only_once_two_reads_agree() -> None:
     env = fake_env({"explore": 0.1})
     env.reset(seed=0)
@@ -135,6 +159,42 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.rom
+def test_a_firered_archive_reset_loads_the_cell_and_pays_nothing_for_it() -> None:
+    if not FIRERED_ROM.is_file():
+        pytest.skip("Needs the local FireRed ROM")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    env_fn, _, _ = env_factory("firered", "seg_02_pallet", FIRERED.reward_weights)
+    env = env_fn(archive=True)
+    _, info = env.reset(seed=0)
+    assert info["location"] == (3, 0, 16, 14)
+    # Left twice: the first press turns the player, the second walks to (15, 14).
+    cell = [env.step(2)[4].get("cell") for _ in range(2)][-1]
+    assert cell is not None
+    # seg_02_pallet holds two milestones and no badge.
+    assert cell.key == (3, 0, 15 // 4, 14 // 4, 0, 2)
+    assert cell.visited == {(3, 0, 16, 14), (3, 0, 15, 14)}
+
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    unwrapped.set_next_start(cell)
+    _, info = env.reset(seed=1)
+    assert info["location"] == (3, 0, 15, 14)
+    assert info["archive_start"] is True
+    # B, then right until the player is back on the start tile; turning takes a step.
+    paid = [env.step(5)[1]]
+    for _ in range(3):
+        _, reward, _, _, info = env.step(3)
+        paid.append(reward)
+        if info["location"] == (3, 0, 16, 14):
+            break
+    assert info["location"] == (3, 0, 16, 14)
+    assert paid == [0.0] * len(paid)
+    env.close()
+
+
 def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path) -> None:
     checkpoints = run_dir / "checkpoints"
     assert sorted(p.name for p in checkpoints.iterdir()) == [
@@ -170,8 +230,8 @@ class CrashOnSecondWorker(gym.Wrapper):
         return self.env.step(action)
 
 
-def crashing_env(weights: dict[str, float]) -> gym.Env:
-    return CrashOnSecondWorker(fake_env(weights))
+def crashing_env(weights: dict[str, float], archive: bool = False) -> gym.Env:
+    return CrashOnSecondWorker(fake_env(weights, archive))
 
 
 def test_a_dead_worker_raises_and_marks_the_run_crashed(

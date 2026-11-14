@@ -11,10 +11,10 @@ from gymnasium.utils.env_checker import check_env
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
-from algoarcade.envs.env import CROP, NOT_READY_FRAMES, AlgoArcadeEnv
+from algoarcade.envs.env import CROP, NOT_READY_FRAMES, AlgoArcadeEnv, Cell
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FEATURES, FakeReader, FakeState
-from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
+from algoarcade.rewards.registry import COMPONENTS, WEIGHTS, RewardRegistry
 
 GOLDEN_TRACE = Path(__file__).parent / "fixtures" / "env_golden_trace.json"
 
@@ -129,7 +129,7 @@ def test_info_components_sum_to_the_reward() -> None:
 def test_info_carries_location_and_milestone_count() -> None:
     env = make_env()
     _, info = env.reset(seed=0)
-    assert info == {"location": (0, 1, 1), "milestone_count": 0}
+    assert info == {"location": (0, 1, 1), "milestone_count": 0, "archive_start": False}
     _, _, _, _, info = env.step(3)
     assert info["location"] == (0, 2, 1)
     assert info["milestone_count"] == 0
@@ -291,3 +291,83 @@ def test_a_reset_read_spike_is_not_kept() -> None:
     backend.load_state(bytes(ram))
     counts = [info["milestone_count"]] + [env.step(3)[4]["milestone_count"] for _ in range(3)]
     assert counts == [0, 0, 0, 0]
+
+
+def poke(backend: FakeBackend, offset: int, value: int) -> None:
+    ram = bytearray(backend.save_state())
+    ram[offset] = value
+    backend.load_state(bytes(ram))
+
+
+def walk_right(env: AlgoArcadeEnv, steps: int) -> list[Cell | None]:
+    return [env.step(3)[4].get("cell") for _ in range(steps)]
+
+
+def test_a_step_reports_a_cell_the_first_time_the_episode_reaches_it() -> None:
+    backend = FakeBackend()
+    env = make_env(backend, archive=True)
+    env.reset(seed=0)
+    cells = walk_right(env, 4)
+    # From (1, 1): x 2 and 3 are in cell x // 4 == 0, x 4 and 5 in cell 1.
+    assert [cell and cell.key for cell in cells] == [(0, 0, 0, 0, 0), None, (0, 1, 0, 0, 0), None]
+    cell = cells[2]
+    assert cell is not None
+    assert cell.visited == {(0, x, 1) for x in range(1, 5)}
+    backend.load_state(cell.state)
+    assert FakeReader().read(backend).location == (0, 4, 1)
+    env.reset(seed=0)
+    assert [cell and cell.key for cell in walk_right(env, 1)] == [(0, 0, 0, 0, 0)]
+
+
+def test_without_archive_no_cell_is_reported_and_a_next_start_is_ignored() -> None:
+    archived = make_env(archive=True)
+    archived.reset(seed=0)
+    cell = walk_right(archived, 3)[-1]
+    assert cell is not None
+    env = make_env()
+    env.reset(seed=0)
+    assert walk_right(env, 4) == [None] * 4
+    env.set_next_start(cell)
+    assert env.reset(seed=0)[1] == {
+        "location": (0, 1, 1),
+        "milestone_count": 0,
+        "archive_start": False,
+    }
+
+
+def test_an_archive_reset_and_a_step_onto_a_visited_tile_pay_nothing() -> None:
+    backend = FakeBackend()
+    env = AlgoArcadeEnv(
+        backend,
+        FakeReader(),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    # Progress the archived state holds, so a progress term that paid it again would show.
+    for offset, value in (
+        (fake.FLAGS, fake.FLAG_CHEST_OPENED),
+        (fake.LEVEL_SUM, 9),
+        (fake.BADGES, 1),
+        (fake.MILESTONES, 3),
+        (fake.HP_PERCENT, 50),
+    ):
+        poke(backend, offset, value)
+    cell = walk_right(env, 3)[-1]
+    assert cell is not None
+    assert cell.key == (0, 1, 0, 0, 3)
+
+    env.set_next_start(cell)
+    _, info = env.reset(seed=1)
+    assert info["location"] == (0, 4, 1)
+    assert info["archive_start"] is True
+    # B does nothing in the fake; left goes to (3, 1), visited on the way to the cell.
+    for action in (5, 2):
+        _, _, _, _, info = env.step(action)
+        raw = {name: info[f"reward/{name}"] for name in WEIGHTS}
+        # time charges every step by design (docs/harness-spec.md, Reward registry).
+        assert raw == dict.fromkeys(WEIGHTS, 0.0) | {"time": 1.0}
+    assert info["location"] == (0, 3, 1)

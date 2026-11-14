@@ -1,6 +1,6 @@
 """Pays the first visit to each location in an episode."""
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Iterable
 from typing import override
 
 from algoarcade.games.base import GameState
@@ -14,8 +14,8 @@ class Explore(RewardComponent[GameState]):
         self._visited: set[tuple[Hashable, ...]] = set()
 
     @override
-    def reset(self, state: GameState) -> None:
-        self._visited = {state.location}
+    def reset(self, state: GameState, visited: Iterable[tuple[Hashable, ...]] = ()) -> None:
+        self._visited = {state.location, *visited}
 
     @override
     def score(self, prev: GameState, curr: GameState) -> float:
