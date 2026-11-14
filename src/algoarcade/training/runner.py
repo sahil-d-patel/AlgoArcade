@@ -209,7 +209,7 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
     runs.close()
 
 
-def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 one run, launch to end row
+def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 linear launch steps; a split gives single-use helpers
     name = f"{config.env_id}-{config.start_state}" if config.start_state else config.env_id
     run_id = f"{name}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
     run_dir = config.runs_dir / f"run_id={run_id}"
@@ -241,9 +241,10 @@ def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 one run, launch t
         eval_venv = make_vec_env(env_fn, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET, **SPAWN)
         if config.archive:
             venv = resets = ArchiveResets(venv, config.archive_p, config.seed)
-            # Only so the eval stack mirrors the training one, as sync_envs_normalization
-            # requires. Its env is built without archive: it reports no cells and ignores a next
-            # start, so evaluation always starts from the start state.
+            # VecNormalize is outermost in both stacks, but sync_envs_normalization walks on
+            # down both and raises at the first checkpoint unless the eval stack has a wrapper
+            # wherever the training stack does. Its env is built without archive: it reports no
+            # cells and ignores a next start, so evaluation always starts from the start state.
             eval_venv = ArchiveResets(eval_venv, config.archive_p, config.seed)
         log = ParquetLog(venv, config, run_dir, start)
         env = log
