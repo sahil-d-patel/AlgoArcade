@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from algoarcade.backends import fake
-from algoarcade.backends.base import GameBackend, read_u8, read_u32
+from algoarcade.backends.base import Button, GameBackend, read_u8, read_u32
 
 
 @dataclass(frozen=True)
@@ -77,3 +77,6 @@ class FakeField:
 
     def battle(self, _state: FakeState, /) -> bool:
         return False
+
+    def ledges(self, _state: FakeState, /) -> dict[tuple[int, int], Button]:
+        return {}

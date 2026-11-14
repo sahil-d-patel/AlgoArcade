@@ -6,9 +6,10 @@ import struct
 import numpy as np
 from numpy.typing import NDArray
 
-from algoarcade.backends.base import GameBackend
+from algoarcade.backends.base import Button, GameBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.addresses import ADDRESSES
+from algoarcade.games.firered.maps import MapGrid
 from algoarcade.games.firered.reader import FireRedState
 
 # include/fieldmap.h: VMap holds the map with a 7-tile border on every side, and object
@@ -63,6 +64,9 @@ CHARACTERS = {
         strict=True,
     )
 )
+# MB_JUMP_EAST to MB_JUMP_SOUTH (include/constants/metatile_behaviors.h): the direction a ledge
+# can be jumped.
+JUMPS = {0x38: Button.RIGHT, 0x39: Button.LEFT, 0x3A: Button.UP, 0x3B: Button.DOWN}
 EOS = 0xFF
 EXT_CTRL_CODE = 0xFC
 # Characters followed by one argument byte: a placeholder, a dynamic character, a keypad icon
@@ -91,9 +95,13 @@ def decode(raw: bytes) -> str:
 
 
 class FireRedField:
-    def __init__(self, rom_sha1: str) -> None:
+    """`maps` is ENV-10's offline map data (`maps.load_maps`). Without it no ledge is known, and
+    a ledge is only a wall: its block carries collision 1."""
+
+    def __init__(self, rom_sha1: str, maps: dict[tuple[int, int], MapGrid] | None = None) -> None:
         self._addresses = {name: entry.address for name, entry in ADDRESSES[rom_sha1].items()}
         self._menus = {self._addresses[name] for name in MENU_TASKS}
+        self._maps = maps or {}
 
     def walkable(self, backend: GameBackend) -> NDArray[np.bool_]:
         """The current map as [y, x] in map-local tiles: True where collision is 0, the elevation
@@ -156,3 +164,12 @@ class FireRedField:
 
     def battle(self, state: FireRedState) -> bool:
         return state.in_battle
+
+    def ledges(self, state: FireRedState) -> dict[tuple[int, int], Button]:
+        grid = self._maps.get((state.map_group, state.map_num))
+        if grid is None:
+            return {}
+        ys, xs = np.nonzero(grid.ledge)
+        return {
+            (int(x), int(y)): JUMPS[int(grid.behavior[y, x])] for x, y in zip(xs, ys, strict=True)
+        }

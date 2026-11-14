@@ -67,7 +67,19 @@ def test_the_path_turns_as_little_as_a_shortest_path_can() -> None:
     path = shortest_path(open_floor, (0, 0), (4, 4))
     assert path is not None
     assert len(path) == 8
-    assert sum(a != b for a, b in itertools.pairwise(path)) == 1
+    buttons = [button for button, _ in path]
+    assert sum(a != b for a, b in itertools.pairwise(buttons)) == 1
+    assert path[-1][1] == (4, 4)
+
+
+def test_a_ledge_is_jumped_only_in_its_direction() -> None:
+    # A wall across row 2 except a south ledge at (1, 2).
+    walkable = np.ones((5, 3), dtype=bool)
+    walkable[2, :] = False
+    ledges = {(1, 2): Button.DOWN}
+    assert shortest_path(walkable, (1, 1), (1, 3), ledges) == [(Button.DOWN, (1, 3))]
+    assert shortest_path(walkable, (1, 3), (1, 1), ledges) is None
+    assert shortest_path(walkable, (1, 1), (1, 3)) is None
 
 
 @pytest.mark.usefixtures("walled")

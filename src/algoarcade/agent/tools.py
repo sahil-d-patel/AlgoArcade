@@ -45,6 +45,11 @@ class Field(Protocol):
 
     def battle(self, state: Any, /) -> bool: ...
 
+    def ledges(self, state: Any, /) -> dict[tuple[int, int], Button]:
+        """The current map's ledges, each with the direction the player can jump it. A jump
+        lands two tiles on in one press."""
+        ...
+
 
 @dataclass
 class Game:
@@ -87,14 +92,21 @@ class Game:
 
 
 def shortest_path(
-    walkable: NDArray[np.bool_], start: tuple[int, int], goal: tuple[int, int]
-) -> list[Button] | None:
-    """A* over the walkable tiles: the fewest steps, and among those the fewest turns, since
-    on FireRed a press in a new direction can only turn the player. None when there is no path."""
+    walkable: NDArray[np.bool_],
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    ledges: dict[tuple[int, int], Button] | None = None,
+) -> list[tuple[Button, tuple[int, int]]] | None:
+    """A* over the walkable tiles and down `ledges`: the fewest presses, and among those the
+    fewest turns, since on FireRed a press in a new direction can only turn the player. Each step
+    is its button and the tile it lands on. None when there is no path."""
+    ledges = ledges or {}
     height, width = walkable.shape
 
     def distance(tile: tuple[int, int]) -> int:
-        return abs(goal[0] - tile[0]) + abs(goal[1] - tile[1])
+        tiles = abs(goal[0] - tile[0]) + abs(goal[1] - tile[1])
+        # A jump crosses two tiles in one press; half the tiles keeps the estimate a lower bound.
+        return (tiles + 1) // 2 if ledges else tiles
 
     # (estimate, turns, steps, tile, facing); facing is a Button value, -1 before the first step.
     frontier = [(distance(start), 0, 0, start, -1)]
@@ -106,13 +118,15 @@ def shortest_path(
             path = []
             key = (tile, facing)
             while key in came_from:
-                path.append(Button(key[1]))
+                path.append((Button(key[1]), key[0]))
                 key = came_from[key]
             return path[::-1]
         if best[(tile, facing)] < (steps, turns):
             continue
         for button, (dx, dy) in STEPS.items():
             x, y = tile[0] + dx, tile[1] + dy
+            if ledges.get((x, y)) == button:
+                x, y = x + dx, y + dy
             if not (0 <= x < width and 0 <= y < height and walkable[y, x]):
                 continue
             cost = (steps + 1, turns + (facing not in (-1, button)))
@@ -164,10 +178,10 @@ def navigate_to(  # noqa: C901 a loop per plan, per step and per press
             walkable[y, x] = True
         for fx, fy in failed:
             walkable[fy, fx] = False
-        path = shortest_path(walkable, state.location[-2:], (x, y))
+        path = shortest_path(walkable, state.location[-2:], (x, y), game.field.ledges(state))
         if path is None:
             return Navigation("no_path", presses)
-        for button in path:
+        for button, landing in path:
             here = state.location[-2:]
             # The first press in a new direction may only turn the player, so a step gets two.
             for _ in range(2):
@@ -180,10 +194,9 @@ def navigate_to(  # noqa: C901 a loop per plan, per step and per press
                 state = game.read()
                 if state.location[-2:] != here:
                     break
-            ahead = (here[0] + STEPS[button][0], here[1] + STEPS[button][1])
-            if state.location[-2:] != ahead:
+            if state.location[-2:] != landing:
                 if state.location[-2:] == here:
-                    failed.add(ahead)
+                    failed.add((here[0] + STEPS[button][0], here[1] + STEPS[button][1]))
                 break
     return Navigation(stopped(game, state, start_map, (x, y)) or "no_path", presses)
 

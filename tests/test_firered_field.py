@@ -1,15 +1,25 @@
 import hashlib
+import io
+import itertools
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from capture_states import Player
 
-from algoarcade.agent.tools import DIALOGUE_PRESSES, Game, advance_dialogue, navigate_to
+from algoarcade.agent.tools import (
+    DIALOGUE_PRESSES,
+    Game,
+    advance_dialogue,
+    navigate_to,
+    shortest_path,
+)
 from algoarcade.backends.base import Button
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.firered.field import FireRedField, decode
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
+from algoarcade.games.firered.maps import MapGrid, load_maps
 from algoarcade.games.firered.reader import FireRedReader
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 HASHES = {entry.name: entry.sha256 for entry in MANIFEST} | {
     "seg_01_house_goal": "b3dadbaeb797824282cc74b8cf0013bd088a7358f0067e2d5b5f3854db4f09bf",
     "validate_rival_text": "5347edf9a63c170cfe341b42a3b3fa164ba08bc8f1e385e7e38849fa095e4473",
+    "validate_potion": "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
 }
+ROUTE1 = (3, 19)
 
 
 @pytest.fixture
@@ -39,14 +51,25 @@ def firered() -> Iterator[MgbaBackend]:
         backend.close()
 
 
-def load(backend: MgbaBackend, name: str) -> Game:
+@pytest.fixture
+def maps() -> dict[tuple[int, int], MapGrid]:
+    try:
+        return load_maps()
+    except FileNotFoundError:
+        pytest.skip("Needs the map data: uv run python scripts/fetch_maps.py")
+
+
+def load(
+    backend: MgbaBackend, name: str, maps: dict[tuple[int, int], MapGrid] | None = None
+) -> Game:
     path = ROOT / "data/states" / f"{name}.state"
     if not path.is_file():
         pytest.skip(f"Needs {path.name}")
     data = path.read_bytes()
     assert hashlib.sha256(data).hexdigest() == HASHES[name]
     backend.load_state(data)
-    return Game(backend, FireRedReader(backend.rom.sha1), FireRedField(backend.rom.sha1))
+    field = FireRedField(backend.rom.sha1, maps)
+    return Game(backend, FireRedReader(backend.rom.sha1), field, io.StringIO())
 
 
 def test_decode_skips_control_codes_and_stops_at_the_terminator() -> None:
@@ -120,3 +143,42 @@ def test_a_yes_no_menu_is_a_choice(firered: MgbaBackend) -> None:
     assert result.text.startswith("Hm! SQUIRTLE is your choice.")
     assert game.field.choice(firered)
     assert not game.read().text_box_open
+
+
+@pytest.mark.rom
+def test_navigate_to_jumps_a_route_1_ledge_without_a_failed_step(
+    firered: MgbaBackend, maps: dict[tuple[int, int], MapGrid]
+) -> None:
+    """validate_potion stands at (7, 28), above the ledges on row 31. (3, 32) is below them, and
+    every shortest way there lands on it from the ledge at (3, 31), out of the grass."""
+    game = load(firered, "validate_potion", maps)
+    state = game.read()
+    assert state.location == (*ROUTE1, 7, 28)
+    plan = shortest_path(game.field.walkable(firered), (7, 28), (3, 32), game.field.ledges(state))
+    assert plan is not None
+    tiles = [(7, 28), *(landing for _, landing in plan)]
+    jumps = [(a, b) for a, b in itertools.pairwise(tiles) if b[1] - a[1] == 2]
+    assert [(a[1], b[1]) for a, b in jumps] == [(30, 32)]
+    result = navigate_to(game, 3, 32)
+    assert (result.reason, game.read().location) == ("arrived", (*ROUTE1, 3, 32))
+    assert isinstance(game.trace, io.StringIO)
+    pressed = [json.loads(line)["state"] for line in game.trace.getvalue().splitlines()]
+    # Every press landed on the plan or turned in place: no step failed, so nothing was replanned.
+    assert {(state["x"], state["y"]) for state in pressed} <= set(tiles)
+    # Seven steps on the plan and one press that only turned the player.
+    assert (len(plan), result.presses) == (7, 8)
+
+
+@pytest.mark.rom
+def test_navigate_to_plans_around_ledges_going_up(
+    firered: MgbaBackend, maps: dict[tuple[int, int], MapGrid]
+) -> None:
+    game = load(firered, "validate_potion", maps)
+    plan = shortest_path(
+        game.field.walkable(firered), (2, 32), (2, 29), game.field.ledges(game.read())
+    )
+    assert plan is not None
+    # Up through the gap in row 31 at x 6 to 8, never across a ledge.
+    crossing = [landing for _, landing in plan if landing[1] == 31]
+    assert len(crossing) == 1
+    assert 6 <= crossing[0][0] <= 8

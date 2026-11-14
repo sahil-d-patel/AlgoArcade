@@ -35,6 +35,7 @@ from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeField, FakeReader
 from algoarcade.games.firered.field import FireRedField
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
+from algoarcade.games.firered.maps import load_maps
 from algoarcade.games.firered.reader import FireRedReader
 from algoarcade.rom import identify
 
@@ -48,7 +49,13 @@ logger = logging.getLogger(__name__)
 
 def firered() -> Game:
     backend = MgbaBackend(DATA / "roms" / "firered.gba")
-    return Game(backend, FireRedReader(backend.rom.sha1), FireRedField(backend.rom.sha1))
+    try:
+        maps = load_maps()
+    except FileNotFoundError as error:
+        logger.warning("navigate_to will treat ledges as walls: %s", error)
+        maps = None
+    field = FireRedField(backend.rom.sha1, maps)
+    return Game(backend, FireRedReader(backend.rom.sha1), field)
 
 
 GAMES: dict[str, Callable[[], Game]] = {
