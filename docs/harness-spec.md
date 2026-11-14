@@ -208,7 +208,7 @@ The six scripted exploit policies are in `tests/test_exploits.py`, and `uv run p
 Rules:
 
 - Every component returns exactly zero on the reset step and on a no-op step, with two exceptions. A progress term (events, level, badge, milestone) pays on a no-op step that is the second of the two reads confirming the previous step's rise, and on no other no-op step; its episode total never exceeds the rise from its first best to its highest confirmed count. The penalties `time` and `anti_spam` never pay and are off by default. `time` charges every step; `anti_spam` charges a step where `text_progress` did not change while `text_box_open` held, including a reset into one.
-- Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
+- Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window. An archive start's set begins with the cell's visited set, so walking back along the archived path pays nothing.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
 - The four progress terms (events, level, badge, milestone) pay a rise only once two consecutive reads agree on it: a step pays the rise from the best to the lower of its two reads. A real rise pays one step late, on the confirming read, even if that step changed nothing. A count that reads high for one frame while a save block moves pays nothing. A rise on the step budget's last step is never confirmed, so an episode loses at most one step's pay of each term: `max_rise`, or `cap` if lower.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
@@ -223,7 +223,7 @@ AlgoArcadeEnv is the Gymnasium environment, in `src/algoarcade/envs/env.py`. It 
 | Decision length | 24 frames: hold 8, release 16 |
 | Actions | `Discrete(6)`: 0 up, 1 down, 2 left, 3 right, 4 A, 5 B. `start=True` appends Start, then `noop=True` appends a no-op that holds nothing for 24 frames. |
 | Episode end | The step budget only. `truncated` is True on the budget's last step; `terminated` is always False. |
-| Reset | Loads the start state, then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
+| Reset | Loads the start state, or the cell handed over by `set_next_start` (Archive resets, below), then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
 | Not ready | A read that raises `StateNotReady` is retried one frame later, up to `NOT_READY_FRAMES` (8) times, and then propagates out of `reset` or `step`. The env never substitutes a state. A retry adds frames only to that step, so the same seed and actions still replay the same episode. |
 
 Reset noise does little. A 24-frame step absorbs most of a 0 to 7 frame offset, so the offset changes outcomes only through the game's RNG, such as a wild encounter. With the actions fixed (`scripts/env_trace.py --action-seed 0`), 128 steps from reset seeds 0 to 9 gave one location trace and one return from `s1.state` (13.0) and from `seg_02_pallet.state` (11.0), and two location traces from `seg_04_route1.state`. On `s1.state` the ten runs still ended in 4 different EWRAM states. So a deterministic evaluation from a state with no encounters nearby, such as these two, replays the same episode; TRN-05 and ENV-09 should not count on reset noise for variety there.
@@ -247,8 +247,9 @@ The observation is a `Dict` of two float32 boxes:
 | `reward/<name>` | Each configured component's raw value, before its weight. The logs store it as `reward_<name>`. The step's reward is the sum of weight times raw value. |
 | `location` | The GameState's location after the decision. For FireRed `(map_group, map_num, x, y)`. |
 | `milestone_count` | The episode's best `milestone_count`: the highest value two consecutive reads agreed on, the reset read included, so a rise shows one step late and the reset step reports 0. Present when the GameState has the field; Super Mario Land has none. |
+| `cell` | Only with `archive=True`, on the first step of an episode that reaches a cell: a `Cell` with its key, the save state after that step and the episode's visited set. |
 
-`reset` returns `location` and `milestone_count` only. ENV-09 adds a save state for the archive.
+`reset` returns `location`, `milestone_count` and `archive_start`, True when the reset loaded an archived cell.
 
 Observation modes:
 
@@ -285,6 +286,18 @@ Every FireRed state has text speed fast and battle animations off. The reader as
 Super Mario Land's manifest is `games/super_mario_land/manifest.py`, and `scripts/capture_sml_states.py` regenerates `level_1_1` from power-on; two captures gave the same bytes. One life's timer lasts about 675 decisions, so 2,048 covers three. The demo runs 1-1 to its end in about 80.
 
 Evaluation always starts from the fixed state with the archive off, even when training used archive resets.
+
+### Archive resets
+
+Training can start episodes from places the run already reached (ENV-09). `--archive` turns it on; it is off by default, so the baseline is archive-off.
+
+- A cell's key is `(map_group, map_num, x // 4, y // 4, badge_flags, milestone_count)`, where `milestone_count` is the episode's best as in `info`. Super Mario Land and the fake game key 0 for the badge byte, and Super Mario Land 0 for milestones. The 4-tile cell is a guess.
+- The env built with `archive=True` reports a cell the first time an episode reaches it, in step info (AlgoArcadeEnv, above).
+- `ArchiveResets` (`training/archive.py`) wraps the SB3 vector env in the main process. It keeps one archive; a cell keeps the first state that reached it, its visited set and a selection count, and is never replaced. A vector env resets inside the worker, so each worker's next start is chosen ahead of time: as soon as the archive has a cell, and after each reset. With probability `archive_p` (default 0.5, a guess) it draws a cell with weight `1 / sqrt(1 + selections)` and sends it with `env_method("set_next_start", cell)`; otherwise the worker loads the fixed start state. The `Archive` class does not depend on SB3, for the TRN-07 trainer.
+- Rewards: reset pays nothing. Explore starts from the cell's visited set. The progress terms take their best from the loaded state on the first step, as on any reset, so a badge or milestone the loaded state holds does not pay again. One gap remains from that rule: a reset read up to `max_rise` low becomes the best, so a cell saved on a frame where a save block moves can pay one rise once. `test_exploit_archive_farming` resets 100 times into a cell holding progress and walks the archived path; it pays 0.
+- The eval env is built with `archive=False`: it reports no cells and ignores `set_next_start`. The runner still wraps it in `ArchiveResets` because `sync_envs_normalization` needs the training and eval stacks to match.
+- Every rollout logs `rollout/archive_share` (archive starts over all training resets so far), `rollout/archive_cells` and `rollout/archive_bytes_per_cell` to `progress.csv`. Each episode logs `archive_start`.
+- An mGBA save state is 528,448 bytes uncompressed, so the archive holds about 0.5 MB per cell. The archive is not kept between runs.
 
 ## Logging schema
 
