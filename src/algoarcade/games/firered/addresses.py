@@ -29,6 +29,8 @@ ADDRESSES = {
         "sTextPrinters": Address(0x02020034, SOURCE_COMMIT),
         "sGlobalScriptContext": Address(0x03000EB0, SOURCE_COMMIT),
         "WaitForAorBPress": Address(wait_for_a_or_b, SOURCE_COMMIT),
+        "VMap": Address(0x03005040, SOURCE_COMMIT),
+        "gBackupMapData": Address(0x02031DFC, SOURCE_COMMIT),
     }
     for sha1, wait_for_a_or_b in (
         ("41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc", 0x0806B898),
