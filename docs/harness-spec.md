@@ -341,7 +341,7 @@ Written every Nth step: each environment writes the row of a decision whose `epi
 | wall_clock_s | Decimal | Seconds since the run started |
 | episode_id | Integer | Counts from 0 within each environment |
 | episode_step | Integer | Counts from 1 at the episode's first decision |
-| action | Small integer | Index into the environment's action set |
+| action | Small integer | Index into the environment's action set. LLM rows hold the Button value instead (A 0 to L 9), so pooled analyses filter by `algorithm` (decisions, 2026-11-13) |
 | map_group, map_num, x, y | Small integer | The location after the decision |
 | in_battle | Boolean | |
 | milestone_count | Small integer | The env's episode best after this decision, as in `info` |
@@ -379,7 +379,7 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 | milestone_count | Small integer | At the episode's end: the env's episode best, as in `info` |
 | start_state | Text | The manifest name |
 | archive_start | Boolean | Whether the start came from the archive |
-| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap` |
+| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap`, and `truncated` when the model stops calling tools (decisions, 2026-11-13) |
 | goal_reached | Boolean | Whether the start state's goal became true at any point in the episode. False when the start state has no goal |
 | goal_step | Integer, nullable | The `episode_step` at which the goal first became true. Null when it never did |
 | is_eval | Boolean | An evaluation episode: fixed start state, archive off |

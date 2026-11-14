@@ -21,8 +21,9 @@ from algoarcade.games.base import StateNotReady, StateReader
 # challenge in the lab closed after 5.
 NAVIGATE_PRESSES = 400
 DIALOGUE_PRESSES = 60
-# Live collision does not show ledges or one-way tiles, so a step can fail. Each failure marks
-# the tile and plans again, this many times at most. A guess.
+# Ledges come from ENV-10's map data when it is fetched; other one-way tiles do not show in live
+# collision, so a step can still fail. Each failure marks the tile and plans again, this many
+# times at most. A guess.
 PLANS = 8
 STEPS = {Button.UP: (0, -1), Button.DOWN: (0, 1), Button.LEFT: (-1, 0), Button.RIGHT: (1, 0)}
 
@@ -97,7 +98,7 @@ def shortest_path(
     goal: tuple[int, int],
     ledges: dict[tuple[int, int], Button] | None = None,
 ) -> list[tuple[Button, tuple[int, int]]] | None:
-    """A* over the walkable tiles and down `ledges`: the fewest presses, and among those the
+    """A* over the walkable tiles and down `ledges`: the fewest steps, and among those the
     fewest turns, since on FireRed a press in a new direction can only turn the player. Each step
     is its button and the tile it lands on. None when there is no path."""
     ledges = ledges or {}

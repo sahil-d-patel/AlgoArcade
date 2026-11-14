@@ -242,14 +242,17 @@ class ToolRound:
 
 
 def capped(name: str, arguments: dict[str, Any], budget: int) -> dict[str, Any]:
-    """The call with no more presses than `budget`. Anything but a list of buttons or a whole
-    number of presses goes through untouched so the server rejects it."""
+    """The call with no more presses than `budget`. A button list is cut to the budget; a press
+    count is always sent as a whole number no larger than it, since the server converts "50" and
+    50.0 to 50. Anything else goes through untouched so the server rejects it."""
+    budget = max(budget, 0)
     if name == "press" and isinstance(arguments.get("buttons"), list):
         return arguments | {"buttons": arguments["buttons"][:budget]}
     if name in PRESS_CAPS:
-        cap = arguments.get("max_presses", PRESS_CAPS[name])
-        if isinstance(cap, int):
-            return arguments | {"max_presses": min(cap, budget)}
+        cap = arguments.get("max_presses")
+        if not isinstance(cap, int) or isinstance(cap, bool):
+            cap = PRESS_CAPS[name]
+        return arguments | {"max_presses": min(cap, budget)}
     return arguments
 
 

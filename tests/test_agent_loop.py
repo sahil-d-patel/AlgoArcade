@@ -25,6 +25,7 @@ from algoarcade.agent.loop import (
     Prices,
     Run,
     Step,
+    capped,
     json_bytes,
     project,
     report,
@@ -432,6 +433,20 @@ def test_navigate_to_keeps_a_smaller_cap_of_its_own() -> None:
     model = StubModel([call("navigate_to", x=8, y=4, max_presses=2), END])
     result = attempt(model, level=2, max_actions=5)
     assert (result.outcome, result.actions) == ("end_turn", 2)
+
+
+@pytest.mark.parametrize("max_presses", ["50", 50.0, True])
+def test_a_press_count_that_is_not_an_int_still_stops_at_the_cap(max_presses: object) -> None:
+    model = StubModel([call("navigate_to", x=8, y=4, max_presses=max_presses), END])
+    logged: list[Step] = []
+    result = attempt(model, record=logged.append, level=2, max_actions=3)
+    assert result.actions <= 3
+    assert len(logged[0].buttons) <= 3
+
+
+def test_capped_never_presses_past_a_spent_budget() -> None:
+    assert capped("press", {"buttons": ["A"] * 6}, -5) == {"buttons": []}
+    assert capped("advance_dialogue", {"max_presses": "60"}, 2) == {"max_presses": 2}
 
 
 def test_a_run_logs_the_attempt_in_the_frozen_schema(tmp_path: Path) -> None:

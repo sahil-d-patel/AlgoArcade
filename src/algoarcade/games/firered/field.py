@@ -12,8 +12,8 @@ from algoarcade.games.firered.addresses import ADDRESSES
 from algoarcade.games.firered.maps import MapGrid
 from algoarcade.games.firered.reader import FireRedState
 
-# include/fieldmap.h: VMap holds the map with a 7-tile border on every side, and object
-# coordinates carry the same offset (MAP_OFFSET).
+# include/fieldmap.h: VMap holds the map with a 7-tile border, and object coordinates carry the
+# same offset (MAP_OFFSET). The right border is one wider: MAP_OFFSET_W is MAP_OFFSET * 2 + 1.
 MAP_OFFSET = 7
 # The pinned .sym gives gBackupMapData 0x5000 bytes, gStringVar4 0x3E8 and
 # gDisplayedStringBattle 0x12C.
