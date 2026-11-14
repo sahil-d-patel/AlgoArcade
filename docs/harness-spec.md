@@ -185,6 +185,25 @@ Rules:
 - File-local symbols carry a numeric suffix that differs between builds. Match on the base name.
 - No address enters the code without a symbol name and the commit it came from.
 
+### FireRed map data
+
+RAM holds only the current map and its border, so `src/algoarcade/games/firered/maps.py` builds every map's grid offline from pret/pokefirered at `e93eb12a336fb97df420b0961753d8a3713c9fcc`. `uv run python scripts/fetch_maps.py` fetches the files into `data/pokefirered/`; `DATA.md` lists them.
+
+`load_maps()` returns a `MapGrid` for each map in `map_groups.json`, keyed by (map_group, map_num). Its arrays are indexed [y, x] in the frame of SaveBlock1's x and y:
+
+- `blocks`: the `map.bin` cells. Bits 0 to 9 are the metatile id, 10 and 11 collision, 12 to 15 elevation (`include/global.fieldmap.h`).
+- `behavior`: bits 0 to 8 of the metatile's 32-bit attribute. Ids below 640 read the primary tileset's `metatile_attributes.bin`, the rest the secondary's (`GetAttributeByMetatileIdAndMapLayout`, `src/fieldmap.c`).
+- `blocked`: collision nonzero, or the cell is 0x3FF (`MAPGRID_UNDEFINED`). No map has a 0x3FF cell at this commit.
+- `ledge`: behaviour 0x38 to 0x3B (`MB_JUMP_EAST` to `MB_JUMP_SOUTH`). Ledge cells carry collision 1, so they are also blocked; the player crosses one only by jumping it in its direction.
+- `water`: the surfable behaviours in `sBehaviorSurfable` (`src/metatile_behavior.c`). Water has collision 0.
+- `walkable`: not blocked and not water.
+
+`place(maps)` walks connections breadth-first from Pallet Town (3, 0), placed at (0, 0), and returns each reached map's offset: global (x, y) = local (x, y) + offset. A connection's offset moves the neighbour along the shared edge, x for up and down, y for left and right (`FillNorthConnection` and the others in `src/fieldmap.c`). It places 37 maps: the mainland towns and routes and `MAP_SAFFRON_CITY_CONNECTION`. Every other map is a separate panel: interiors, gyms, Viridian Forest, the 25 Sevii Islands maps, which connect only to each other, and `MAP_SAFFRON_CITY`. Routes 5 to 8 connect to `MAP_SAFFRON_CITY_CONNECTION` instead, and the player enters the city through gatehouse warps.
+
+One connection pair disagrees. Route 6 has `MAP_SAFFRON_CITY_CONNECTION` above it at offset 0, and that map has Route 6 below it at offset 12. The walk places Route 6 from the city side, which Vermilion City's edge to Route 6 agrees with.
+
+`tests/test_firered_maps.py` compares the offline grid with the live buffer on each FireRed manifest state: `VMap.map` points at `gBackupMapData`, and the current map sits at (7, 7) inside it (`InitMapLayoutData`). The test needs 99% of the map's collision to agree; on rev 1 all nine states agree on every cell.
+
 ## Reward registry
 
 A reward component is a small object with a name, a reset step that runs at the start of an episode, and a scoring step. The scoring step looks at the previous GameState and the current one and returns a number. The protocol lives in `src/algoarcade/rewards/base.py`.
@@ -295,7 +314,7 @@ Evaluation always starts from the fixed state with the archive off, even when tr
 
 ## Logging schema
 
-Freezes November 8 under the tag `schema-v1`. It moved from November 1 because ENV-08 was not validated on real memory by then (#20). Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section.
+Frozen under the tag `schema-v1` (November 13; due November 8, moved from November 1 because ENV-08 was not validated on real memory by then, #20). No lane asked for a field before the freeze. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section. A game without a FireRed field logs it as False or 0 rather than null (Super Mario Land logs `in_battle` False and the counts as 0), so an analysis that pools games filters by `env_id`.
 
 Logs are Parquet files under `data/runs/run_id=<id>/<table>/`, one folder per table: `steps`, `visits`, `episodes`, `runs`. Each writing process owns its own files, named `<writer_id>-<n>.parquet`, and rolls to a new file every 100,000 rows by default, because a Parquet file cannot be read until it is closed. The open file is `_<writer_id>-<n>.parquet.inprogress`, so a glob on `*.parquet` and a pyarrow folder read (`pq.read_table`, `ds.dataset`) see only closed files.
 
@@ -442,8 +461,8 @@ Each attempt is also run `<name>` in the logging schema under `data/runs/`, so i
 
 `.mcp.json` at the repo root launches the server through `uv` at L1, so Claude Code and VS Code list `get_state` and `press` after `uv sync`.
 
-## Open questions before the freeze
+## Defaults at the freeze
 
-- Frames per decision: does a 24-frame decision still land menu inputs reliably? OPS-02 checks 8, 16, 24 and 48.
-- Number of environments: 12 or 16 on the training box? Set from the benchmark.
-- Per-step sampling: is every fourth step enough for the reward decomposition chart? Decide before the freeze.
+- Frames per decision: 24 (8 held, 16 released) stays the default. OPS-02's menu check on the Mac moved the cursor on 20 of 20 presses at 8, 16, 24 and 48 frames, so no tested split failed (#52); the box has not been measured.
+- Number of environments: 16 stays the default. On the Mac it gave 1,005 steps/s at 24 frames against 962 for 12, about 4% more, measured with other jobs running (#52). Revisit when OPS-02 runs on the box.
+- Per-step sampling: every fourth decision. The reward decomposition reads each component's episode total from the episodes table, and the visits table counts every step, so neither needs every row.
