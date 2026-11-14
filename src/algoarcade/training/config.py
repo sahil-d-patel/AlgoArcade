@@ -111,9 +111,14 @@ FIRERED = dataclasses.replace(
 # TRN-08's baseline: experiments import it and change one field. The 20 evaluation episodes per
 # seed are TRN-08's. 15M steps is the experiment run length in docs/technical-plan.md, Compute
 # budget (the E1 to E4 row); at 1M every segment scored 0 of 100 (#29). Sampled evaluation is the
-# PM decision of 2026-11-14. tests/training/test_training_config.py pins every field.
+# PM decision of 2026-11-14, as is the 1.5M-step checkpoint interval: ten evaluations per run
+# instead of thirty. tests/training/test_training_config.py pins every field.
 BASELINE_V1 = dataclasses.replace(
-    FIRERED, total_timesteps=15_000_000, eval_episodes=20, eval_deterministic=False
+    FIRERED,
+    total_timesteps=15_000_000,
+    checkpoint_every=1_500_000,
+    eval_episodes=20,
+    eval_deterministic=False,
 )
 
 # TRN-05's Super Mario Land runs: the same PPO values as FireRed, explore on the location, from the

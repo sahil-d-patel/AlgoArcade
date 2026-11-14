@@ -41,7 +41,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "env_id": "firered",
         "total_timesteps": 15_000_000,
         "n_envs": 16,
-        "checkpoint_every": 500_000,
+        "checkpoint_every": 1_500_000,
         "ppo": {
             "learning_rate": 0.0003,
             "n_steps": 2048,
