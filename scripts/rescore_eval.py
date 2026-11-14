@@ -1,6 +1,6 @@
 """Re-score a checkpoint: play its evaluation episodes as runner.evaluate() does and count goals.
 
-    uv run python scripts/rescore_eval.py data/runs/run_id=<id> --step 1015808 --sampled
+    uv run python scripts/rescore_eval.py --run data/runs/run_id=<id> --step 1015808 --sampled
 
 The env and the sampled actions start from the eval seed, through runner.eval_rng, so episode k
 here is the episode `algoarcade.viz.render --eval-episode k` replays. TRN-08 scored the 1M-step
@@ -10,9 +10,11 @@ is written to the run directory.
 
 import dataclasses
 from pathlib import Path
+from typing import Any
 
 import tyro
 from stable_baselines3 import PPO
+from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from algoarcade.training.config import load_config
@@ -28,17 +30,23 @@ def main(run: Path, step: int, episodes: int = 20, sampled: bool = False) -> Non
     env.training = False
     env.seed(config.seed + EVAL_SEED_OFFSET)
     model = PPO.load(checkpoint.with_suffix(".zip"), device="auto")
-    goals = 0
-    obs = env.reset()
-    with eval_rng(config):
-        for _ in range(episodes):
-            reached, done = False, False
-            while not done:
-                action, _ = model.predict(obs, deterministic=config.eval_deterministic)
-                obs, _, dones, infos = env.step(action)
-                reached |= bool(infos[0]["goal"])
-                done = bool(dones[0])
+    goals, reached = 0, False
+
+    def count(local: dict[str, Any], _globals: dict[str, Any]) -> None:
+        nonlocal goals, reached
+        reached |= bool(local["info"]["goal"])
+        if local["done"]:
             goals += reached
+            reached = False
+
+    with eval_rng(config):
+        evaluate_policy(
+            model,
+            env,
+            n_eval_episodes=episodes,
+            deterministic=config.eval_deterministic,
+            callback=count,
+        )
     mode = "sampled" if sampled else "deterministic"
     print(f"{run.name} step {step} {mode}: {goals}/{episodes} reached the goal")
 
