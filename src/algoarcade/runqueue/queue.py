@@ -173,8 +173,12 @@ def attempt(queue_dir: Path) -> bool:
         entry = next((r for r in runs if r["status"] == "queued"), None)
         if entry is None:
             return False
-        entry |= {"status": "running", "attempts": entry["attempts"] + 1, "started": now()}
-        entry["ended"] = ""
+        entry |= {
+            "status": "running",
+            "attempts": entry["attempts"] + 1,
+            "started": now(),
+            "ended": "",
+        }
     name = entry["name"]
     log = log_path(queue_dir, entry)
     log.parent.mkdir(exist_ok=True)
