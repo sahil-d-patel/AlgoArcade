@@ -362,8 +362,8 @@ def test_a_malformed_webhook_url_neither_stops_the_queue_nor_prints(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows ends the trainer through its job")
-@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGHUP])
-def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, number: int) -> None:
+@pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
+def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, name: str) -> None:
     queue_dir = queued(tmp_path, "queued", 0)
     pid_file = tmp_path / "trainer.pid"
     trainer = (
@@ -381,7 +381,7 @@ def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, number: int)
         time.sleep(0.05)
     trainer_pid = int(pid_file.read_text())
 
-    run.send_signal(number)
+    run.send_signal(getattr(signal, name))
     run.wait(timeout=30)
 
     with pytest.raises(ProcessLookupError):
