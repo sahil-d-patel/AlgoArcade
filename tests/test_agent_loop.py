@@ -4,12 +4,14 @@ import copy
 import itertools
 import json
 import sys
+import tempfile
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from mcp import Client, StdioServerParameters
@@ -30,11 +32,12 @@ from algoarcade.agent.loop import (
     run_attempt,
 )
 from algoarcade.agent.server import Game, build, png
-from algoarcade.backends.base import GameBackend
+from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeField, FakeState
 from algoarcade.games.firered.reader import FireRedState, PartyPokemon
+from algoarcade.logs.schema import TABLES
 
 PARAMS = StdioServerParameters(command=sys.executable, args=["-m", "algoarcade.agent.server"])
 USAGE = Usage(
@@ -46,9 +49,11 @@ USAGE = Usage(
 
 
 def press(buttons: object, usage: Usage = USAGE, **arguments: Any) -> Message:
-    block = ToolUseBlock(
-        type="tool_use", id="toolu_1", name="press", input={"buttons": buttons, **arguments}
-    )
+    return call("press", usage, buttons=buttons, **arguments)
+
+
+def call(name: str, usage: Usage = USAGE, **arguments: Any) -> Message:
+    block = ToolUseBlock(type="tool_use", id="toolu_1", name=name, input=arguments)
     return reply([block], "tool_use", usage)
 
 
@@ -81,18 +86,26 @@ class StubModel:
 def attempt(
     model: StubModel,
     record: Callable[[Step], None] = lambda _: None,
-    server: StdioServerParameters | MCPServer[Game] = PARAMS,
+    game: Callable[[], Game] | None = None,
     **settings: Any,
 ) -> Attempt:
-    """`settings` are AttemptConfig fields; the caps default to 100 actions and $100."""
+    """`settings` are AttemptConfig fields; the caps default to 100 actions and $100. Without
+    `game` the fake game runs over stdio at the config's level; with it, in this process."""
     caps: dict[str, Any] = {"max_actions": 100, "max_dollars": 100.0}
     config = AttemptConfig(**(caps | settings))
 
-    async def go() -> Attempt:
+    async def go(trace: Path) -> Attempt:
+        server: StdioServerParameters | MCPServer[Game]
+        if game is None:
+            arguments = ["--level", str(config.level), "--trace", str(trace)]
+            server = StdioServerParameters(command=PARAMS.command, args=[*PARAMS.args, *arguments])
+        else:
+            server = build(game, config.level, trace)
         async with Client(server, raise_exceptions=True) as client:
-            return await run_attempt(model, client, config, SEGMENTS["fake"], record)
+            return await run_attempt(model, client, config, SEGMENTS["fake"], trace, record)
 
-    return asyncio.run(go())
+    with tempfile.TemporaryDirectory() as folder:
+        return asyncio.run(go(Path(folder) / "presses.jsonl"))
 
 
 def test_stops_at_the_action_cap_and_presses_nothing_past_it() -> None:
@@ -127,8 +140,9 @@ class NeverReady:
 def test_presses_into_a_state_that_is_not_ready_still_count() -> None:
     model = StubModel([press(["RIGHT", "DOWN"]), END])
     logged: list[Step] = []
-    server = build(lambda: Game(FakeBackend(), NeverReady(), FakeField()))
-    result = attempt(model, record=logged.append, server=server)
+    result = attempt(
+        model, record=logged.append, game=lambda: Game(FakeBackend(), NeverReady(), FakeField())
+    )
     assert result.actions == 2
     assert [step.buttons for step in logged] == [["RIGHT", "DOWN"], []]
     assert logged[0].state is None
@@ -251,7 +265,9 @@ def test_a_run_logs_every_request_and_reports_per_action(tmp_path: Path) -> None
         cache_read_input_tokens=1500,
     )
     model = StubModel([press(["RIGHT"], usage), press(["RIGHT", "A"], usage)])
-    settings = Run(name="pilot", out=tmp_path, max_actions=20, max_dollars=1.0)
+    settings = Run(
+        name="pilot", out=tmp_path, runs=tmp_path / "runs", max_actions=20, max_dollars=1.0
+    )
     result = asyncio.run(run(settings, model))
 
     lines = (tmp_path / "pilot" / "steps.jsonl").read_text().splitlines()
@@ -392,3 +408,60 @@ def test_a_run_that_pressed_nothing_projects_one_request_per_action() -> None:
 def test_no_projection_from_a_single_request() -> None:
     result = attempt(StubModel([press(["DOWN"]), END]))
     assert project(result.steps[:1], Prices()) is None
+
+
+def test_level_0_is_graded_from_the_trace_it_cannot_see() -> None:
+    model = StubModel([press(["RIGHT", "RIGHT", "A"])])
+    result = attempt(model, level=0)
+    assert (result.outcome, result.actions, result.goal_step) == ("goal", 3, 3)
+    assert len(model.requests) == 1
+
+
+def test_presses_inside_navigate_to_count_and_stop_at_the_cap() -> None:
+    model = StubModel([call("navigate_to", x=8, y=4), END])
+    logged: list[Step] = []
+    result = attempt(model, record=logged.append, level=2, max_actions=5)
+    assert (result.outcome, result.actions) == ("action_cap", 5)
+    assert len(logged[0].buttons) == 5
+    assert logged[0].state is not None
+    # Five steps along a shortest path from (1, 1).
+    assert logged[0].state["x"] - 1 + logged[0].state["y"] - 1 == 5
+
+
+def test_navigate_to_keeps_a_smaller_cap_of_its_own() -> None:
+    model = StubModel([call("navigate_to", x=8, y=4, max_presses=2), END])
+    result = attempt(model, level=2, max_actions=5)
+    assert (result.outcome, result.actions) == ("end_turn", 2)
+
+
+def test_a_run_logs_the_attempt_in_the_frozen_schema(tmp_path: Path) -> None:
+    model = StubModel([press(["RIGHT", "DOWN"]), END])
+    settings = Run(
+        name="quit", out=tmp_path, runs=tmp_path / "runs", level=0, max_actions=9, max_dollars=1.0
+    )
+    asyncio.run(run(settings, model))
+    logs = tmp_path / "runs" / "run_id=quit"
+    tables = {name: pq.read_table(logs / name).to_pylist() for name in TABLES}
+    assert [row["status"] for row in tables["runs"]] == ["running", "finished"]
+    assert tables["runs"][1]["env_steps"] == 2
+    (episode,) = tables["episodes"]
+    # The model ended its turn, which the frozen end_reason set has no value for.
+    assert episode["end_reason"] == "truncated"
+    assert (episode["episode_length"], episode["goal_reached"], episode["goal_step"]) == (
+        2,
+        False,
+        None,
+    )
+    assert (episode["llm_tool_level"], episode["llm_cost_usd"]) == (0, pytest.approx(0.002))
+    assert [(row["action"], row["x"], row["y"]) for row in tables["steps"]] == [
+        (Button.RIGHT.value, 2, 1),
+        (Button.DOWN.value, 2, 2),
+    ]
+    assert sum(row["visits"] for row in tables["visits"]) == 2
+
+
+def test_a_run_refuses_a_run_id_already_logged(tmp_path: Path) -> None:
+    (tmp_path / "runs" / "run_id=taken").mkdir(parents=True)
+    settings = Run(name="taken", out=tmp_path, runs=tmp_path / "runs", max_actions=1, max_dollars=1)
+    with pytest.raises(FileExistsError):
+        asyncio.run(run(settings, StubModel([END])))

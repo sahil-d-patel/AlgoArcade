@@ -78,7 +78,7 @@ def test_pallet_town_walkability(
 def test_navigate_to_a_tile_17_away_on_seg_02(firered: MgbaBackend) -> None:
     game = load(firered, "seg_02_pallet")
     result = navigate_to(game, 5, 8)
-    state = game.reader.read(firered)
+    state = game.read()
     assert result.reason == "arrived"
     assert (state.location, result.presses) == ((3, 0, 5, 8), 20)
 
@@ -91,7 +91,7 @@ def test_a_door_is_reachable_and_warps_on_its_own(firered: MgbaBackend) -> None:
     result = navigate_to(game, 16, 13)
     assert (result.reason, result.presses) == ("arrived", 1)
     firered.step(120)
-    assert game.reader.read(firered).location[:2] == (4, 3)  # MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB
+    assert game.read().location[:2] == (4, 3)  # MAP_PALLET_TOWN_PROFESSOR_OAKS_LAB
 
 
 @pytest.mark.rom
@@ -103,7 +103,7 @@ def test_advance_dialogue_reads_the_rivals_challenge(firered: MgbaBackend) -> No
     )
     assert result.reason == "closed"
     assert 0 < result.presses < DIALOGUE_PRESSES
-    assert not game.reader.read(firered).text_box_open
+    assert not game.read().text_box_open
 
 
 @pytest.mark.rom
@@ -112,11 +112,11 @@ def test_a_yes_no_menu_is_a_choice(firered: MgbaBackend) -> None:
     game = load(firered, "seg_01_house_goal")
     Player(firered).run("tRx6 tUx7 tD tRx3 U")
     firered.press([Button.A])
-    state = game.reader.read(firered)
+    state = game.read()
     assert state.text_box_open
     assert not game.field.choice(firered)
     result = advance_dialogue(game)
     assert result.reason == "choice"
     assert result.text.startswith("Hm! SQUIRTLE is your choice.")
     assert game.field.choice(firered)
-    assert not game.reader.read(firered).text_box_open
+    assert not game.read().text_box_open
