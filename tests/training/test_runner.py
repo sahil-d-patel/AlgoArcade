@@ -23,6 +23,7 @@ SMOKE = dataclasses.replace(
     total_timesteps=2_000,
     n_envs=2,
     checkpoint_every=1_000,
+    eval_every=1_000,
     eval_episodes=2,
     ppo=dataclasses.replace(CARTPOLE.ppo, n_steps=250, batch_size=100),
 )

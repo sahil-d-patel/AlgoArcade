@@ -1,5 +1,6 @@
 """The runner on the fake game: Parquet logs, normalisation statistics and checkpoint replay."""
 
+import csv
 import dataclasses
 import time
 from functools import partial
@@ -34,6 +35,7 @@ FAKE = dataclasses.replace(
     total_timesteps=512,
     n_envs=2,
     checkpoint_every=256,
+    eval_every=256,
     eval_episodes=1,
     reward_weights={"events": 1.0, "explore": 0.1},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
@@ -151,6 +153,23 @@ def test_a_sampled_evaluation_plays_different_episodes(
     episodes = pq.read_table(train(config) / "episodes").to_pylist()
     evals = {(e["episode_return"], e["unique_tiles"]) for e in episodes if e["is_eval"]}
     assert len(evals) == distinct
+
+
+def test_every_checkpoint_is_saved_and_every_eval_every_steps_evaluated(tmp_path: Path) -> None:
+    # Four rollouts of 128 steps: checkpoints at 128, 256, 384 and the final 512. Evaluations at
+    # 256, the one multiple of eval_every, and at the final checkpoint, which always evaluates.
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, checkpoint_every=128, eval_every=256)
+    run_dir = train(config)
+    assert sorted(p.name for p in (run_dir / "checkpoints").glob("*.zip")) == [
+        "step_128.zip",
+        "step_256.zip",
+        "step_384.zip",
+        "step_512.zip",
+    ]
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [256, 512]
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [256, 512]
 
 
 def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path) -> None:

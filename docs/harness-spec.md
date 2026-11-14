@@ -405,7 +405,7 @@ Two rows per run, because a Parquet file cannot be updated in place. The start r
 
 ### Checkpoints
 
-Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. Checkpoints and per-step logs are never deleted before the showcase.
+Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. A checkpoint is evaluated when its step is a multiple of `eval_every`, and the final checkpoint always is; `BASELINE_V1` evaluates every 1.5M steps (decisions.md, 2026-11-14). Checkpoints and per-step logs are never deleted before the showcase.
 
 ## Conformance tests
 

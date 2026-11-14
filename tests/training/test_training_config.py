@@ -41,7 +41,8 @@ def test_baseline_v1_pins_every_field() -> None:
         "env_id": "firered",
         "total_timesteps": 15_000_000,
         "n_envs": 16,
-        "checkpoint_every": 1_500_000,
+        "checkpoint_every": 500_000,
+        "eval_every": 1_500_000,
         "ppo": {
             "learning_rate": 0.0003,
             "n_steps": 2048,
@@ -74,5 +75,13 @@ def test_baseline_v1_pins_every_field() -> None:
 
 
 @pytest.mark.parametrize("name", [n for n in PRESETS if n != "baseline_v1"])
-def test_other_presets_evaluate_deterministically(name: str) -> None:
-    assert PRESETS[name][1].eval_deterministic is True
+def test_other_presets_evaluate_deterministically_at_every_checkpoint(name: str) -> None:
+    config = PRESETS[name][1]
+    assert config.eval_deterministic is True
+    assert config.eval_every == config.checkpoint_every
+
+
+@pytest.mark.parametrize("eval_every", [0, 750_000, -500_000])
+def test_eval_every_must_be_a_positive_multiple_of_checkpoint_every(eval_every: int) -> None:
+    with pytest.raises(ValueError, match="eval_every"):
+        dataclasses.replace(BASELINE_V1, eval_every=eval_every)

@@ -28,6 +28,7 @@ import pyarrow as pa
 import tyro
 from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -60,12 +61,11 @@ def build_model(config: TrainConfig, env: VecEnv) -> PPO:
 
 
 class CheckpointEval(BaseCallback):
-    """Every `every` env steps and at the end: save a checkpoint, evaluate it, append to eval.csv.
+    """Every checkpoint_every env steps and at the end, save a checkpoint. Evaluate it through
+    evaluate() when its scheduled step is a multiple of eval_every, and always at the end.
 
     With VecNormalize, its statistics are saved beside the checkpoint as step_<n>.pkl and copied
-    to the eval env, which never updates them. The eval env is reseeded before each evaluation,
-    so with eval_deterministic every checkpoint plays the same episodes. Sampled actions come from
-    torch's generator, which training advances too, so a run replays only as a whole.
+    to the eval env, which never updates them.
     _on_step runs during a rollout, before that rollout's update, so the final checkpoint waits
     for _on_training_end; a periodic one in the last rollout would miss the last update.
 
@@ -87,8 +87,10 @@ class CheckpointEval(BaseCallback):
             if "continues" in info:
                 self.continues[i] = info["continues"]
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
+            # The scheduled step, not num_timesteps, which can overshoot it by up to n_envs - 1.
+            due = self.next_at % self.config.eval_every == 0
             self.next_at += self.config.checkpoint_every
-            self.checkpoint()
+            self.checkpoint(evaluate_it=due)
         return True
 
     def _on_rollout_end(self) -> None:
@@ -96,40 +98,63 @@ class CheckpointEval(BaseCallback):
             self.logger.record("rollout/continues", sum(self.continues.values()))
 
     def _on_training_end(self) -> None:
-        self.checkpoint()
+        self.checkpoint(evaluate_it=True)
         self.logger.dump(self.num_timesteps)
 
-    def checkpoint(self) -> None:
+    def checkpoint(self, *, evaluate_it: bool) -> None:
         path = self.run_dir / "checkpoints" / f"step_{self.num_timesteps}"
         self.model.save(path.with_suffix(".zip"))
         normalize = self.model.get_vec_normalize_env()
         if normalize is not None:
             normalize.save(str(path.with_suffix(".pkl")))
+        if not evaluate_it:
+            return
+        if normalize is not None:
             sync_envs_normalization(self.training_env, self.eval_env)
-        self.eval_env.seed(self.config.seed + EVAL_SEED_OFFSET)
-        returns, _ = evaluate_policy(
-            self.model,
-            self.eval_env,
-            n_eval_episodes=self.config.eval_episodes,
-            deterministic=self.config.eval_deterministic,
-            return_episode_rewards=True,
+        mean = evaluate(
+            self.model, self.eval_env, self.config, self.run_dir, self.num_timesteps, self.start
         )
-        mean = float(np.mean(returns))
         self.logger.record("eval/mean_return", mean)
-        path = self.run_dir / "eval.csv"
-        new = not path.exists()
-        with path.open("a", newline="") as f:
-            writer = csv.DictWriter(f, EVAL_FIELDS)
-            if new:
-                writer.writeheader()
-            writer.writerow(
-                {
-                    "step": self.num_timesteps,
-                    "mean_return": mean,
-                    "std_return": float(np.std(returns)),
-                    "wall_time_s": round(time.time() - self.start, 1),
-                }
-            )
+
+
+def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to write it
+    model: BaseAlgorithm,
+    eval_env: VecEnv,
+    config: TrainConfig,
+    run_dir: Path,
+    step: int,
+    start: float,
+) -> float:
+    """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
+    and return the mean return. TRN-07's trainer evaluates through this function too.
+
+    The eval env is reseeded first, so with eval_deterministic every evaluation plays the same
+    episodes. Sampled actions come from torch's generator, which training advances too, so a run
+    replays only as a whole."""
+    eval_env.seed(config.seed + EVAL_SEED_OFFSET)
+    returns, _ = evaluate_policy(
+        model,
+        eval_env,
+        n_eval_episodes=config.eval_episodes,
+        deterministic=config.eval_deterministic,
+        return_episode_rewards=True,
+    )
+    mean = float(np.mean(returns))
+    path = run_dir / "eval.csv"
+    new = not path.exists()
+    with path.open("a", newline="") as f:
+        writer = csv.DictWriter(f, EVAL_FIELDS)
+        if new:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "step": step,
+                "mean_return": mean,
+                "std_return": float(np.std(returns)),
+                "wall_time_s": round(time.time() - start, 1),
+            }
+        )
+    return mean
 
 
 class WandbOutput(KVWriter):

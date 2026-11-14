@@ -37,7 +37,10 @@ class TrainConfig:
     """Total env steps across all environments. PPO rounds up to a whole rollout."""
     n_envs: int
     checkpoint_every: int
-    """Env steps between checkpoints. Each checkpoint is evaluated."""
+    """Env steps between checkpoints. Every checkpoint is saved."""
+    eval_every: int
+    """Env steps between evaluations, a multiple of checkpoint_every. The final checkpoint is
+    always evaluated."""
     ppo: PPOConfig
     norm_obs: bool
     norm_reward: bool
@@ -62,6 +65,13 @@ class TrainConfig:
     arm: str = ""
     """Set by the run queue. Logged in the runs table."""
 
+    def __post_init__(self) -> None:
+        if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:
+            raise ValueError(
+                f"eval_every {self.eval_every} is not a positive multiple of checkpoint_every "
+                f"{self.checkpoint_every}"
+            )
+
 
 def save_config(config: TrainConfig, path: Path) -> None:
     path.write_text(json.dumps(dataclasses.asdict(config), indent=2, default=str) + "\n")
@@ -81,6 +91,7 @@ BASELINE = TrainConfig(
     total_timesteps=15_000_000,
     n_envs=16,
     checkpoint_every=500_000,
+    eval_every=500_000,
     ppo=PPOConfig(
         learning_rate=0.0003,
         n_steps=2048,
@@ -111,12 +122,13 @@ FIRERED = dataclasses.replace(
 # TRN-08's baseline: experiments import it and change one field. The 20 evaluation episodes per
 # seed are TRN-08's. 15M steps is the experiment run length in docs/technical-plan.md, Compute
 # budget (the E1 to E4 row); at 1M every segment scored 0 of 100 (#29). Sampled evaluation is the
-# PM decision of 2026-11-14, as is the 1.5M-step checkpoint interval: ten evaluations per run
-# instead of thirty. tests/training/test_training_config.py pins every field.
+# PM decision of 2026-11-14, as is evaluating every third checkpoint: ten evaluations per run
+# instead of thirty, with a checkpoint still saved every 500,000 steps.
+# tests/training/test_training_config.py pins every field.
 BASELINE_V1 = dataclasses.replace(
     FIRERED,
     total_timesteps=15_000_000,
-    checkpoint_every=1_500_000,
+    eval_every=1_500_000,
     eval_episodes=20,
     eval_deterministic=False,
 )
@@ -142,6 +154,7 @@ CARTPOLE = TrainConfig(
     total_timesteps=100_000,
     n_envs=8,
     checkpoint_every=10_000,
+    eval_every=10_000,
     ppo=PPOConfig(
         learning_rate=0.001,
         n_steps=32,
@@ -163,6 +176,7 @@ ACROBOT = TrainConfig(
     total_timesteps=500_000,
     n_envs=16,
     checkpoint_every=50_000,
+    eval_every=50_000,
     ppo=PPOConfig(
         learning_rate=0.0003,
         n_steps=256,
