@@ -305,7 +305,7 @@ Every FireRed state has text speed fast and battle animations off. The reader as
 
 Super Mario Land's manifest is `games/super_mario_land/manifest.py`, and `scripts/capture_sml_states.py` regenerates `level_1_1` from power-on; two captures gave the same bytes. One life's timer lasts about 675 decisions, so 2,048 covers three. The demo runs 1-1 to its end in about 80.
 
-Evaluation always starts from the fixed state with the archive off, even when training used archive resets.
+Evaluation always starts from the fixed state with the archive off, even when training used archive resets. A success rate comes from sampled actions (`eval_deterministic` False, as in `BASELINE_V1`), because from a segment's start state the policy's argmax replays one episode: in TRN-08's 1M-step runs, all 20 evaluation episodes at each of 30 checkpoints were identical. The other presets keep the argmax (decisions.md, 2026-11-14).
 
 ## Logging schema
 
