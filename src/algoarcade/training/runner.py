@@ -20,11 +20,14 @@ import json
 import socket
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import torch
 import tyro
 from gymnasium import spaces
 from stable_baselines3 import PPO
@@ -117,6 +120,15 @@ class CheckpointEval(BaseCallback):
         self.logger.record("eval/mean_return", mean)
 
 
+@contextmanager
+def eval_rng(config: TrainConfig) -> Iterator[None]:
+    """Torch's generators, CPU and every CUDA device, seeded from the eval seed and restored after.
+    Sampled actions draw from them; without the fork they would draw from training's stream."""
+    with torch.random.fork_rng(devices=range(torch.cuda.device_count())):
+        torch.manual_seed(config.seed + EVAL_SEED_OFFSET)
+        yield
+
+
 def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to write it
     model: BaseAlgorithm,
     eval_env: VecEnv,
@@ -126,19 +138,18 @@ def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to wr
     start: float,
 ) -> float:
     """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
-    and return the mean return. TRN-07's trainer evaluates through this function too.
-
-    The eval env is reseeded first, so with eval_deterministic every evaluation plays the same
-    episodes. Sampled actions come from torch's generator, which training advances too, so a run
-    replays only as a whole."""
+    and return the mean return. The env and, inside eval_rng, the sampled actions start from the
+    eval seed, so an evaluation never moves training and each episode replays from its
+    checkpoint (algoarcade.viz.render --eval-episode)."""
     eval_env.seed(config.seed + EVAL_SEED_OFFSET)
-    returns, _ = evaluate_policy(
-        model,
-        eval_env,
-        n_eval_episodes=config.eval_episodes,
-        deterministic=config.eval_deterministic,
-        return_episode_rewards=True,
-    )
+    with eval_rng(config):
+        returns, _ = evaluate_policy(
+            model,
+            eval_env,
+            n_eval_episodes=config.eval_episodes,
+            deterministic=config.eval_deterministic,
+            return_episode_rewards=True,
+        )
     mean = float(np.mean(returns))
     path = run_dir / "eval.csv"
     new = not path.exists()
