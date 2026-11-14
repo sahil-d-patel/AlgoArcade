@@ -7,10 +7,16 @@
 reward weights come from the run's config.json, two folders above the checkpoint, and the frozen
 normalisation statistics from step_<n>.pkl beside it. The policy acts deterministically on the
 CPU from the manifest start state, reset with `seed`, so a checkpoint and seed always play the
-same episode. Each decision is one video frame, the screen after it, with the step, the return,
+same episode.
+
+`--eval-episode k` replays instead the k-th episode the runner evaluated at this checkpoint: the
+eval seed, the run's eval_deterministic and the runner's eval_rng, with episodes 0 to k-1 played
+first and not recorded. A sampled episode replays exactly only on the device the run trained on,
+so this mode loads the model as training did (CUDA when present). Each decision is one video frame, the screen after it, with the step, the return,
 the location, the badge count and one bar per reward component's weighted episode total.
 """
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +30,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from algoarcade.training.config import load_config
 from algoarcade.training.games import env_factory
+from algoarcade.training.runner import EVAL_SEED_OFFSET, eval_rng
 
 SCALE = 2
 # 6x real time: a decision is 24 frames of a 60 fps game.
@@ -73,21 +80,32 @@ def frame(
     return np.asarray(image)
 
 
-def render(
-    checkpoint: Path, out: Path, seed: int = 0, grid: int = 1
+def render(  # noqa: C901 - the eval replay adds a branch and a loop
+    checkpoint: Path, out: Path, seed: int = 0, grid: int = 1, eval_episode: int | None = None
 ) -> list[tuple[float, tuple[int, ...]]]:
     """Writes the video and returns each episode's return and final location."""
     config = load_config(checkpoint.parents[1] / "config.json")
+    deterministic, rng, device = True, contextlib.nullcontext(), "cpu"
+    if eval_episode is not None:
+        if grid != 1:
+            raise ValueError("--eval-episode replays one episode; leave --grid at 1")
+        seed = config.seed + EVAL_SEED_OFFSET
+        deterministic, rng, device = config.eval_deterministic, eval_rng(config), "auto"
     weights = config.reward_weights
     make, _, _ = env_factory(config.env_id, config.start_state, weights, render=True)
     envs = [make() for _ in range(grid)]
-    model = PPO.load(checkpoint, device="cpu")
+    model = PPO.load(checkpoint, device=device)
     normalize = None
     if config.norm_obs:
         # Only normalize_obs is called on it, which never updates the statistics.
         normalize = VecNormalize.load(
             str(checkpoint.with_suffix(".pkl")), DummyVecEnv([lambda: envs[0]])
         )
+
+    def act(observation: Any) -> Any:
+        policy_obs = normalize.normalize_obs(observation) if normalize else observation
+        return model.predict(policy_obs, deterministic=deterministic)[0]
+
     obs = [env.reset(seed=seed + i)[0] for i, env in enumerate(envs)]
     returns = [0.0] * grid
     totals = [dict.fromkeys(weights, 0.0) for _ in envs]
@@ -95,41 +113,48 @@ def render(
     out.parent.mkdir(parents=True, exist_ok=True)
     writer = None
     step, truncated = 0, False
-    try:
-        # Every episode runs to the same step budget; AlgoArcadeEnv never terminates.
-        while not truncated:
-            step += 1
-            panels = []
-            for i, env in enumerate(envs):
-                policy_obs = normalize.normalize_obs(obs[i]) if normalize else obs[i]
-                action, _ = model.predict(policy_obs, deterministic=True)
-                obs[i], reward, _, truncated, infos[i] = env.step(action)
-                returns[i] += float(reward)
-                for name, weight in weights.items():
-                    totals[i][name] += weight * infos[i][f"reward/{name}"]
-                screen = env.get_wrapper_attr("backend").screen()
-                panels.append(frame(screen, step, returns[i], infos[i], totals[i]))
-            image = np.hstack(panels)
-            if writer is None:
-                height, width = image.shape[:2]
-                writer = imageio_ffmpeg.write_frames(
-                    str(out), (width, height), fps=FPS, codec="libx264", pix_fmt_out="yuv420p"
-                )
-                writer.send(None)
-            writer.send(image.tobytes())
-    finally:
-        if writer is not None:
-            writer.close()
-        for env in envs:
-            env.close()
+    with rng:
+        try:
+            for _ in range(eval_episode or 0):
+                while not envs[0].step(act(obs[0]))[3]:
+                    pass
+                obs[0] = envs[0].reset()[0]
+            # Every episode runs to the same step budget; AlgoArcadeEnv never terminates.
+            while not truncated:
+                step += 1
+                panels = []
+                for i, env in enumerate(envs):
+                    obs[i], reward, _, truncated, infos[i] = env.step(act(obs[i]))
+                    returns[i] += float(reward)
+                    for name, weight in weights.items():
+                        totals[i][name] += weight * infos[i][f"reward/{name}"]
+                    screen = env.get_wrapper_attr("backend").screen()
+                    panels.append(frame(screen, step, returns[i], infos[i], totals[i]))
+                image = np.hstack(panels)
+                if writer is None:
+                    height, width = image.shape[:2]
+                    writer = imageio_ffmpeg.write_frames(
+                        str(out), (width, height), fps=FPS, codec="libx264", pix_fmt_out="yuv420p"
+                    )
+                    writer.send(None)
+                writer.send(image.tobytes())
+        finally:
+            if writer is not None:
+                writer.close()
+            for env in envs:
+                env.close()
     return [(ret, info["location"]) for ret, info in zip(returns, infos, strict=True)]
 
 
-def main(checkpoint: Path, out: Path, seed: int = 0, grid: int = 1) -> None:
-    """Render a checkpoint's episode from seed `seed`, or `grid` episodes side by side."""
-    results = render(checkpoint, out, seed, grid)
+def main(
+    checkpoint: Path, out: Path, seed: int = 0, grid: int = 1, eval_episode: int | None = None
+) -> None:
+    """Render a checkpoint's episode from seed `seed`, `grid` episodes side by side, or the
+    checkpoint's evaluation episode `eval_episode`."""
+    results = render(checkpoint, out, seed, grid, eval_episode)
     for i, (episode_return, location) in enumerate(results):
-        print(f"seed {seed + i}: return {episode_return:.6f}, final location {location}")  # noqa: T201
+        name = f"seed {seed + i}" if eval_episode is None else f"eval episode {eval_episode}"
+        print(f"{name}: return {episode_return:.6f}, final location {location}")  # noqa: T201
     print(out)  # noqa: T201
 
 
