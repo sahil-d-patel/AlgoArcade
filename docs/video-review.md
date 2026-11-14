@@ -44,7 +44,7 @@ Clips, 27 min 18 s in total, all seed 0 from each run's final checkpoint:
 
 The FireRed returns equal the last row of each run's `eval.csv`.
 
-What we saw: every final policy settles on one action and stands still for most of the episode. None of the six signatures explains the flat returns; the policies stop moving.
+What we saw, on three seeds per task and so exploratory: every final policy settles on one action and stands still for most of the episode. None of the six signatures explains the flat returns; the policies stop moving.
 
 - FireRed seg_01_house: each policy presses one direction on all 2,048 steps, Down for seeds 0 and 1 and Left for seed 2. The player walks 2 or 3 tiles to the edge of the bedroom and stands there. The last reward comes on step 3 or 4.
 - FireRed seg_02_pallet: the same, with Left, Right and Up on all 4,096 steps. Seed 0 walks into the sign by the flowers in Pallet Town and seed 1 walks 5 tiles right. Seed 2 walks into Oak's Lab on step 4, up 8 tiles to an NPC, and holds Up for the remaining 4,083 steps. The last reward comes on step 6 to 13. No battle, no text box and no faint in any of the six episodes.
