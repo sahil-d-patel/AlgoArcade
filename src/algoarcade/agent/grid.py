@@ -3,11 +3,13 @@
 Contract: docs/technical-plan.md, LLM arm. Each attempt is `loop.run` with its own server process
 and run id `<experiment>-<model>-L<level>-<segment>-<index>`, logged under data/llm/<experiment>/
 and data/runs/. The grid goes round by round, one more attempt for each cell per round, so a
-budget stop leaves the cells even. It resumes from what is on disk: an attempt with attempt.json
-is finished, a folder without it crashed and is skipped, and the next index runs. Before each
+budget stop leaves the cells even. It resumes from what is on disk: an attempt whose runs end row
+says finished counts, any other is skipped as crashed, and the next index runs. Before each
 attempt the grid adds one attempt's dollar cap to the spend so far and stops if that would pass
-the budget. A crashed attempt counts as the larger of its logged requests and the cap, since the
-request in flight when it died was never logged.
+the budget. A crashed attempt counts its attempt.json total if it wrote one; otherwise the larger
+of its logged requests and the cap it ran under, from its runs row, since the request in flight
+when it died was never logged. Every attempt of a cell must start from the start state hash of
+the cell's first finished attempt; the loop refuses another before its first request.
 """
 
 import asyncio
@@ -24,6 +26,7 @@ from anthropic import AsyncAnthropic
 from scipy.stats import binomtest
 
 from algoarcade.agent.loop import Create, Prices, Run, run
+from algoarcade.logs.writer import run_dir
 
 # Only cards with a source. Add a model's card, with the date read, before running its cells.
 PRICES = {
@@ -67,13 +70,32 @@ class Grid:
     runs: Path = Path("data/runs")
 
 
-def spent(folder: Path, cap: float) -> float:
+def run_row(runs: Path, name: str) -> dict[str, Any] | None:
+    """The run's current row in the runs table, or None before its first row closed."""
+    table = run_dir(name, runs) / "runs"
+    rows = pq.read_table(table).to_pylist() if table.is_dir() else []
+    return rows[-1] if rows else None
+
+
+def finished(runs: Path, name: str) -> bool:
+    row = run_row(runs, name)
+    return row is not None and row["status"] == "finished"
+
+
+def spent(folder: Path, runs: Path) -> tuple[float, float]:
+    """What an attempt logged, and what it counts against the budget. One with attempt.json,
+    finished or not, made all its requests and counts its total."""
     summary = folder / "attempt.json"
     if summary.is_file():
-        return json.loads(summary.read_text())["dollars"]
+        dollars = json.loads(summary.read_text())["dollars"]
+        return dollars, dollars
     steps = folder / "steps.jsonl"
     lines = steps.read_text().splitlines() if steps.is_file() else []
-    return max(cap, sum(json.loads(line)["dollars"] for line in lines))
+    logged = sum(json.loads(line)["dollars"] for line in lines)
+    row = run_row(runs, folder.name)
+    # The loop writes the runs row before its first request, so without one nothing was sent.
+    cap = json.loads(row["hyperparameters"])["max_dollars"] if row else 0.0
+    return logged, max(logged, cap)
 
 
 async def run_grid(grid: Grid, create: Create) -> float:
@@ -84,14 +106,15 @@ async def run_grid(grid: Grid, create: Create) -> float:
         raise ValueError(f"no prices for {', '.join(missing)}: add each card to PRICES in grid.py")
     folder = grid.out / grid.experiment
     folder.mkdir(parents=True, exist_ok=True)
-    total = sum(spent(path, grid.max_dollars) for path in folder.iterdir() if path.is_dir())
+    total = sum(spent(path, grid.runs)[1] for path in folder.iterdir() if path.is_dir())
     for done in range(grid.attempts):
         for segment in grid.segments:
             for model, level in grid.cells:
                 arm = f"{model}-L{level}"
                 prefix = f"{grid.experiment}-{arm}-{segment}-"
-                tried = list(folder.glob(f"{prefix}*"))
-                if sum((path / "attempt.json").is_file() for path in tried) > done:
+                tried = sorted(folder.glob(f"{prefix}*"))
+                done_here = [path for path in tried if finished(grid.runs, path.name)]
+                if len(done_here) > done:
                     continue
                 if total + grid.max_dollars > grid.budget:
                     print(f"stopped: ${total:.4f} spent, one more attempt could pass the budget")  # noqa: T201
@@ -108,6 +131,7 @@ async def run_grid(grid: Grid, create: Create) -> float:
                     max_dollars=grid.max_dollars,
                     out=folder,
                     runs=grid.runs,
+                    start_sha256=start_hash(done_here[0]) if done_here else "",
                 )
                 attempt = await run(settings, create)
                 total += attempt.dollars
@@ -116,6 +140,10 @@ async def run_grid(grid: Grid, create: Create) -> float:
                     f"${attempt.dollars:.4f}; grid ${total:.4f}"
                 )
     return total
+
+
+def start_hash(folder: Path) -> str:
+    return json.loads((folder / "attempt.json").read_text())["start_sha256"]
 
 
 def results(runs: Path, experiment: str) -> list[dict[str, Any]]:
@@ -184,7 +212,8 @@ def table(cells: list[dict[str, Any]]) -> str:
 
 @dataclass(frozen=True, kw_only=True)
 class Summary:
-    """Print the summary per cell from the Parquet logs, and the transcript count."""
+    """Print the summary per cell from the Parquet logs, the transcripts of those attempts, and
+    the crashed attempts with what they logged and count against the budget."""
 
     experiment: str = "E7"
     out: Path = Path("data/llm")
@@ -192,9 +221,21 @@ class Summary:
 
     def render(self) -> str:
         rows = results(self.runs, self.experiment)
-        transcripts = len(list((self.out / self.experiment).glob("*/transcript.json")))
+        folder = self.out / self.experiment
+        names = {row["run_id"] for row in rows}
+        transcripts = sum((folder / name / "transcript.json").is_file() for name in names)
         dollars = sum(row["llm_cost_usd"] for row in rows)
-        footer = f"{len(rows)} attempts, {transcripts} transcripts, ${dollars:.4f} spent"
+        crashed = [
+            spent(path, self.runs)
+            for path in (folder.iterdir() if folder.is_dir() else [])
+            if path.is_dir() and path.name not in names
+        ]
+        logged = sum(pair[0] for pair in crashed)
+        budget = sum(pair[1] for pair in crashed)
+        footer = (
+            f"{len(rows)} attempts, {transcripts} transcripts, ${dollars:.4f} spent; "
+            f"{len(crashed)} crashed, ${logged:.4f} logged, ${budget:.4f} counted against the budget"
+        )
         return f"{table(cell_rows(rows))}\n\n{footer}"
 
 

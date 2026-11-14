@@ -7,6 +7,7 @@ import pyarrow.parquet as pq
 import pytest
 from anthropic.types import Message, ToolUseBlock, Usage
 
+from algoarcade.agent import loop
 from algoarcade.agent.grid import Grid, Summary, cell_rows, results, run_grid, table
 
 # $0.001 a request at Haiku's short card.
@@ -14,13 +15,17 @@ USAGE = Usage(input_tokens=10_000, output_tokens=0)
 
 
 class Presser:
-    """A model that presses the same buttons on every request."""
+    """A model that presses the same buttons on every request, and raises on the request after
+    `crash_after`."""
 
-    def __init__(self, buttons: list[str]) -> None:
+    def __init__(self, buttons: list[str], crash_after: int | None = None) -> None:
         self.buttons = buttons
+        self.crash_after = crash_after
         self.requests = 0
 
     async def __call__(self, **_: Any) -> Message:
+        if self.requests == self.crash_after:
+            raise RuntimeError("the API went away")
         self.requests += 1
         block = ToolUseBlock(
             type="tool_use", id="toolu_1", name="press", input={"buttons": self.buttons}
@@ -119,18 +124,85 @@ def test_the_grid_resumes_where_it_stopped(tmp_path: Path) -> None:
     assert len(attempts(grid(tmp_path))) == 4
 
 
+ONE_CELL = (("claude-haiku-5-5", 1),)
+
+
+def crash(tmp_path: Path, max_dollars: float) -> None:
+    """One attempt that made two $0.001 requests and died on the third."""
+    settings = grid(tmp_path, attempts=1, cells=ONE_CELL, max_dollars=max_dollars)
+    with pytest.raises(ExceptionGroup):
+        asyncio.run(run_grid(settings, Presser(["RIGHT"], crash_after=2)))
+
+
 def test_a_crashed_attempt_is_skipped_and_counted_at_its_cap(tmp_path: Path) -> None:
-    settings = grid(tmp_path, attempts=1, cells=(("claude-haiku-5-5", 1),), budget=0.06)
-    crashed = settings.out / settings.experiment / "E7-claude-haiku-5-5-L1-fake-00"
-    crashed.mkdir(parents=True)
-    # The crash left $0.05 of budget counted, so a $0.05 attempt would pass $0.06.
+    crash(tmp_path, max_dollars=0.05)
+    # The crash counts $0.05, so another $0.05 attempt would pass $0.06.
     model = Presser(["RIGHT"])
-    spent = asyncio.run(run_grid(settings, model))
+    spent = asyncio.run(run_grid(grid(tmp_path, attempts=1, cells=ONE_CELL, budget=0.06), model))
     assert (model.requests, spent) == (0, pytest.approx(0.05))
-    spent = asyncio.run(run_grid(grid(tmp_path, attempts=1, cells=settings.cells), model))
+    settings = grid(tmp_path, attempts=1, cells=ONE_CELL)
+    spent = asyncio.run(run_grid(settings, model))
     assert model.requests == 5
     assert spent == pytest.approx(0.05 + 0.005)
     assert list(attempts(settings)) == ["E7-claude-haiku-5-5-L1-fake-01"]
+
+
+def test_a_crash_counts_the_cap_it_ran_under_after_a_resume_with_a_lower_cap(
+    tmp_path: Path,
+) -> None:
+    crash(tmp_path, max_dollars=0.05)
+    # At the new $0.01 cap the crash would count $0.01 and leave room for an attempt.
+    model = Presser(["RIGHT"])
+    settings = grid(tmp_path, attempts=1, cells=ONE_CELL, max_dollars=0.01, budget=0.055)
+    spent = asyncio.run(run_grid(settings, model))
+    assert (model.requests, spent) == (0, pytest.approx(0.05))
+
+
+def test_the_summary_reports_crashed_attempts_and_their_spend(tmp_path: Path) -> None:
+    crash(tmp_path, max_dollars=0.05)
+    settings = grid(tmp_path, attempts=1, cells=ONE_CELL)
+    asyncio.run(run_grid(settings, Presser(["RIGHT"])))
+    footer = Summary(out=settings.out, runs=settings.runs).render().splitlines()[-1]
+    assert footer == (
+        "1 attempts, 1 transcripts, $0.0050 spent; 1 crashed, $0.0020 logged, "
+        "$0.0500 counted against the budget"
+    )
+
+
+def test_an_attempt_killed_before_its_parquet_episode_counts_its_exact_spend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def killed(*_: Any) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(loop, "write_attempt", killed)
+    settings = grid(tmp_path, attempts=1, cells=ONE_CELL)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(run_grid(settings, Presser(["RIGHT"])))
+    monkeypatch.undo()
+    first = "E7-claude-haiku-5-5-L1-fake-00"
+    (summary,) = attempts(settings).values()
+    status = pq.read_table(settings.runs / f"run_id={first}" / "runs").to_pylist()[-1]["status"]
+    assert (summary["dollars"], status) == (pytest.approx(0.005), "crashed")
+    # Counted at its $0.005, not the $0.05 cap, and run again under the next index.
+    model = Presser(["RIGHT"])
+    spent = asyncio.run(run_grid(settings, model))
+    assert (model.requests, spent) == (5, pytest.approx(0.01))
+    assert [row["run_id"] for row in results(settings.runs, "E7")] == [
+        "E7-claude-haiku-5-5-L1-fake-01"
+    ]
+
+
+def test_an_attempt_from_another_start_fails_before_its_first_request(tmp_path: Path) -> None:
+    settings = grid(tmp_path, attempts=1, cells=ONE_CELL)
+    asyncio.run(run_grid(settings, Presser(["RIGHT"])))
+    path = settings.out / "E7" / "E7-claude-haiku-5-5-L1-fake-00" / "attempt.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"start_sha256": "0" * 64}))
+    model = Presser(["RIGHT"])
+    with pytest.raises(ExceptionGroup) as raised:
+        asyncio.run(run_grid(grid(tmp_path, attempts=2, cells=ONE_CELL), model))
+    assert raised.group_contains(ValueError, match="not 0000")
+    assert model.requests == 0
 
 
 def test_the_grid_stops_before_an_attempt_that_could_pass_the_budget(tmp_path: Path) -> None:
@@ -192,4 +264,7 @@ def test_the_summary_reads_the_grid_from_the_parquet_logs(tmp_path: Path) -> Non
     lines = text.splitlines()
     assert lines[0].startswith("| Model | Level | Segment |")
     assert "| claude-haiku-5-5 | 0 | fake | 2 | 2 | 1.00 [0.16, 1.00] | 3 |" in text
-    assert lines[-1] == "4 attempts, 4 transcripts, $0.0040 spent"
+    assert lines[-1] == (
+        "4 attempts, 4 transcripts, $0.0040 spent; 0 crashed, $0.0000 logged, "
+        "$0.0000 counted against the budget"
+    )

@@ -171,6 +171,9 @@ class AttemptConfig:
     prices: Prices = field(default_factory=Prices)
     max_tokens: int = 4096
     system: str = SYSTEM
+    # The SHA-256 the server's start state must have, from the trace's first line. Empty
+    # checks nothing.
+    start_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -305,7 +308,9 @@ async def run_attempt(  # noqa: PLR0913 the attempt's model, server, config, tas
     prompt_tokens = TOOL_PROMPT_TOKENS + json_bytes([config.system, tools])
     sent = 0
     with trace.open() as presses:
-        presses.readline()  # the start state
+        start = json.loads(presses.readline())["start_sha256"]
+        if config.start_sha256 and start != config.start_sha256:
+            raise ValueError(f"the server started from {start}, not {config.start_sha256}")
         while True:
             # The prompt only grows by what was appended since the last request, whose size the
             # API reported, so this bounds the next request before it is paid for.
@@ -451,6 +456,19 @@ async def run(settings: Run, create: Create) -> Attempt:
             async with Client(server(arguments), raise_exceptions=True) as client:
                 attempt = await run_attempt(create, client, settings, segment, trace, record)
         presses = [json.loads(line) for line in trace.read_text().splitlines()]
+        # attempt.json first: a run whose end row says finished always has it.
+        projection = project(attempt.steps, settings.prices)
+        summary = asdict(settings) | asdict(attempt)
+        summary |= {
+            "per_action": attempt.per_action(),
+            "projection_300_actions": asdict(projection) if projection else None,
+            "server_pid": presses[0]["pid"],
+            "start_sha256": presses[0]["start_sha256"],
+        }
+        del summary["steps"], summary["messages"]
+        transcript = without_images(to_jsonable_python(attempt.messages))
+        (folder / "transcript.json").write_text(json.dumps(transcript, indent=1))
+        (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
         episode = {
             "start_state": settings.segment,
             "end_reason": attempt.outcome,
@@ -472,17 +490,6 @@ async def run(settings: Run, create: Create) -> Attempt:
             "wall_clock_s": time.time() - started,
         }
         write_run_row(logs, fixed | end)
-    projection = project(attempt.steps, settings.prices)
-    summary = asdict(settings) | asdict(attempt)
-    summary |= {
-        "per_action": attempt.per_action(),
-        "projection_300_actions": asdict(projection) if projection else None,
-    }
-    summary |= {"server_pid": presses[0]["pid"], "start_sha256": presses[0]["start_sha256"]}
-    del summary["steps"], summary["messages"]
-    transcript = without_images(to_jsonable_python(attempt.messages))
-    (folder / "transcript.json").write_text(json.dumps(transcript, indent=1))
-    (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
     return attempt
 
 
