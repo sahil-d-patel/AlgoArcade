@@ -26,7 +26,22 @@ from scipy.stats import binomtest
 from algoarcade.agent.loop import Create, Prices, Run, run
 
 # Only cards with a source. Add a model's card, with the date read, before running its cells.
-PRICES = {"claude-haiku-5-5": Prices()}
+PRICES = {
+    "claude-haiku-5-5": Prices(),
+    # Anthropic's model table on 2026-11-14: $4 input, $20 output, $0.20 cache read per million
+    # tokens, with no long-prompt card. It lists no cache-write rate; this assumes 1.25x input,
+    # as on Haiku's card.
+    "claude-opus-5-5": Prices(
+        input=4.0,
+        output=20.0,
+        cache_write=5.0,
+        cache_read=0.20,
+        long_input=4.0,
+        long_output=20.0,
+        long_cache_write=5.0,
+        long_cache_read=0.20,
+    ),
+}
 CELLS = (
     ("claude-haiku-5-5", 0),
     ("claude-haiku-5-5", 1),
