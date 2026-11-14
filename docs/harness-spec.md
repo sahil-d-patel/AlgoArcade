@@ -104,9 +104,16 @@ These come from the pret/pokefirered symbol files at commit `3b401eaf14f19394689
 | sLockFieldControls | 0x03000F9C | |
 | sTextPrinters | 0x02020034 | 32 TextPrinters of 0x24 bytes, indexed by window id |
 | sGlobalScriptContext | 0x03000EB0 | The overworld script's context: mode at +1, nativePtr at +4 |
-| WaitForAorBPress | 0x0806B898 (rev 1: 0x0806B8AC) | ROM function; the only address that differs between the revisions |
+| WaitForAorBPress | 0x0806B898 (rev 1: 0x0806B8AC) | ROM function. ROM functions are the only addresses that differ between the revisions |
 | gBattlerPartyIndexes | 0x02023BCE | Four u16 party slots, one per battler |
 | gEnemyParty | 0x0202402C | Six entries of 100 bytes |
+| VMap | 0x03005040 | The live map: Xsize and Ysize (s32), then a pointer to gBackupMapData |
+| gBackupMapData | 0x02031DFC | One map.bin cell per tile: the current map inside a 7-tile border of its neighbours |
+| gObjectEvents | 0x02036E38 | 16 `struct ObjectEvent` of 0x24 bytes: flags (active bit 0, isPlayer bit 16), currentElevation in the low nibble of +0x0B, currentCoords +0x10, previousCoords +0x14, each 7 above map-local |
+| gStringVar4 | 0x02021D18 | 0x3E8 bytes. `ShowFieldMessage` expands every field message here |
+| gDisplayedStringBattle | 0x0202298C | 0x12C bytes. The battle message |
+| gTasks | 0x03005090 | 16 `struct Task` of 0x28 bytes: func (+0), isActive (+4) |
+| Task_YesNoMenu_HandleInput, Task_MultichoiceMenu_HandleInput, Hask_MultichoiceGridMenu_HandleInput | 0x0809CE54, 0x0809CC98, 0x0809CFDC (rev 1: 0x0809CE68, 0x0809CCAC, 0x0809CFF0) | ROM functions: the input tasks of the script menus. The third is the decomp's own spelling |
 
 Offsets inside SaveBlock1: x at 0x00, y at 0x02, map group at 0x04, map number at 0x05, money at 0x290, flags at 0xEE0. The eight badge flags are one byte at 0xFE4. Trainer flags run from 0xF80 to 0xFDF. The money key is in SaveBlock2 at 0xF20.
 
@@ -178,6 +185,25 @@ Rules:
 - File-local symbols carry a numeric suffix that differs between builds. Match on the base name.
 - No address enters the code without a symbol name and the commit it came from.
 
+### FireRed map data
+
+RAM holds only the current map and its border, so `src/algoarcade/games/firered/maps.py` builds every map's grid offline from pret/pokefirered at `e93eb12a336fb97df420b0961753d8a3713c9fcc`. `uv run python scripts/fetch_maps.py` fetches the files into `data/pokefirered/`; `DATA.md` lists them.
+
+`load_maps()` returns a `MapGrid` for each map in `map_groups.json`, keyed by (map_group, map_num). Its arrays are indexed [y, x] in the frame of SaveBlock1's x and y:
+
+- `blocks`: the `map.bin` cells. Bits 0 to 9 are the metatile id, 10 and 11 collision, 12 to 15 elevation (`include/global.fieldmap.h`).
+- `behavior`: bits 0 to 8 of the metatile's 32-bit attribute. Ids below 640 read the primary tileset's `metatile_attributes.bin`, the rest the secondary's (`GetAttributeByMetatileIdAndMapLayout`, `src/fieldmap.c`).
+- `blocked`: collision nonzero, or the cell is 0x3FF (`MAPGRID_UNDEFINED`). No map has a 0x3FF cell at this commit.
+- `ledge`: behaviour 0x38 to 0x3B (`MB_JUMP_EAST` to `MB_JUMP_SOUTH`). Ledge cells carry collision 1, so they are also blocked; the player crosses one only by jumping it in its direction.
+- `water`: the surfable behaviours in `sBehaviorSurfable` (`src/metatile_behavior.c`). Water has collision 0.
+- `walkable`: not blocked and not water.
+
+`place(maps)` walks connections breadth-first from Pallet Town (3, 0), placed at (0, 0), and returns each reached map's offset: global (x, y) = local (x, y) + offset. A connection's offset moves the neighbour along the shared edge, x for up and down, y for left and right (`FillNorthConnection` and the others in `src/fieldmap.c`). It places 37 maps: the mainland towns and routes and `MAP_SAFFRON_CITY_CONNECTION`. Every other map is a separate panel: interiors, gyms, Viridian Forest, the 25 Sevii Islands maps, which connect only to each other, and `MAP_SAFFRON_CITY`. Routes 5 to 8 connect to `MAP_SAFFRON_CITY_CONNECTION` instead, and the player enters the city through gatehouse warps.
+
+One connection pair disagrees. Route 6 has `MAP_SAFFRON_CITY_CONNECTION` above it at offset 0, and that map has Route 6 below it at offset 12. The walk places Route 6 from the city side, which Vermilion City's edge to Route 6 agrees with.
+
+`tests/test_firered_maps.py` compares the offline grid with the live buffer on each FireRed manifest state: `VMap.map` points at `gBackupMapData`, and the current map sits at (7, 7) inside it (`InitMapLayoutData`). The test needs 99% of the map's collision to agree; on rev 1 all nine states agree on every cell.
+
 ## Reward registry
 
 A reward component is a small object with a name, a reset step that runs at the start of an episode, and a scoring step. The scoring step looks at the previous GameState and the current one and returns a number. The protocol lives in `src/algoarcade/rewards/base.py`.
@@ -203,12 +229,12 @@ FireRed's ten components are in `src/algoarcade/rewards/registry.py`: `COMPONENT
 
 Super Mario Land's table, in `games/super_mario_land/rewards.py`, holds the components that read only the location: `explore`, `anti_loop` and `time`. Its default is `explore` at 0.02. Jumping is the exploit: each new y tile in a column pays once. Jumping in place pays once per tile of the jump's height on the first jump, and nothing after; a column holds at most 32 y tiles, one byte over 8. Jumping while running right pays up to that many per column instead of one. `explore` keys on the full location, so this is bounded, not prevented. `test_jumping_in_place_pays_explore_once_per_y_tile` checks it on a 48-pixel arc, which pays 6. After a game over the game returns to its title menu, and after about 27 decisions the menu plays a demo of a level on its own; `explore` would pay for the demo's tiles. So in training a game over continues: the backend loads the start state again as soon as the menu flag (`0xFF9F`) is set, before the reader sees the menu. A continue pays nothing, because the start tiles are already visited, and costs the time it took to lose three lives. It is not a terminal transition: the episode goes on, PPO bootstraps across it, and the episode still ends as `truncated`.
 
-The six scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
+The seven scripted exploit policies are in `tests/test_exploits.py`, and `uv run pytest -k exploit` runs exactly those.
 
 Rules:
 
 - Every component returns exactly zero on the reset step and on a no-op step, with two exceptions. A progress term (events, level, badge, milestone) pays on a no-op step that is the second of the two reads confirming the previous step's rise, and on no other no-op step; its episode total never exceeds the rise from its first best to its highest confirmed count. The penalties `time` and `anti_spam` never pay and are off by default. `time` charges every step; `anti_spam` charges a step where `text_progress` did not change while `text_box_open` held, including a reset into one.
-- Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window.
+- Novelty uses coordinate tuples in a permanent per-episode set. Never screen hashes, never a sliding window. An archive start's set begins with the cell's visited set, so walking back along the archived path pays nothing.
 - A component that reads a field validates it first. Garbage memory must not pay, and must not become the best value that later real progress has to beat. A count term ignores a read above the game's maximum or a rise faster than the game allows, and takes its best only from two consecutive reads that agree, so one bad read, at reset or later, cannot set it. A bad read that repeats on two consecutive steps can; the reader has to catch that.
 - The four progress terms (events, level, badge, milestone) pay a rise only once two consecutive reads agree on it: a step pays the rise from the best to the lower of its two reads. A real rise pays one step late, on the confirming read, even if that step changed nothing. A count that reads high for one frame while a save block moves pays nothing. A rise on the step budget's last step is never confirmed, so an episode loses at most one step's pay of each term: `max_rise`, or `cap` if lower.
 - Each known exploit has a scripted policy in the tests that tries it and must stay under a stated reward.
@@ -223,7 +249,7 @@ AlgoArcadeEnv is the Gymnasium environment, in `src/algoarcade/envs/env.py`. It 
 | Decision length | 24 frames: hold 8, release 16 |
 | Actions | `Discrete(6)`: 0 up, 1 down, 2 left, 3 right, 4 A, 5 B. `start=True` appends Start, then `noop=True` appends a no-op that holds nothing for 24 frames. |
 | Episode end | The step budget only. `truncated` is True on the budget's last step; `terminated` is always False. |
-| Reset | Loads the start state, then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
+| Reset | Loads the start state, or the cell handed over by `set_next_start` (Archive resets, below), then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
 | Not ready | A read that raises `StateNotReady` is retried one frame later, up to `NOT_READY_FRAMES` (8) times, and then propagates out of `reset` or `step`. The env never substitutes a state. A retry adds frames only to that step, so the same seed and actions still replay the same episode. |
 
 Reset noise does little. A 24-frame step absorbs most of a 0 to 7 frame offset, so the offset changes outcomes only through the game's RNG, such as a wild encounter. With the actions fixed (`scripts/env_trace.py --action-seed 0`), 128 steps from reset seeds 0 to 9 gave one location trace and one return from `s1.state` (13.0) and from `seg_02_pallet.state` (11.0), and two location traces from `seg_04_route1.state`. On `s1.state` the ten runs still ended in 4 different EWRAM states. So a deterministic evaluation from a state with no encounters nearby, such as these two, replays the same episode; TRN-05 and ENV-09 should not count on reset noise for variety there.
@@ -247,8 +273,9 @@ The observation is a `Dict` of two float32 boxes:
 | `reward/<name>` | Each configured component's raw value, before its weight. The logs store it as `reward_<name>`. The step's reward is the sum of weight times raw value. |
 | `location` | The GameState's location after the decision. For FireRed `(map_group, map_num, x, y)`. |
 | `milestone_count` | The episode's best `milestone_count`: the highest value two consecutive reads agreed on, the reset read included, so a rise shows one step late and the reset step reports 0. Present when the GameState has the field; Super Mario Land has none. |
+| `cell` | Only with `archive=True`, on the first step of an episode that reaches a cell whose key the archive does not hold yet: a `Cell` with its key, the zlib-compressed save state after that step, the episode's visited set, each progress term's best and the episode's best `milestone_count`. |
 
-`reset` returns `location` and `milestone_count` only. ENV-09 adds a save state for the archive.
+`reset` returns `location`, `milestone_count` and `archive_start`, True when the reset loaded an archived cell.
 
 Observation modes:
 
@@ -286,9 +313,22 @@ Super Mario Land's manifest is `games/super_mario_land/manifest.py`, and `script
 
 Evaluation always starts from the fixed state with the archive off, even when training used archive resets.
 
+### Archive resets
+
+Training can start episodes from places the run already reached (ENV-09). `--archive` turns it on; it is off by default, so the baseline is archive-off.
+
+- A cell's key is `(map_group, map_num, x // 4, y // 4, badge_flags, milestone_count)`, where `milestone_count` is the episode's best as in `info`. Super Mario Land and the fake game key 0 for the badge byte, and Super Mario Land 0 for milestones. The 4-tile cell is a guess.
+- The env built with `archive=True` reports a cell the first time an episode reaches it, in step info (AlgoArcadeEnv, above), unless the archive already holds its key: `ArchiveResets` sends every new key to all workers with `env_method("add_archived", keys)`. Workers that find the same cell on the same step each send it once; the archive keeps the first.
+- `ArchiveResets` (`training/archive.py`) wraps the SB3 vector env in the main process. It keeps one archive; a cell keeps the first state that reached it, its visited set and a selection count, and is never replaced. A vector env resets inside the worker, so each worker's next start is chosen ahead of time: as soon as the archive has a cell, and after each reset. With probability `archive_p` (default 0.5, a guess) it draws a cell with weight `1 / sqrt(1 + selections)` and sends it with `env_method("set_next_start", cell)`; otherwise the worker loads the fixed start state. The `Archive` class does not depend on SB3, for the TRN-07 trainer.
+- Rewards: reset pays nothing. Explore starts from the cell's visited set. Each progress term starts from its best when the cell was reached, carried in the cell, not from the loaded count. The two differ when a count fell after its best: `forest_exited` and `gym_entered` stop holding when the player walks off their maps, and depositing a Pokémon lowers the level sum. Climbing back to the best after a reload pays nothing, and neither does a reset read that comes in low. A term with no best yet when the cell was reached starts as on any reset. The env's `milestone_count` latch starts from the cell's best too, so the reset reports it instead of 0. `test_exploit_archive_farming` resets 100 times into a cell reached after every count fell by one, restores the counts and walks the archived path; it pays 0.
+- The eval env is built with `archive=False`: it reports no cells and ignores `set_next_start`. The runner still wraps it in `ArchiveResets`: `sync_envs_normalization` copies the statistics from the outermost VecNormalize and then walks the rest of both stacks, raising unless the eval stack has a wrapper at every depth the training stack does.
+- Every rollout logs `rollout/archive_share` (archive starts over all training resets so far), `rollout/archive_cells` and `rollout/archive_bytes_per_cell` (compressed) to `progress.csv`. Each episode logs `archive_start`.
+- An episode that starts from a cell logs only what it did itself. `unique_tiles` and `reward_explore` count the tiles new to this episode, not the cell's visited set, so they run lower than for an episode that walked the same way from the fixed start. `milestone_count` is the episode's best, which starts at the cell's best. Filter on `archive_start` before comparing episodes.
+- An mGBA save state is 528,448 bytes; zlib level 1 cuts it to about 50,000 in about 4 ms. The archive is not kept between runs.
+
 ## Logging schema
 
-Freezes November 8 under the tag `schema-v1`. It moved from November 1 because ENV-08 was not validated on real memory by then (#20). Before the freeze, each lane confirms the logs hold every field its week 6 visual needs. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section.
+Frozen under the tag `schema-v1` (November 13; due November 8, moved from November 1 because ENV-08 was not validated on real memory by then, #20). No lane asked for a field before the freeze. Owner: Sahil (PM), in OPS-03. The code is `src/algoarcade/logs/schema.py`, and it must match this section. A game without a FireRed field logs it as False or 0 rather than null (Super Mario Land logs `in_battle` False and the counts as 0), so an analysis that pools games filters by `env_id`.
 
 Logs are Parquet files under `data/runs/run_id=<id>/<table>/`, one folder per table: `steps`, `visits`, `episodes`, `runs`. Each writing process owns its own files, named `<writer_id>-<n>.parquet`, and rolls to a new file every 100,000 rows by default, because a Parquet file cannot be read until it is closed. The open file is `_<writer_id>-<n>.parquet.inprogress`, so a glob on `*.parquet` and a pyarrow folder read (`pq.read_table`, `ds.dataset`) see only closed files.
 
@@ -315,7 +355,7 @@ Written every Nth step: each environment writes the row of a decision whose `epi
 | wall_clock_s | Decimal | Seconds since the run started |
 | episode_id | Integer | Counts from 0 within each environment |
 | episode_step | Integer | Counts from 1 at the episode's first decision |
-| action | Small integer | Index into the environment's action set |
+| action | Small integer | Index into the environment's action set. LLM rows hold the Button value instead (A 0 to L 9), so pooled analyses filter by `algorithm` (decisions, 2026-11-13) |
 | map_group, map_num, x, y | Small integer | The location after the decision |
 | in_battle | Boolean | |
 | milestone_count | Small integer | The env's episode best after this decision, as in `info` |
@@ -353,7 +393,7 @@ One row per finished episode. An episode the end of the run cuts off is not writ
 | milestone_count | Small integer | At the episode's end: the env's episode best, as in `info` |
 | start_state | Text | The manifest name |
 | archive_start | Boolean | Whether the start came from the archive |
-| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap` |
+| end_reason | Text | `truncated` for the step budget. LLM attempts also use `goal`, `action_cap` and `dollar_cap`, and `truncated` when the model stops calling tools (decisions, 2026-11-13) |
 | goal_reached | Boolean | Whether the start state's goal became true at any point in the episode. False when the start state has no goal |
 | goal_step | Integer, nullable | The `episode_step` at which the goal first became true. Null when it never did |
 | is_eval | Boolean | An evaluation episode: fixed start state, archive off |
@@ -413,23 +453,30 @@ The MCP server exposes the same harness to a language model. It uses the officia
 
 | Tool | Arguments | Returns | Level |
 |---|---|---|---|
-| press | `buttons`: a list of button names, each one of A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L. `screenshot`: optional, default false | The GameState after pressing them in order, one decision each | L0 |
-| get_state | `screenshot`: optional, default false | The GameState | L1 |
-| navigate_to | — (AGT-04) | The state after walking to a tile on the current map by A*. Stops on a battle, dialogue or warp and says which. | L2 |
-| advance_dialogue | — (AGT-04) | The text shown, after pressing A until the box closes or a choice appears | L2 |
+| press | `buttons`: a list of button names, each one of A, B, SELECT, START, RIGHT, LEFT, UP, DOWN, R, L. `screenshot`: optional, default false, L1 and up | The GameState after pressing them in order, one decision each. At L0, only the screenshot | L0 |
+| get_state | `screenshot`: optional, default false, L1 and up | The GameState. At L0, only the screenshot | L0 |
+| navigate_to | `x`, `y`: a tile of the current map, in the GameState's x and y. `max_presses`: default 400. `screenshot` | `reason`, `presses`, then the GameState | L2 |
+| advance_dialogue | `max_presses`: default 60. `screenshot` | `reason`, `presses`, `text`, then the GameState | L2 |
 
-`get_state` and `press` return the GameState twice: as structured content and as one compact JSON text block, one field per name. On the fake backend that is `room`, `x`, `y`, `chest_opened` and `frame`. With `screenshot` true, a PNG of the screen upscaled 2x (480x320 on FireRed) follows the text. When the reader raises `StateNotReady`, the text is `State not ready: <reason>`, there is no structured content, and the result is not a tool error: a `press` has already pressed its buttons. The server takes the game as a launch option, `--game`: `fake`, or `firered` on MgbaBackend with ENV-05's reader. `--state NAME` loads `data/states/NAME.state` before the first call, and refuses it when the manifest lists NAME with a different SHA-256, or when the ROM is not rev 1, the revision the states were captured on. The loop grades a FireRed segment with the manifest's goal.
+The server takes the level as `--level` (default 1). L0 serves `press` and `get_state` with no `screenshot` argument; each returns only a PNG of the screen, with no text block and no structured content. L1 serves the same two tools with the GameState. L2 adds `navigate_to` and `advance_dialogue`. A level includes every tool below it, so the same code serves all three rungs of the ladder.
 
-The loop in `src/algoarcade/agent/loop.py` drives one attempt: it lists the tools once, keeps an append-only history with a cache breakpoint on the system prompt and the automatic one on the last turn, prices every response from `usage`, and stops at the goal, at the action cap, before a request whose upper-bound cost would pass the dollar cap, or when the model stops calling tools. The bound is the last request's prompt tokens plus the bytes appended since, at the dearer of the input and cache-write prices, plus `max_tokens` at the output price, on the long-prompt card when that prompt bound is past 100K tokens. One action is one button press the server accepted; a rejected `press` counts nothing. Each request is one line of `steps.jsonl` under `data/llm/<name>/`: tokens by kind, dollars, buttons pressed, the model's text and the state after.
+At L1 and L2, `get_state` and `press` return the GameState twice: as structured content and as one compact JSON text block, one field per name. On the fake backend that is `room`, `x`, `y`, `chest_opened` and `frame`. With `screenshot` true, a PNG of the screen upscaled 2x (480x320 on FireRed) follows the text. When the reader raises `StateNotReady`, the text is `State not ready: <reason>`, there is no structured content, and the result is not a tool error: a `press` has already pressed its buttons. The server takes the game as a launch option, `--game`: `fake`, or `firered` on MgbaBackend with ENV-05's reader. `--state NAME` loads `data/states/NAME.state` before the first call, and refuses it when the manifest lists NAME with a different SHA-256, or when the ROM is not rev 1, the revision the states were captured on. The loop grades a FireRed segment with the manifest's goal.
 
-A level includes every tool below it. The server takes the level as a launch option, so the same code serves all three rungs of the ladder.
+`navigate_to` and `advance_dialogue` return a JSON text block with what they did, then the GameState as `get_state` does; their structured content is that object with the GameState under `state`. Both press through the same 24-frame decisions as `press`.
 
-`.mcp.json` at the repo root launches the server through `uv`, so Claude Code and VS Code list the tools after `uv sync`.
+- `navigate_to` plans with A* over the current map: the fewest steps, then the fewest turns, because a press in a new direction can only turn the player. A tile is open when its live collision bits are 0, its elevation suits the player's, and no other object stands on it or is leaving it (`games/firered/field.py`). The goal counts as open, because a door block carries collision 1 and warps the player who walks into it: a door goal ends `arrived` on the door, and the game warps about 70 frames later with no press. A ledge block carries collision 1, so live collision alone makes it a wall. With ENV-10's map data fetched, the planner also jumps each ledge in its direction, one press landing two tiles on; without it (CI), ledges stay walls. Water needs no map data: the elevation rule closes it, and on all nine FireRed manifest states it closes every water tile the map data lists. A step that moves nothing after two presses marks its tile closed and plans again, up to 8 plans. It stops with `reason` arrived, battle (in_battle), dialogue (text_box_open), warp (the map changed), no_path, or press_cap. One map only: routes across maps are the model's job.
+- `advance_dialogue` presses A while the text box is open and no script menu (yes/no, multichoice or grid) is waiting, so it never answers a choice. `reason` is closed, choice or press_cap. `text` is each distinct message the box held, one per line, read from `gStringVar4` in the field and `gDisplayedStringBattle` in battle, decoded with the decomp's `charmap.txt` and control codes left out.
 
-Jayden updates this section when AGT-04 lands.
+Both press caps and the 8 plans are guesses. With `--trace FILE` the server writes one JSON line per press, `{"button", "time", "state"}`, the state after the press or null when not ready, after a first line with button null and the start state. The loop counts and grades from it at every level, so presses inside a tool count, and an L0 attempt is graded though the model never sees the state.
 
-## Open questions before the freeze
+The loop in `src/algoarcade/agent/loop.py` drives one attempt at a level from config (default 1), with one system prompt for every level. It lists the tools once, keeps an append-only history with a cache breakpoint on the system prompt and the automatic one on the last turn, prices every response from `usage`, and stops at the goal, at the action cap, before a request whose upper-bound cost would pass the dollar cap, or when the model stops calling tools. The bound is the last request's prompt tokens plus the bytes appended since, at the dearer of the input and cache-write prices, plus `max_tokens` at the output price, on the long-prompt card when that prompt bound is past 100K tokens. One action is one button press in the trace, whichever tool made it; a rejected call counts nothing. Before each call the loop cuts `press`'s buttons, or lowers `max_presses`, to the presses left. The goal holds when any press's state meets it. Each request is one line of `steps.jsonl` under `data/llm/<name>/`, with `presses.jsonl` the trace: tokens by kind, dollars, buttons pressed, the model's text and the last state.
 
-- Frames per decision: does a 24-frame decision still land menu inputs reliably? OPS-02 checks 8, 16, 24 and 48.
-- Number of environments: 12 or 16 on the training box? Set from the benchmark.
-- Per-step sampling: is every fourth step enough for the reward decomposition chart? Decide before the freeze.
+Each attempt is also run `<name>` in the logging schema under `data/runs/`, so it joins the RL runs on `start_state`, the segment's manifest name. The runs table has algorithm `llm`, seed 0, `step_log_every` 1 and empty reward weights. Every press is a decision: a per-step row and a visit, with `action` the Button value (A 0 to L 9), not the RL env's action index, so a pooled analysis of actions filters by `algorithm` (decided 2026-11-13), and the last ready state for a press read while not ready. The one episode has return 0, null reward columns, the `llm_` columns filled, and `end_reason` goal, action_cap or dollar_cap; an attempt whose model stopped calling tools logs `truncated`, as the frozen set has no other value for it (decided 2026-11-13).
+
+`.mcp.json` at the repo root launches the server through `uv` at L1, so Claude Code and VS Code list `get_state` and `press` after `uv sync`.
+
+## Defaults at the freeze
+
+- Frames per decision: 24 (8 held, 16 released) stays the default. OPS-02's menu check on the Mac moved the cursor on 20 of 20 presses at 8, 16, 24 and 48 frames, so no tested split failed (#52); the box has not been measured.
+- Number of environments: 16 stays the default. On the Mac it gave 1,005 steps/s at 24 frames against 962 for 12, about 4% more, measured with other jobs running (#52). Revisit when OPS-02 runs on the box.
+- Per-step sampling: every fourth decision. The reward decomposition reads each component's episode total from the episodes table, and the visits table counts every step, so neither needs every row.
