@@ -15,7 +15,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ruff", "pyrefly", "pytest", "poethepoet", "prek", "typos"]
-train = ["torch", "stable-baselines3", "wandb", "matplotlib"]
+train = ["torch", "stable-baselines3", "wandb", "matplotlib", "scipy", "imageio-ffmpeg", "pillow"]
 agent = ["mcp>=2.3,<3", "anthropic"]
 
 [build-system]
