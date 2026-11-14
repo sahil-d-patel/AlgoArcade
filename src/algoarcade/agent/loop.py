@@ -390,8 +390,8 @@ class Run(AttemptConfig):
 
 
 def without_images(value: Any) -> Any:
-    """`value` with each base64 image's data replaced by its length. The trace replays the
-    screen."""
+    """`value` with each base64 image's data replaced by its length. Replaying the trace's
+    presses from the start state shows the screens again."""
     if isinstance(value, list):
         return [without_images(item) for item in value]
     if not isinstance(value, dict):
