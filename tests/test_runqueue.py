@@ -2,7 +2,9 @@
 
 import json
 import subprocess
+import sys
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -162,11 +164,13 @@ def queued(tmp_path: Path, status: str, attempts: int) -> Path:
     return queue_dir
 
 
-def exits(code: int):
-    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess([], code)
+def train_with(monkeypatch: pytest.MonkeyPatch, code: str) -> None:
+    """Replace the trainer with a Python snippet; the run's config path stays the last argument."""
+    monkeypatch.setattr(queue, "TRAIN", [sys.executable, "-c", code])
 
-    return run
+
+def statuses(queue_dir: Path) -> list[tuple[str, int]]:
+    return [(r["status"], r["attempts"]) for r in queue.load(queue_dir)]
 
 
 def test_a_run_left_running_counts_as_a_crashed_attempt(
@@ -174,11 +178,11 @@ def test_a_run_left_running_counts_as_a_crashed_attempt(
 ) -> None:
     # A reboot or a killed `run` leaves its run marked running with no process behind it.
     queue_dir = queued(tmp_path, "running", 1)
-    monkeypatch.setattr(subprocess, "run", exits(0))
+    train_with(monkeypatch, "pass")
 
     queue.main(["run"], queue_dir)
 
-    assert [(r["status"], r["attempts"]) for r in queue.load(queue_dir)] == [("done", 2)]
+    assert statuses(queue_dir) == [("done", 2)]
     assert webhook == []
 
 
@@ -186,11 +190,11 @@ def test_a_second_interrupted_attempt_fails_the_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, webhook: list[dict[str, str]]
 ) -> None:
     queue_dir = queued(tmp_path, "running", 2)
-    monkeypatch.setattr(subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "Popen", no_process)
 
     queue.main(["run"], queue_dir)
 
-    assert [(r["status"], r["attempts"]) for r in queue.load(queue_dir)] == [("failed", 2)]
+    assert statuses(queue_dir) == [("failed", 2)]
     assert len(webhook) == 1
 
 
@@ -198,15 +202,19 @@ def test_ctrl_c_puts_the_run_back_without_using_an_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     queue_dir = queued(tmp_path, "queued", 0)
+    train_with(monkeypatch, "import time; time.sleep(600)")
+    wait = subprocess.Popen.wait
 
-    def interrupt(*args: object, **kwargs: object) -> None:
-        raise KeyboardInterrupt
+    def interrupted(self: subprocess.Popen[bytes], timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise KeyboardInterrupt
+        return wait(self)
 
-    monkeypatch.setattr(subprocess, "run", interrupt)
+    monkeypatch.setattr(subprocess.Popen, "wait", interrupted)
 
     with pytest.raises(KeyboardInterrupt):
         queue.main(["run"], queue_dir)
-    assert [(r["status"], r["attempts"]) for r in queue.load(queue_dir)] == [("queued", 0)]
+    assert statuses(queue_dir) == [("queued", 0)]
 
 
 def test_run_leaves_the_queue_to_a_runner_already_on_it(
@@ -214,10 +222,138 @@ def test_run_leaves_the_queue_to_a_runner_already_on_it(
 ) -> None:
     # The nightly task fires while last night's `run` is still working through the queue.
     queue_dir = queued(tmp_path, "queued", 0)
-    monkeypatch.setattr(subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "Popen", no_process)
 
     with queue.locked(queue_dir / "run.lock", wait=False) as held:
         assert held
         queue.main(["run"], queue_dir)
 
-    assert [(r["status"], r["attempts"]) for r in queue.load(queue_dir)] == [("queued", 0)]
+    assert statuses(queue_dir) == [("queued", 0)]
+
+
+def test_a_hung_run_is_killed_with_its_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The trainer starts a worker that writes a heartbeat, then hangs, like a stuck SubprocVecEnv.
+    heartbeat = tmp_path / "heartbeat"
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import time\nfrom pathlib import Path\n"
+        f"beat = Path({str(heartbeat)!r})\n"
+        "for n in range(100_000):\n    beat.write_text(str(n))\n    time.sleep(0.02)\n"
+    )
+    queue_dir = queued(tmp_path, "queued", 0)
+    train_with(
+        monkeypatch,
+        f"import subprocess, sys, time; subprocess.Popen([sys.executable, {str(worker)!r}]); "
+        "time.sleep(600)",
+    )
+    monkeypatch.setattr(queue, "STARTUP_S", 1.5)
+
+    queue.main(["run", "--min-steps-per-s", "1e9"], queue_dir)
+
+    assert statuses(queue_dir) == [("failed", 2)]
+    assert "no exit after" in (queue_dir / "logs" / "E0-a-seed0-2.log").read_text()
+    beat = heartbeat.read_text()
+    time.sleep(0.5)
+    assert heartbeat.read_text() == beat
+
+
+def test_the_trainer_does_not_see_the_webhook_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, webhook: list[dict[str, str]]
+) -> None:
+    queue_dir = queued(tmp_path, "queued", 0)
+    train_with(monkeypatch, f"import os, sys; sys.exit({queue.WEBHOOK_ENV!r} in os.environ)")
+
+    queue.main(["run"], queue_dir)
+
+    assert statuses(queue_dir) == [("done", 1)]
+
+
+def test_status_reads_without_rewriting_the_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue_dir = queued(tmp_path, "queued", 0)
+    monkeypatch.setattr(Path, "replace", no_process)
+
+    queue.main(["status"], queue_dir)
+
+
+def test_a_write_retries_while_another_program_holds_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On Windows a virus scanner or indexer can hold queue.json open for a moment.
+    replace = Path.replace
+    calls = []
+
+    def busy_twice(self: Path, target: Path) -> Path:
+        calls.append(target)
+        if len(calls) < 3:
+            raise PermissionError
+        return replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", busy_twice)
+
+    queue_dir = queued(tmp_path, "queued", 0)
+
+    assert len(calls) >= 3
+    assert statuses(queue_dir) == [("queued", 0)]
+
+
+# 16 workers dying on one bad config print 16 copies of the same exception.
+WORKER_DEATH = [
+    *(
+        line
+        for i in range(16)
+        for line in (
+            f"Process SpawnProcess-{i}:",
+            "Traceback (most recent call last):",
+            '  File "games.py", line 1, in fake_env',
+            "ValueError: unknown reward component(s) ['no_such_component']; valid names: "
+            + "x" * 120,
+        )
+    ),
+    "Traceback (most recent call last):",
+    '  File "subproc_vec_env.py", line 127, in __init__',
+    "EOFError",
+]
+
+
+def test_a_16_worker_failure_fits_one_discord_message(
+    tmp_path: Path, webhook: list[dict[str, str]]
+) -> None:
+    entry = {"name": "E0-a-seed0", "experiment_id": "E0", "attempts": 2, "status": "failed"}
+    log = queue.log_path(tmp_path, entry)
+    log.parent.mkdir()
+    log.write_text("\n".join(WORKER_DEATH) + "\n")
+
+    queue.report(entry, tmp_path)
+
+    [message] = webhook
+    assert len(message["content"]) <= queue.MESSAGE_CHARS
+    head = message["content"].split("```")[0]
+    assert head.count("ValueError: unknown reward component") == 1
+    assert "EOFError" in head
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "discord.example/api/webhooks/123/SECRETTOKEN",
+        "https://discord.example/api/webhooks/123/SECRET TOKEN",
+    ],
+)
+def test_a_malformed_webhook_url_neither_stops_the_queue_nor_prints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    url: str,
+) -> None:
+    monkeypatch.setenv(queue.WEBHOOK_ENV, url)
+    entry = {"name": "E0-a-seed0", "experiment_id": "E0", "attempts": 2, "status": "failed"}
+
+    queue.report(entry, tmp_path)
+
+    out = capsys.readouterr().out
+    assert "Webhook post failed" in out
+    assert "SECRET" not in out
