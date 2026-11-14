@@ -139,18 +139,20 @@ uv run python -m algoarcade.runqueue run
 ```
 
 - `submit` queues one run per arm and seed, named `<experiment>-<arm>-seed<n>`: seed 0 of every arm, then seed 1, so a queue cut short leaves the arms with the same seeds. It refuses a name already in the queue. The config is fixed at submit. The code is whatever the clone has checked out when the run starts, and the run records that commit.
-- `run` trains the queued runs in submit order, each in its own process, until none is left. A run that exits with an error is retried once, from step 0, then marked failed, and the next run starts. A second `run` exits at once while one is working. Ctrl+C stops the queue and puts the current run back without using up an attempt.
+- `run` trains the queued runs in submit order, each in its own process, until none is left. A run that exits with an error is retried once, from step 0, then marked failed, and the next run starts. An attempt still running after 1 hour plus `total_timesteps` / 100 seconds (43 hours for 15M steps; `run --min-steps-per-s` changes the 100) is killed with its workers and counts as a crash. A second `run` exits at once while one is working. Ctrl+C stops the queue and puts the current run back without using up an attempt.
 - `status` prints each run's status (queued, running, done or failed), attempts, start and end time, then a count per experiment.
 
 Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
 
-The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash.
+The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash. On Windows a trainer dies with its `run`, however `run` ends. On macOS and Linux, Ctrl+C or an error in `run` kills the trainer, but a `run` killed with SIGKILL leaves it training.
 
-A failed run posts its experiment id, run name, the exception line of each traceback and the end of its log to the team channel. The webhook URL is a secret: set it once as a user environment variable on the box, never in a file in the repo. The message carries both Discord's `content` and Slack's `text`. Without the variable, `run` prints a line and goes on.
+A failed run posts its experiment id, run name, the exception line of each traceback (each once) and the end of its log to the team channel, in at most 1,900 characters. The message carries both Discord's `content` and Slack's `text`. The webhook URL is a secret: set it as a user environment variable on the box, never in a file in the repo. The trainer does not get it, and a failed post prints only the error type. Without the variable, `run` prints a line and goes on.
 
 ```powershell
 setx ALGOARCADE_WEBHOOK_URL "<webhook URL>"
 ```
+
+`setx` changes only processes started after it. Set the variable before you register the task below, then sign out and back in so the task's next start sees it. Do the same after changing it.
 
 `run` starts every night from Task Scheduler. Register the task once, in PowerShell from the clone:
 
@@ -159,11 +161,11 @@ $action = New-ScheduledTaskAction -Execute (Get-Command uv).Source `
   -Argument "run python -m algoarcade.runqueue run" -WorkingDirectory (Get-Location).Path
 $trigger = New-ScheduledTaskTrigger -Daily -At 1am
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
-  -MultipleInstances IgnoreNew -StartWhenAvailable
+  -MultipleInstances IgnoreNew -StartWhenAvailable -Priority 4
 Register-ScheduledTask -TaskName "AlgoArcade run queue" -Action $action -Trigger $trigger -Settings $settings
 ```
 
-A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. Not run on the box yet.
+A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. `-Priority 4` is normal priority; the default, 7, is below normal and would lower the steps per second the runs measure. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. Not run on the box yet.
 
 ## Gamma
 
