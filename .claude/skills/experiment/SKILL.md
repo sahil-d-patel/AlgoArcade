@@ -96,6 +96,6 @@ for seed in 0 1 2; do
 done
 ```
 
-`--archive` starts training episodes from cells the run already reached (ENV-09; docs/harness-spec.md, Archive resets); `--archive-p` is the chance per reset, default 0.5. It is off in the baseline, and evaluation never uses it. progress.csv gains `rollout/archive_share`, `rollout/archive_cells` and `rollout/archive_bytes_per_cell`, and the episodes table fills `archive_start`.
+`--archive` starts training episodes from cells the run already reached (ENV-09; docs/harness-spec.md, Archive resets); `--archive-p` is the chance per reset, default 0.5. It is off in the baseline, and evaluation never uses it. progress.csv gains `rollout/archive_share`, `rollout/archive_cells` and `rollout/archive_bytes_per_cell` (zlib-compressed), and the episodes table fills `archive_start`.
 
 The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.
