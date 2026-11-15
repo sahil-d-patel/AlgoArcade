@@ -311,7 +311,7 @@ Every FireRed state has text speed fast and battle animations off. The reader as
 
 Super Mario Land's manifest is `games/super_mario_land/manifest.py`, and `scripts/capture_sml_states.py` regenerates `level_1_1` from power-on; two captures gave the same bytes. One life's timer lasts about 675 decisions, so 2,048 covers three. The demo runs 1-1 to its end in about 80.
 
-Evaluation always starts from the fixed state with the archive off, even when training used archive resets.
+Evaluation always starts from the fixed state with the archive off, even when training used archive resets. `BASELINE_V1`, and every experiment built on it, measures success with sampled actions (`eval_deterministic` False), because from a segment's start state the policy's argmax replays one episode: in TRN-08's 1M-step runs, all 20 evaluation episodes at each of 30 checkpoints were identical. The other presets keep the argmax (decisions.md, 2026-11-14).
 
 ### Archive resets
 
@@ -424,7 +424,7 @@ Two rows per run, because a Parquet file cannot be updated in place. The start r
 
 ### Checkpoints
 
-Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. Checkpoints and per-step logs are never deleted before the showcase.
+Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. A checkpoint is evaluated when its step is a multiple of `eval_every`, and the final checkpoint always is; `BASELINE_V1` evaluates every 1.5M steps (decisions.md, 2026-11-14). Checkpoints and per-step logs are never deleted before the showcase.
 
 ## Conformance tests
 
