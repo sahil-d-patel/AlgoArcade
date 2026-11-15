@@ -34,4 +34,15 @@ uv run python -m algoarcade.logs.fake --run-id heatmap-demo --seed 0 --env-steps
 uv run python -m algoarcade.viz.heatmap --run data/runs/run_id=heatmap-demo --out .planning/heatmap-preview.png
 ```
 
-Generate a given demo run only once: the logger refuses to overwrite it. The training-time slider and milestone timeline are not implemented yet.
+Generate a given demo run only once: the logger refuses to overwrite it. The PNG preview sums the whole run; use HTML output below for the training-time slider. The milestone timeline is not implemented yet.
+
+## Interactive training windows
+
+An `.html` output uses Plotly and embeds its JavaScript for offline viewing. Each slider position shows visits within that window, not cumulative visits. All frames share one logarithmic color scale. Hover gives the map, local tile coordinates and exact visit count. Adjacent 500,000-step windows are combined only when needed to stay at or below 50 frames; the title shows the actual range, including a partial final window. Counts must match both the finished run and every original window. These are raw counts, not visit rates: a partial final window contains fewer decisions and should not be interpreted as reduced exploration by itself.
+
+```sh
+uv run python -m algoarcade.logs.fake --run-id heatmap-slider-demo --seed 0 --env-steps 1000040
+uv run python -m algoarcade.viz.heatmap --run data/runs/run_id=heatmap-slider-demo --out .planning/heatmap-slider.html
+```
+
+For the dashboard, export to `src/algoarcade/viz/dashboard/heatmap-view.html` instead. The adjacent `heatmap.qmd` embeds that file and lists it as a Quarto resource, so the export travels with the rendered page. The generated HTML is ignored by git. Add `heatmap.qmd` to the dashboard navigation when its skeleton is ready. No milestone timeline or real baseline validation is included yet.
