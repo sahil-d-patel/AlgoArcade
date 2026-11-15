@@ -110,6 +110,6 @@ uv run python -m algoarcade.runqueue submit experiments/<file>.py
 uv run python -m algoarcade.runqueue status
 ```
 
-The nightly task runs `uv run python -m algoarcade.runqueue run`. A crash is retried once from step 0, then marked failed and posted to the channel. Set `track=True` in `BASE` for W&B, where the experiment id is the group. The file format, queue directory, webhook variable and nightly task are in docs/setup.md, Training box.
+The nightly task runs `uv run python -m algoarcade.runqueue run`. A crash is retried once from step 0, then marked failed and posted to the channel. A run whose config sets `second_value_head`, which RND's `int_coef` needs, trains on the owned trainer (`algoarcade.training.ppo`); every other run on the SB3 runner. Set `track=True` in `BASE` for W&B, where the experiment id is the group. The file format, queue directory, webhook variable and nightly task are in docs/setup.md, Training box.
 
 The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.
