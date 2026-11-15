@@ -24,3 +24,14 @@ uv run python -m algoarcade.viz.kanto_map --out .planning/kanto-preview.png
 ```
 
 The output directory must already exist. Keep generated images local. The ticket's original count of 63 includes disconnected areas; this renderer reuses the existing 37-map placement without inventing connections.
+
+## Visit heatmap preview
+
+The static heatmap sums exact visit rows across environments and checkpoint windows for one finished run. It checks the total against the run's final step count, rejects mixed runs and invalid coordinates, and reports visits in areas outside the displayed panels. Zero-visit tiles keep their terrain colors; visited tiles use a shared logarithmic magma scale. Synthetic logs are labeled as demonstrations, not training results.
+
+```sh
+uv run python -m algoarcade.logs.fake --run-id heatmap-demo --seed 0 --env-steps 20000
+uv run python -m algoarcade.viz.heatmap --run data/runs/run_id=heatmap-demo --out .planning/heatmap-preview.png
+```
+
+Generate a given demo run only once: the logger refuses to overwrite it. The training-time slider and milestone timeline are not implemented yet.

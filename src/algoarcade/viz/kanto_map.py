@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 import tyro
+from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
@@ -29,8 +30,7 @@ def terrain(grid: MapGrid) -> NDArray[np.uint8]:
     return cells
 
 
-def main(out: Path) -> None:
-    maps = load_maps()
+def draw(maps: dict[tuple[int, int], MapGrid]) -> tuple[Figure, dict[tuple[int, int], Axes]]:
     offsets = place(maps)
     cmap = ListedColormap(COLORS)
     with matplotlib.rc_context({"font.family": "DejaVu Sans", "font.size": 10}):
@@ -38,6 +38,7 @@ def main(out: Path) -> None:
         FigureCanvasAgg(figure)
         panels = figure.add_gridspec(2, 2, width_ratios=(3, 1), hspace=0.3)
         mainland = figure.add_subplot(panels[:, 0])
+        axes = dict.fromkeys(offsets, mainland)
         for map_id, (x, y) in offsets.items():
             grid = maps[map_id]
             mainland.imshow(
@@ -70,6 +71,7 @@ def main(out: Path) -> None:
             )
         for row, (map_id, name) in enumerate((((1, 0), "Viridian Forest"), ((6, 2), "Pewter Gym"))):
             axis = figure.add_subplot(panels[row, 1])
+            axes[map_id] = axis
             axis.imshow(terrain(maps[map_id]), cmap=cmap, vmin=0, vmax=4, interpolation="nearest")
             axis.set_title(f"{name}\nSeparate area · enlarged")
             axis.set_axis_off()
@@ -91,8 +93,14 @@ def main(out: Path) -> None:
             ha="center",
             color="#555555",
         )
-        figure.savefig(out, dpi=160, facecolor=figure.get_facecolor())
-    print(f"{len(offsets)} placed maps; 2 separate panels; saved {out}")  # noqa: T201
+    return figure, axes
+
+
+def main(out: Path) -> None:
+    maps = load_maps()
+    figure, axes = draw(maps)
+    figure.savefig(out, dpi=160, facecolor=figure.get_facecolor())
+    print(f"{len(axes) - 2} placed maps; 2 separate panels; saved {out}")  # noqa: T201
 
 
 if __name__ == "__main__":
