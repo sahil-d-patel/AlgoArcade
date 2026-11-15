@@ -13,3 +13,14 @@ uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<
 `--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
 
 Contract: `docs/technical-plan.md`, Visualization.
+
+## Kanto terrain schematic
+
+`kanto_map.py` draws the 37 mainland maps placed by ENV-10, with enlarged separate panels for Viridian Forest and Pewter Gym. Colors identify walkable ground, blocked tiles, grass, water and ledges. This is terrain only; it does not show visits or account for NPC blockers.
+
+```sh
+uv run python scripts/fetch_maps.py
+uv run python -m algoarcade.viz.kanto_map --out .planning/kanto-preview.png
+```
+
+The output directory must already exist. Keep generated images local. The ticket's original count of 63 includes disconnected areas; this renderer reuses the existing 37-map placement without inventing connections.
