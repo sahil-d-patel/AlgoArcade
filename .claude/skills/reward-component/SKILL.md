@@ -46,4 +46,16 @@ Prefer terms that pay for a new maximum (a new flag, a first visit this episode,
 
 When you tune a weight, change one weight, state the ratio you are aiming for (badge above everything, events above level), and watch the per-component chart and five minutes of video before trusting the return curve.
 
+## RND
+
+RND is not a component. It lives in the owned trainer, `src/algoarcade/training/ppo.py` (TRN-10), and pays novelty as a second reward with its own value head, so the registry, the `reward_<name>` columns and the frozen schema never see it. It is on when `int_coef` is not 0, which needs `second_value_head` and env_id `firered` or `fake`; the run queue trains such a config on the owned trainer. At `int_coef` 0 none of it runs, and the trainer is TRN-07's.
+
+- Input, `rnd_fields`, from each step's info: `map_group`, `map_num`, `x`, `y`, the badge byte as 8 bits, `milestone_count` as 9 bits (one per milestone reached this episode) and `party_level_sum`. The badge byte and the level sum are the values two consecutive reads agreed on, and `milestone_count` is the env's episode best, so a torn read is not novel. Never add a counter, play time or RNG: the target network is frozen, so an input that never repeats stays novel forever.
+- Each column is whitened by its running mean and standard deviation and clipped to ±5. The statistics start from one rollout of random-policy steps before training's seeded reset, and a column that has never varied whitens to 0.
+- Novelty is the predictor's squared error against the frozen target, divided by the running standard deviation of the intrinsic return: each env's novelty discounted by `int_gamma` (0.99) over time, never reset by a done.
+- The intrinsic return ignores episode ends. The extrinsic one keeps gamma 0.997 and the truncation bootstrap. The policy follows the extrinsic advantage plus `int_coef` times the intrinsic one.
+- progress.csv logs `train/rnd_loss`, the predictor's error on the rollout, and `train/intrinsic_value_loss`. A `train/rnd_loss` that never falls usually means an input that never repeats.
+
+The exploit: RND pays for any input the predictor has not learned, so the agent gains by making new values of the slice without progressing. Grinding levels makes a new `party_level_sum` at every level, with no cap like the level term's `LEVEL_CAP`. Fainting warps the party to a Pokémon Center, a new tile early in training, and `blackout` is off in E3. Each decays once the predictor has seen the input often. The tests are in `tests/training/test_ppo.py`; E3 is `experiments/e3_rnd.py`.
+
 The contract is in `docs/harness-spec.md` under "Reward registry", and the reasoning in `docs/technical-plan.md` under "Reward design".
