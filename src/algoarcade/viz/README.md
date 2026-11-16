@@ -2,7 +2,7 @@
 
 Renderers and dashboard sources: the schematic Kanto map, the exploration heatmap, comparison panels, video rendering.
 
-Empty until week 6 on purpose, apart from the video renderer (OPS-05, Akshaj, week 4). The dashboard (VIZ-01) builds on fake-logger data by Tuesday Nov 17, and every panel lands that week.
+The video renderer arrived in week 4; the Kanto schematic, heatmap and recorded-progress timeline are the week 6 work. The dashboard (VIZ-01) builds on fake-logger data by Tuesday Nov 17, and every panel lands that week.
 
 `render.py` plays one seeded episode of a checkpoint from the run's start state and writes an mp4 with the step, return, location, badges and one bar per reward component:
 
@@ -34,7 +34,7 @@ uv run python -m algoarcade.logs.fake --run-id heatmap-demo --seed 0 --env-steps
 uv run python -m algoarcade.viz.heatmap --run data/runs/run_id=heatmap-demo --out .planning/heatmap-preview.png
 ```
 
-Generate a given demo run only once: the logger refuses to overwrite it. The PNG preview sums the whole run; use HTML output below for the training-time slider. The milestone timeline is not implemented yet.
+Generate a given demo run only once: the logger refuses to overwrite it. The PNG preview sums the whole run; use HTML output below for the training-time slider. The recorded-progress timeline is described below.
 
 ## Interactive training windows
 
@@ -45,4 +45,16 @@ uv run python -m algoarcade.logs.fake --run-id heatmap-slider-demo --seed 0 --en
 uv run python -m algoarcade.viz.heatmap --run data/runs/run_id=heatmap-slider-demo --out .planning/heatmap-slider.html
 ```
 
-For the dashboard, export to `src/algoarcade/viz/dashboard/heatmap-view.html` instead. The adjacent `heatmap.qmd` embeds that file and lists it as a Quarto resource, so the export travels with the rendered page. The generated HTML is ignored by git. Add `heatmap.qmd` to the dashboard navigation when its skeleton is ready. No milestone timeline or real baseline validation is included yet.
+For the dashboard, export to `src/algoarcade/viz/dashboard/heatmap-view.html` instead. The adjacent `heatmap.qmd` embeds that file and lists it as a Quarto resource, so the export travels with the rendered page. The generated HTML is ignored by git. Add `heatmap.qmd` to the dashboard navigation when its skeleton is ready. Real baseline validation and a full Quarto dashboard render remain pending.
+
+## Recorded-progress timeline
+
+`timeline.py` reads sampled training steps, with one row per selected seed. Markers mean **first recorded progress at or beyond a stage**, not exact event-completion times. The furthest-stage counter can skip earlier events. The timeline groups thresholds first seen in the same sample into one hover entry.
+
+An open diamond means the threshold is present in that episode's first available sample. It may predate the episode, come from a saved state, or have occurred before that first sample. A filled circle means the threshold was first observed later within an episode. Neither establishes new learning. Missing thresholds stay unobserved; they are never filled with step zero. Hover over the run-end tick to see unobserved stages. Evaluation episodes are excluded because the source is the training steps table.
+
+```sh
+uv run python -m algoarcade.viz.timeline --runs data/runs/run_id=timeline-demo-0 data/runs/run_id=timeline-demo-1 --out .planning/milestone-timeline.html
+```
+
+Generate those synthetic runs first with `algoarcade.logs.fake`, using seeds 0 and 1 respectively. Use explicit run directories: duplicate seeds and mismatched experiment, arm, game, trainer, start-state, observation mode or reward configuration are rejected. For the dashboard, export to `src/algoarcade/viz/dashboard/milestone-timeline.html`; `heatmap.qmd` embeds it alongside the heatmap. No logging fields change.

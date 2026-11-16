@@ -3,6 +3,7 @@ title: "Exploration heatmap"
 format: html
 resources:
   - heatmap-view.html
+  - milestone-timeline.html
 ---
 
 Move the slider to compare visits during successive training windows. Colors use the same logarithmic scale throughout; hover over a visited tile for its map, local coordinates and exact count.
@@ -10,3 +11,11 @@ Move the slider to compare visits during successive training windows. Colors use
 <iframe src="heatmap-view.html" title="Kanto exploration by training window" style="width:100%;height:980px;border:0;"></iframe>
 
 The forest and gym are shown separately from the 37 connected mainland maps. Each frame reports visits to areas outside these panels. Synthetic runs are demonstrations, not training results; their walkers do not obey the game's collision rules.
+
+## Recorded progress by seed
+
+Each marker shows the first sampled observation at or beyond a progress stage. Hover for the stages and logged training step. A first-sample marker may represent progress inherited from a saved state; it does not establish when the agent earned it.
+
+<iframe src="milestone-timeline.html" title="First recorded progress by seed" style="width:100%;height:720px;border:0;"></iframe>
+
+The progress counter records the furthest stage, so reaching a later stage does not prove every earlier event occurred. Missing markers mean the threshold was not observed in sampled logs.
