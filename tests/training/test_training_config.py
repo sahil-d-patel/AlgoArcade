@@ -53,6 +53,8 @@ def test_baseline_v1_pins_every_field() -> None:
             "gae_lambda": 0.95,
             "clip_range": 0.2,
             "ent_coef": 0.01,
+            "vf_coef": 0.5,
+            "max_grad_norm": 0.5,
         },
         "norm_obs": True,
         "norm_reward": False,
@@ -74,6 +76,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "archive_p": 0.5,
         "experiment_id": "",
         "arm": "",
+        "second_value_head": False,
     }
 
 
