@@ -72,3 +72,26 @@ def test_a_failed_render_is_named_and_leaves_no_clip(
     assert "failed fake0: no ROM" in lines
     assert lines[-1] == "rendered 0, skipped 0, failed 2"
     assert not list(out.glob("*.mp4"))
+
+
+def test_an_interrupted_render_is_rendered_again(
+    root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    renders: list[Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    working = render_all.render
+
+    def interrupted(checkpoint: Path, out: Path) -> None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.touch()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(render_all, "render", interrupted)
+    out = tmp_path / "videos"
+    with pytest.raises(KeyboardInterrupt):
+        render_all.main(root, out)
+    monkeypatch.setattr(render_all, "render", working)
+    render_all.main(root, out)
+    assert capsys.readouterr().out.splitlines()[-1] == "rendered 2, skipped 0, failed 0"

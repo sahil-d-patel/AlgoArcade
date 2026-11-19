@@ -39,13 +39,15 @@ def main(root: Path = ROOT, out: Path = VIDEOS) -> None:
         if clip.exists():
             skipped += 1
             continue
+        # Rendered aside and moved in when done: an interrupted render must not leave a clip
+        # the next run would skip.
+        partial = out / "partial" / clip.name
         try:
-            render(checkpoint, clip)
+            render(checkpoint, partial)
         except Exception as error:  # noqa: BLE001 one broken run must not stop the batch
-            # A half-written clip would be skipped next time as if it were done.
-            clip.unlink(missing_ok=True)
             failed.append(f"{run_id}: {error}")
             continue
+        partial.replace(clip)
         rendered += 1
     for line in failed:
         print(f"failed {line}")  # noqa: T201
