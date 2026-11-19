@@ -171,6 +171,9 @@ class AttemptConfig:
     prices: Prices = field(default_factory=Prices)
     max_tokens: int = 4096
     system: str = SYSTEM
+    # The SHA-256 the server's start state must have, from the trace's first line. Empty
+    # checks nothing.
+    start_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -200,6 +203,7 @@ class Attempt:
     dollars: float
     steps: list[Step]
     goal_step: int | None = None  # the press after which the goal first held
+    messages: list[MessageParam] = field(default_factory=list)
 
     def per_action(self) -> dict[str, float] | None:
         """Mean tokens of each kind and dollars per button press; None if nothing was pressed."""
@@ -304,13 +308,15 @@ async def run_attempt(  # noqa: PLR0913 the attempt's model, server, config, tas
     prompt_tokens = TOOL_PROMPT_TOKENS + json_bytes([config.system, tools])
     sent = 0
     with trace.open() as presses:
-        presses.readline()  # the start state
+        start = json.loads(presses.readline())["start_sha256"]
+        if config.start_sha256 and start != config.start_sha256:
+            raise ValueError(f"the server started from {start}, not {config.start_sha256}")
         while True:
             # The prompt only grows by what was appended since the last request, whose size the
             # API reported, so this bounds the next request before it is paid for.
             prompt_tokens += json_bytes(messages[sent:])
             if dollars + config.prices.most(prompt_tokens, config.max_tokens) > config.max_dollars:
-                return Attempt("dollar_cap", actions, dollars, steps)
+                return Attempt("dollar_cap", actions, dollars, steps, messages=messages)
             sent = len(messages)
             response = await create(
                 model=config.model,
@@ -360,7 +366,7 @@ async def run_attempt(  # noqa: PLR0913 the attempt's model, server, config, tas
                 outcome = response.stop_reason or "end_turn"
             else:
                 continue
-            return Attempt(outcome, actions, dollars, steps, goal_step)
+            return Attempt(outcome, actions, dollars, steps, goal_step, messages)
 
 
 def server(args: tuple[str, ...]) -> StdioServerParameters:
@@ -377,12 +383,27 @@ def server(args: tuple[str, ...]) -> StdioServerParameters:
 @dataclass(frozen=True, kw_only=True)
 class Run(AttemptConfig):
     """One attempt, logged under data/llm/<name>/ as steps.jsonl, presses.jsonl (the server's
-    trace) and attempt.json, and in the logging schema as run <name> under data/runs/."""
+    trace), transcript.json (the messages, images left out) and attempt.json, and in the logging
+    schema as run <name> under data/runs/."""
 
     name: str
     segment: str = "fake"
+    experiment_id: str = ""
+    arm: str = ""
     out: Path = Path("data/llm")
     runs: Path = Path("data/runs")
+
+
+def without_images(value: Any) -> Any:
+    """`value` with each base64 image's data replaced by its length. Replaying the trace's
+    presses from the start state shows the screens again."""
+    if isinstance(value, list):
+        return [without_images(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if value.get("type") == "base64":
+        return value | {"data": f"<{len(value['data'])} base64 characters>"}
+    return {key: without_images(item) for key, item in value.items()}
 
 
 def git_commit() -> str:
@@ -403,8 +424,8 @@ async def run(settings: Run, create: Create) -> Attempt:
     backend, rom_sha1, parse = GAMES[segment.game]
     ids = {"run_id": settings.name, "seed": 0}
     fixed = ids | {
-        "experiment_id": "",
-        "arm": "",
+        "experiment_id": settings.experiment_id,
+        "arm": settings.arm,
         "algorithm": "llm",
         "trainer": "algoarcade.agent.loop",
         "env_id": segment.game,
@@ -435,6 +456,19 @@ async def run(settings: Run, create: Create) -> Attempt:
             async with Client(server(arguments), raise_exceptions=True) as client:
                 attempt = await run_attempt(create, client, settings, segment, trace, record)
         presses = [json.loads(line) for line in trace.read_text().splitlines()]
+        # attempt.json first: a run whose end row says finished always has it.
+        projection = project(attempt.steps, settings.prices)
+        summary = asdict(settings) | asdict(attempt)
+        summary |= {
+            "per_action": attempt.per_action(),
+            "projection_300_actions": asdict(projection) if projection else None,
+            "server_pid": presses[0]["pid"],
+            "start_sha256": presses[0]["start_sha256"],
+        }
+        del summary["steps"], summary["messages"]
+        transcript = without_images(to_jsonable_python(attempt.messages))
+        (folder / "transcript.json").write_text(json.dumps(transcript, indent=1))
+        (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
         episode = {
             "start_state": settings.segment,
             "end_reason": attempt.outcome,
@@ -456,14 +490,6 @@ async def run(settings: Run, create: Create) -> Attempt:
             "wall_clock_s": time.time() - started,
         }
         write_run_row(logs, fixed | end)
-    projection = project(attempt.steps, settings.prices)
-    summary = asdict(settings) | asdict(attempt)
-    summary |= {
-        "per_action": attempt.per_action(),
-        "projection_300_actions": asdict(projection) if projection else None,
-    }
-    del summary["steps"]
-    (folder / "attempt.json").write_text(json.dumps(summary, indent=2, default=str))
     return attempt
 
 
