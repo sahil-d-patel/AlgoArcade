@@ -193,6 +193,7 @@ Anyone adding a component writes in the pull request how an agent would exploit 
 - Menu spam: opening and closing menus because the screen changes. Start is not in the default action set.
 - Reset farming: any reward paid on reset teaches the agent to die fast. Every component returns zero on the reset step.
 - Warp flicker: stepping on and off a warp so a progress count misreads high for a frame. A progress term pays only a rise two consecutive reads agree on.
+- Archive farming: resetting into an archived state again and again to collect its progress or its path once more. Progress terms take their best from the loaded state, and novelty starts from the cell's visited set.
 
 ### Catching what we did not predict
 

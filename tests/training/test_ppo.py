@@ -212,6 +212,39 @@ def test_the_trn05_evaluation_path_loads_the_checkpoint(fake_run: Path) -> None:
     assert lengths == [FAKE_STEP_BUDGET]
 
 
+def test_the_same_seed_trains_the_same_run(fake_run: Path, tmp_path: Path) -> None:
+    again = ppo.train(dataclasses.replace(FAKE, runs_dir=tmp_path))
+    for step in (256, 512):
+        first = PPO.load(fake_run / "checkpoints" / f"step_{step}.zip").policy.state_dict()
+        second = PPO.load(again / "checkpoints" / f"step_{step}.zip").policy.state_dict()
+        for name, value in first.items():
+            torch.testing.assert_close(second[name], value, rtol=0, atol=0, msg=name)
+        stats = [
+            VecNormalize.load(str(run / "checkpoints" / f"step_{step}.pkl"), DummyVecEnv([env]))
+            for run in (fake_run, again)
+            for env in [partial(fake_env, FAKE.reward_weights)]
+        ]
+        assert isinstance(stats[0].obs_rms, dict)
+        assert isinstance(stats[1].obs_rms, dict)
+        for key, rms in stats[0].obs_rms.items():
+            np.testing.assert_array_equal(stats[1].obs_rms[key].mean, rms.mean)
+    columns = ["env_idx", "env_steps", "action", "x", "y", "reward_total"]
+    assert (
+        pq.read_table(again / "steps", columns=columns)
+        .sort_by([("env_steps", "ascending"), ("env_idx", "ascending")])
+        .equals(
+            pq.read_table(fake_run / "steps", columns=columns).sort_by(
+                [("env_steps", "ascending"), ("env_idx", "ascending")]
+            )
+        )
+    )
+    returns = []
+    for run in (fake_run, again):
+        with (run / "eval.csv").open() as f:
+            returns.append([(row["step"], row["mean_return"]) for row in csv.DictReader(f)])
+    assert returns[0] == returns[1]
+
+
 class CrashOnSecondWorker(gym.Wrapper):
     def reset(self, *, seed=None, options=None):
         if seed is not None:

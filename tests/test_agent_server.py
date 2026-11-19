@@ -23,7 +23,7 @@ from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.games.base import StateNotReady
-from algoarcade.games.fake import FakeReader, FakeState
+from algoarcade.games.fake import FakeField, FakeReader, FakeState
 from algoarcade.games.firered.manifest import ROM_SHA1 as MANIFEST_ROM_SHA1
 from algoarcade.games.firered.reader import FireRedReader
 from algoarcade.rom import KNOWN_ROMS
@@ -227,7 +227,7 @@ class NotReadyPastX1:
 
 
 async def press_into_a_state_that_is_not_ready() -> tuple[CallToolResult, CallToolResult]:
-    server = build(lambda: Game(FakeBackend(), NotReadyPastX1()))
+    server = build(lambda: Game(FakeBackend(), NotReadyPastX1(), FakeField()))
     async with Client(server, raise_exceptions=True) as client:
         pressed = await client.call_tool("press", {"buttons": ["RIGHT"], "screenshot": True})
         read_back = await client.call_tool("get_state")
@@ -291,3 +291,75 @@ def test_a_manifest_state_needs_the_rom_it_was_captured_on(
     with pytest.raises(ValueError, match="captured on rev 1"):
         agent_server.start_state("seg_01_house")
     assert agent_server.start_state("mine") == b"a state of my own"
+
+
+async def tools_and_results(level: int) -> tuple[list[str], list[CallToolResult]]:
+    params = StdioServerParameters(
+        command=sys.executable, args=["-m", "algoarcade.agent.server", "--level", str(level)]
+    )
+    async with Client(params, raise_exceptions=True) as client:
+        names = sorted(tool.name for tool in (await client.list_tools()).tools)
+        results = [
+            await client.call_tool("get_state"),
+            await client.call_tool("press", {"buttons": ["RIGHT"]}),
+        ]
+    return names, results
+
+
+@pytest.mark.parametrize(
+    ("level", "names"),
+    [
+        (0, ["get_state", "press"]),
+        (1, ["get_state", "press"]),
+        (2, ["advance_dialogue", "get_state", "navigate_to", "press"]),
+    ],
+)
+def test_each_level_lists_its_tools(level: int, names: list[str]) -> None:
+    assert asyncio.run(tools_and_results(level))[0] == names
+
+
+def test_level_0_returns_only_the_screen() -> None:
+    _, results = asyncio.run(tools_and_results(0))
+    for result in results:
+        assert not result.is_error
+        assert result.structured_content is None
+        assert [block.type for block in result.content] == ["image"]
+    pressed = FakeBackend()
+    pressed.press([Button.RIGHT])
+    (image,) = results[1].content
+    assert image.type == "image"
+    assert np.array_equal(
+        png_pixels(base64.b64decode(image.data)), pressed.screen().repeat(2, 0).repeat(2, 1)
+    )
+
+
+async def navigate_and_talk(trace: Path) -> tuple[CallToolResult, CallToolResult]:
+    server = build(lambda: Game(FakeBackend(), FakeReader(), FakeField()), level=2, trace=trace)
+    async with Client(server, raise_exceptions=True) as client:
+        walked = await client.call_tool("navigate_to", {"x": 4, "y": 1})
+        talked = await client.call_tool("advance_dialogue")
+    return walked, talked
+
+
+def test_l2_tools_report_what_they_did_and_trace_every_press(tmp_path: Path) -> None:
+    trace = tmp_path / "presses.jsonl"
+    walked, talked = asyncio.run(navigate_and_talk(trace))
+    backend = FakeBackend()
+    for _ in range(3):
+        backend.press([Button.RIGHT])
+    after = asdict(FakeReader().read(backend))
+    assert walked.structured_content == {"reason": "arrived", "presses": 3, "state": after}
+    assert [json.loads(block.text) for block in walked.content if block.type == "text"] == [
+        {"reason": "arrived", "presses": 3},
+        after,
+    ]
+    assert talked.structured_content == {
+        "reason": "closed",
+        "presses": 0,
+        "text": "",
+        "state": after,
+    }
+    lines = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert [line["button"] for line in lines] == [None, "RIGHT", "RIGHT", "RIGHT"]
+    assert lines[0]["state"] == asdict(FakeReader().read(FakeBackend()))
+    assert lines[-1]["state"] == after
