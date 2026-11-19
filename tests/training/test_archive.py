@@ -11,7 +11,7 @@ pytest.importorskip("stable_baselines3")
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from algoarcade.backends.fake import FakeBackend
-from algoarcade.envs.env import CROP, AlgoArcadeEnv, Cell
+from algoarcade.envs.env import CROP, VISITED, AlgoArcadeEnv, Cell
 from algoarcade.games.fake import FEATURES, FakeReader
 from algoarcade.rewards.registry import COMPONENTS, DEFAULT_WEIGHTS, RewardRegistry
 from algoarcade.training.archive import Archive, ArchiveResets
@@ -62,7 +62,7 @@ def test_with_p_1_and_one_cell_a_reset_lands_on_the_cell_with_its_visited_set() 
     assert venv.reset_infos[0]["location"] == (0, 4, 1)
     assert venv.reset_infos[0]["archive_start"] is True
     rows, cols = CROP
-    seen = np.nonzero(obs["visited"][0, 0])
+    seen = np.nonzero(obs["grid"][0, VISITED])
     visited = {
         (0, 4 + col - cols // 2, 1 + row - rows // 2) for row, col in zip(*seen, strict=True)
     }

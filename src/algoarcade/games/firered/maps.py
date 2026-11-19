@@ -6,6 +6,7 @@ Fetch the files first with: uv run python scripts/fetch_maps.py
 import json
 import re
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -146,3 +147,30 @@ def place(maps: dict[tuple[int, int], MapGrid]) -> dict[tuple[int, int], tuple[i
             }[connection.direction]
             queue.append(connection.map_id)
     return offsets
+
+
+def walkability(maps: dict[tuple[int, int], MapGrid]) -> Callable[[tuple[int, ...]], bool]:
+    """`walkable((map_group, map_num, x, y))`. A tile off its map reads from the map placed there
+    when both maps are on the `place` grid, and reads not walkable otherwise."""
+    grids = {map_id: grid.walkable for map_id, grid in maps.items()}
+    offsets = place(maps)
+    placed = [(offsets[map_id], grids[map_id]) for map_id in offsets]
+
+    def walkable(location: tuple[int, ...]) -> bool:
+        group, num, x, y = location
+        grid = grids.get((group, num))
+        if grid is None:
+            return False
+        height, width = grid.shape
+        if 0 <= x < width and 0 <= y < height:
+            return bool(grid[y, x])
+        if (group, num) not in offsets:
+            return False
+        dx, dy = offsets[(group, num)]
+        for (ox, oy), other in placed:
+            gx, gy = x + dx - ox, y + dy - oy
+            if 0 <= gx < other.shape[1] and 0 <= gy < other.shape[0]:
+                return bool(other[gy, gx])
+        return False
+
+    return walkable

@@ -39,7 +39,13 @@ def fake_env() -> AlgoArcadeEnv:
     backend = FakeBackend()
     rewards = RewardRegistry(COMPONENTS, {"events": 1.0, "explore": 0.1})
     return AlgoArcadeEnv(
-        backend, fake.FakeReader(), rewards, backend.save_state(), BUDGET, fake.FEATURES
+        backend,
+        fake.FakeReader(),
+        rewards,
+        backend.save_state(),
+        BUDGET,
+        fake.FEATURES,
+        walkable=fake.walkable,
     )
 
 
@@ -72,7 +78,7 @@ def trace(env: AlgoArcadeEnv, seed: int, actions: list[int]) -> list[list[Any]]:
 
     def row(action: int | None, reward: float, obs: Any, info: Any, truncated: bool) -> list[Any]:
         # An integer, not hex: the typos hook reads hex digits as misspelled words.
-        digest = hashlib.sha1(obs["vector"].tobytes() + obs["visited"].tobytes()).digest()
+        digest = hashlib.sha1(obs["vector"].tobytes() + obs["grid"].tobytes()).digest()
         return [action, reward, list(info["location"]), truncated, int.from_bytes(digest[:6])]
 
     obs, info = env.reset(seed=seed)

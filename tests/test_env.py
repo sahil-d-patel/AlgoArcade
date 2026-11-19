@@ -2,19 +2,21 @@ import json
 import zlib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 from env_trace import fake_env, trace
-from gymnasium.spaces import Discrete
+from gymnasium.spaces import Box, Discrete
 from gymnasium.utils.env_checker import check_env
+from numpy.typing import NDArray
 
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
-from algoarcade.envs.env import CROP, NOT_READY_FRAMES, AlgoArcadeEnv, Cell
+from algoarcade.envs.env import CROP, NOT_READY_FRAMES, VISITED, WALKABLE, AlgoArcadeEnv, Cell
 from algoarcade.games.base import StateNotReady
-from algoarcade.games.fake import FEATURES, FakeReader, FakeState
+from algoarcade.games.fake import FEATURES, FakeReader, FakeState, walkable
 from algoarcade.rewards.registry import COMPONENTS, WEIGHTS, RewardRegistry
 
 GOLDEN_TRACE = Path(__file__).parent / "fixtures" / "env_golden_trace.json"
@@ -39,7 +41,7 @@ class RecordingBackend(FakeBackend):
         self.frames[recorded:] = [held] * hold + [()] * release
 
 
-def make_env(backend: FakeBackend | None = None, budget: int = 50, **kwargs: bool) -> AlgoArcadeEnv:
+def make_env(backend: FakeBackend | None = None, budget: int = 50, **kwargs: Any) -> AlgoArcadeEnv:
     backend = backend or FakeBackend()
     return AlgoArcadeEnv(
         backend,
@@ -56,8 +58,9 @@ def frame(env: AlgoArcadeEnv) -> int:
     return FakeReader().read(env.backend).frame
 
 
-def test_env_checker_passes_on_fake_backend() -> None:
-    check_env(make_env(), skip_render_check=True)
+@pytest.mark.parametrize("obs_mode", ["symbolic", "pixels", "both"])
+def test_env_checker_passes_on_fake_backend(obs_mode: str) -> None:
+    check_env(make_env(obs_mode=obs_mode, walkable=walkable), skip_render_check=True)
 
 
 def test_env_checker_passes_with_start_and_noop() -> None:
@@ -158,7 +161,7 @@ def test_reset_pays_nothing_and_clears_the_episode() -> None:
         env.step(action)
     obs, info = env.reset(seed=0)
     assert not any(key.startswith("reward/") for key in info)
-    assert obs["visited"].sum() == 1
+    assert obs["grid"][VISITED].sum() == 1
     _, reward, _, _, _ = env.step(2)
     assert reward == 0.0
 
@@ -183,17 +186,86 @@ def test_same_seed_gives_the_same_noop_count() -> None:
     assert frame(env) - start == first
 
 
-def test_visited_crop_is_centred_on_the_player() -> None:
-    env = make_env()
+def test_symbolic_grid_has_a_visited_and_a_walkable_channel_centred_on_the_player() -> None:
+    env = make_env(walkable=walkable)
     obs, _ = env.reset(seed=0)
     rows, cols = CROP
-    centre = (0, rows // 2, cols // 2)
-    assert obs["visited"].shape == (1, rows, cols)
-    assert obs["visited"][centre] == 1.0
+    assert set(obs) == {"vector", "grid"}
+    assert obs["grid"].shape == (2, rows, cols)
+    # The player starts at (1, 1) in room 0: the wall tile above it, the floor tile right of it.
+    assert obs["grid"][WALKABLE, rows // 2 - 1, cols // 2] == 0.0
+    assert obs["grid"][WALKABLE, rows // 2, cols // 2 + 1] == 1.0
+    assert obs["grid"][VISITED, rows // 2, cols // 2] == 1.0
     obs, *_ = env.step(3)
-    assert obs["visited"][centre] == 1.0
-    assert obs["visited"][0, rows // 2, cols // 2 - 1] == 1.0
-    assert obs["visited"].sum() == 2
+    assert obs["grid"][VISITED, rows // 2, cols // 2] == 1.0
+    assert obs["grid"][VISITED, rows // 2, cols // 2 - 1] == 1.0
+    assert obs["grid"][VISITED].sum() == 2
+
+
+def test_without_map_data_every_tile_reads_walkable() -> None:
+    obs, _ = make_env().reset(seed=0)
+    assert obs["grid"][WALKABLE].min() == 1.0
+
+
+def test_an_unknown_obs_mode_is_refused() -> None:
+    with pytest.raises(ValueError, match="pixel"):
+        make_env(obs_mode="pixel")
+
+
+def test_pixels_stack_three_greyscale_frames_beside_the_symbolic_vector() -> None:
+    symbolic, pixels = make_env(walkable=walkable), make_env(obs_mode="pixels")
+    assert pixels.observation_space["pixels"] == Box(0, 255, (3, 72, 80), np.uint8)
+    expected, _ = symbolic.reset(seed=3)
+    obs, _ = pixels.reset(seed=3)
+    assert set(obs) == {"vector", "pixels"}
+    assert obs["pixels"].shape == (3, 72, 80)
+    assert obs["pixels"].dtype == np.uint8
+    assert (obs["pixels"] == obs["pixels"][2]).all()
+    np.testing.assert_array_equal(obs["vector"], expected["vector"])
+    for action in (3, 3, 1, 4, 2, 0, 5, 3):
+        previous = obs["pixels"]
+        expected, *_ = symbolic.step(action)
+        obs, *_ = pixels.step(action)
+        np.testing.assert_array_equal(obs["vector"], expected["vector"])
+        np.testing.assert_array_equal(obs["pixels"][:2], previous[1:])
+    assert not (obs["pixels"][2] == previous[2]).all()
+
+
+def test_both_is_the_union_of_symbolic_and_pixels() -> None:
+    env = make_env(obs_mode="both", walkable=walkable)
+    obs, _ = env.reset(seed=0)
+    symbolic, _ = make_env(walkable=walkable).reset(seed=0)
+    pixels, _ = make_env(obs_mode="pixels").reset(seed=0)
+    assert set(obs) == {"vector", "grid", "pixels"}
+    for key, value in (symbolic | pixels).items():
+        np.testing.assert_array_equal(obs[key], value)
+
+
+class ScreenBackend(FakeBackend):
+    """Shows a fixed GBA-sized frame."""
+
+    def __init__(self, image: NDArray[np.uint8]) -> None:
+        super().__init__()
+        self.image = image
+
+    def screen(self) -> NDArray[np.uint8]:
+        return self.image.copy()
+
+
+def test_a_240_by_160_frame_averages_3_columns_and_about_2_2_rows_into_one_pixel() -> None:
+    image = np.zeros((160, 240, 3), np.uint8)
+    image[:80, ::3] = 90
+    obs, _ = make_env(ScreenBackend(image), obs_mode="pixels").reset(seed=0)
+    # 80 of 160 rows are 72 * 80 / 160 = 36 of 72 output rows exactly.
+    assert (obs["pixels"][:, :36] == 30).all()
+    assert (obs["pixels"][:, 36:] == 0).all()
+
+
+def test_greyscale_weights_red_green_and_blue_as_bt_601() -> None:
+    image = np.zeros((160, 240, 3), np.uint8)
+    image[:] = (200, 100, 50)
+    obs, _ = make_env(ScreenBackend(image), obs_mode="pixels").reset(seed=0)
+    assert (obs["pixels"] == round(0.299 * 200 + 0.587 * 100 + 0.114 * 50)).all()
 
 
 def test_vector_is_scaled_into_the_unit_box() -> None:
