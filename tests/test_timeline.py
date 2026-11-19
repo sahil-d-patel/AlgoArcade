@@ -103,7 +103,7 @@ def test_cli_exports_an_empty_sampled_run_without_claiming_progress(tmp_path: Pa
     pq.write_table(run["runs"], tmp_path / "runs" / "part.parquet")
     out = tmp_path / "timeline.html"
     main([tmp_path], out)
-    content = out.read_text()
+    content = out.read_text(encoding="utf-8")
     assert "Synthetic progress" in content
     assert "Seed 0" in content
     assert '<script src="https://' not in content
