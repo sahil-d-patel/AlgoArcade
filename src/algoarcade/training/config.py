@@ -59,11 +59,17 @@ class TrainConfig:
     """Total env steps across all environments. PPO rounds up to a whole rollout."""
     n_envs: int
     checkpoint_every: int
-    """Env steps between checkpoints. Each checkpoint is evaluated."""
+    """Env steps between checkpoints. Every checkpoint is saved."""
+    eval_every: int
+    """Env steps between evaluations, a multiple of checkpoint_every. The final checkpoint is
+    always evaluated."""
     ppo: PPOConfig
     norm_obs: bool
     norm_reward: bool
     """VecNormalize's switches. The plan normalizes observations and never the reward."""
+    eval_deterministic: bool
+    """Evaluate with the policy's argmax instead of sampled actions. From a segment's start state
+    the argmax replays one episode, so success rates sample (decisions.md, 2026-11-14)."""
     seed: int = 0
     eval_episodes: int = 10
     runs_dir: Path = Path("data/runs")
@@ -91,6 +97,13 @@ class TrainConfig:
     """Train PQN (algoarcade.training.pqn) with these values instead of PPO. The ppo block is then
     unused."""
 
+    def __post_init__(self) -> None:
+        if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:
+            raise ValueError(
+                f"eval_every {self.eval_every} is not a positive multiple of checkpoint_every "
+                f"{self.checkpoint_every}"
+            )
+
 
 def save_config(config: TrainConfig, path: Path) -> None:
     path.write_text(json.dumps(dataclasses.asdict(config), indent=2, default=str) + "\n")
@@ -102,6 +115,9 @@ def load_config(path: Path) -> TrainConfig:
     if raw.get("pqn") is not None:
         raw["pqn"] = PQNConfig(**raw["pqn"])
     raw["runs_dir"] = Path(raw["runs_dir"])
+    # Runs saved before 2026-11-14 wrote neither field; they evaluated every checkpoint, argmax.
+    raw.setdefault("eval_every", raw["checkpoint_every"])
+    raw.setdefault("eval_deterministic", True)
     return TrainConfig(**raw)
 
 
@@ -114,6 +130,7 @@ BASELINE = TrainConfig(
     total_timesteps=15_000_000,
     n_envs=16,
     checkpoint_every=500_000,
+    eval_every=500_000,
     ppo=PPOConfig(
         learning_rate=0.0003,
         n_steps=2048,
@@ -128,6 +145,7 @@ BASELINE = TrainConfig(
     ),
     norm_obs=True,
     norm_reward=False,
+    eval_deterministic=True,
 )
 
 # TRN-05's FireRed runs, on the default reward: the five positive terms at their starting
@@ -140,6 +158,17 @@ FIRERED = dataclasses.replace(
     total_timesteps=1_000_000,
     eval_episodes=3,
     reward_weights=dict(DEFAULT_WEIGHTS),
+)
+
+# TRN-08's baseline, which experiments import and change one field of: 15M steps, 20 sampled
+# evaluation episodes every 1.5M steps. tests/training/test_training_config.py pins every field;
+# why each value: docs/decisions.md, 2026-11-14.
+BASELINE_V1 = dataclasses.replace(
+    FIRERED,
+    total_timesteps=15_000_000,
+    eval_every=1_500_000,
+    eval_episodes=20,
+    eval_deterministic=False,
 )
 
 # TRN-05's Super Mario Land runs: the same PPO values as FireRed, explore on the location, from the
@@ -163,6 +192,7 @@ CARTPOLE = TrainConfig(
     total_timesteps=100_000,
     n_envs=8,
     checkpoint_every=10_000,
+    eval_every=10_000,
     ppo=PPOConfig(
         learning_rate=0.001,
         n_steps=32,
@@ -178,6 +208,7 @@ CARTPOLE = TrainConfig(
     ),
     norm_obs=False,
     norm_reward=False,
+    eval_deterministic=True,
 )
 
 ACROBOT = TrainConfig(
@@ -185,6 +216,7 @@ ACROBOT = TrainConfig(
     total_timesteps=500_000,
     n_envs=16,
     checkpoint_every=50_000,
+    eval_every=50_000,
     ppo=PPOConfig(
         learning_rate=0.0003,
         n_steps=256,
@@ -200,6 +232,7 @@ ACROBOT = TrainConfig(
     ),
     norm_obs=False,
     norm_reward=False,
+    eval_deterministic=True,
 )
 
 # CleanRL's pqn.py defaults at 1ed8062 (TRN-09). Gamma is CleanRL's too; a FireRed run replaces it
@@ -223,6 +256,7 @@ PQN_CARTPOLE = dataclasses.replace(CARTPOLE, total_timesteps=500_000, n_envs=4, 
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
     "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
+    "baseline_v1": ("The experiments' baseline (TRN-08). Pass --start-state.", BASELINE_V1),
     "super_mario_land": ("Super Mario Land 1-1 on PyBoy, explore reward.", SUPER_MARIO_LAND),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),

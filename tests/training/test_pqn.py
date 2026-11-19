@@ -26,6 +26,7 @@ SMOKE = dataclasses.replace(
     total_timesteps=2_000,
     n_envs=2,
     checkpoint_every=1_000,
+    eval_every=1_000,
     eval_episodes=2,
     pqn=dataclasses.replace(PQN_CLEANRL, n_steps=250),
 )
@@ -37,6 +38,7 @@ FAKE = dataclasses.replace(
     total_timesteps=512,
     n_envs=2,
     checkpoint_every=256,
+    eval_every=256,
     eval_episodes=1,
     reward_weights={"events": 1.0, "explore": 0.1},
     pqn=dataclasses.replace(PQN_CLEANRL, n_steps=FAKE_STEP_BUDGET, gamma=FIRERED.ppo.gamma),

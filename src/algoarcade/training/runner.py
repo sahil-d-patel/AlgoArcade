@@ -20,11 +20,14 @@ import json
 import socket
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import torch
 import tyro
 from gymnasium import spaces
 from stable_baselines3 import PPO
@@ -62,11 +65,11 @@ def build_model(config: TrainConfig, env: VecEnv) -> PPO:
 
 
 class CheckpointEval(BaseCallback):
-    """Every `every` env steps and at the end: save a checkpoint, evaluate it, append to eval.csv.
+    """Every checkpoint_every env steps and at the end, save a checkpoint. Evaluate it through
+    evaluate() when its scheduled step is a multiple of eval_every, and always at the end.
 
     With VecNormalize, its statistics are saved beside the checkpoint as step_<n>.pkl and copied
-    to the eval env, which never updates them. The eval env is reseeded before each evaluation,
-    so every checkpoint plays the same episodes.
+    to the eval env, which never updates them.
     _on_step runs during a rollout, before that rollout's update, so the final checkpoint waits
     for _on_training_end; a periodic one in the last rollout would miss the last update.
 
@@ -97,8 +100,10 @@ class CheckpointEval(BaseCallback):
             if "continues" in info:
                 self.continues[i] = info["continues"]
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
+            # The scheduled step, not num_timesteps, which can overshoot it by up to n_envs - 1.
+            due = self.next_at % self.config.eval_every == 0
             self.next_at += self.config.checkpoint_every
-            self.checkpoint()
+            self.checkpoint(evaluate_it=due)
         return True
 
     def _on_rollout_end(self) -> None:
@@ -112,20 +117,32 @@ class CheckpointEval(BaseCallback):
             self.logger.record("rollout/archive_bytes_per_cell", size / len(cells) if cells else 0)
 
     def _on_training_end(self) -> None:
-        self.checkpoint()
+        self.checkpoint(evaluate_it=True)
         self.logger.dump(self.num_timesteps)
 
-    def checkpoint(self) -> None:
+    def checkpoint(self, *, evaluate_it: bool) -> None:
         path = self.run_dir / "checkpoints" / f"step_{self.num_timesteps}"
         self.model.save(path.with_suffix(".zip"))
         normalize = self.model.get_vec_normalize_env()
         if normalize is not None:
             normalize.save(str(path.with_suffix(".pkl")))
+        if not evaluate_it:
+            return
+        if normalize is not None:
             sync_envs_normalization(self.training_env, self.eval_env)
         mean = evaluate(
             self.model, self.eval_env, self.config, self.run_dir, self.num_timesteps, self.start
         )
         self.logger.record("eval/mean_return", mean)
+
+
+@contextmanager
+def eval_rng(config: TrainConfig) -> Iterator[None]:
+    """Torch's generators, CPU and every CUDA device, seeded from the eval seed and restored after.
+    Sampled actions draw from them; without the fork they would draw from training's stream."""
+    with torch.random.fork_rng(devices=range(torch.cuda.device_count())):
+        torch.manual_seed(config.seed + EVAL_SEED_OFFSET)
+        yield
 
 
 def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to write it
@@ -137,15 +154,18 @@ def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to wr
     start: float,
 ) -> float:
     """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
-    and return the mean return. Both trainers evaluate through this function."""
+    and return the mean return. Every trainer evaluates through this function. The env and,
+    inside eval_rng, the sampled actions start from the eval seed, so an evaluation never moves
+    training and each episode replays from its checkpoint (algoarcade.viz.render --eval-episode)."""
     eval_env.seed(config.seed + EVAL_SEED_OFFSET)
-    returns, _ = evaluate_policy(
-        model,
-        eval_env,
-        n_eval_episodes=config.eval_episodes,
-        deterministic=True,
-        return_episode_rewards=True,
-    )
+    with eval_rng(config):
+        returns, _ = evaluate_policy(
+            model,
+            eval_env,
+            n_eval_episodes=config.eval_episodes,
+            deterministic=config.eval_deterministic,
+            return_episode_rewards=True,
+        )
     mean = float(np.mean(returns))
     path = run_dir / "eval.csv"
     new = not path.exists()
