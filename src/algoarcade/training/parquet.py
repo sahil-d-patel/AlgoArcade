@@ -64,6 +64,7 @@ class RunLog:
         self._totals: list[Counter[str]] = [Counter() for _ in range(n_envs)]
         self._tiles: list[set[tuple[Hashable, ...]]] = [set() for _ in range(n_envs)]
         self._goal_step: list[int | None] = [None] * n_envs
+        self._archive_start = [False] * n_envs
 
     def begin(self, envs: Iterable[int], reset_infos: Sequence[Mapping[str, Any]]) -> None:
         for i in envs:
@@ -71,6 +72,7 @@ class RunLog:
             self._return[i] = 0.0
             self._totals[i] = Counter()
             self._tiles[i] = {tuple(reset_infos[i]["location"])}
+            self._archive_start[i] = reset_infos[i]["archive_start"]
             self._goal_step[i] = None
 
     def step(
@@ -151,7 +153,7 @@ class RunLog:
                 "unique_tiles": len(self._tiles[i]),
                 "milestone_count": info["milestone_count"],
                 "start_state": self._start_state,
-                "archive_start": False,
+                "archive_start": self._archive_start[i],
                 # AlgoArcadeEnv ends episodes on the step budget only. A Super Mario Land
                 # continue after a game over is not an end: the episode goes on.
                 "end_reason": "truncated",

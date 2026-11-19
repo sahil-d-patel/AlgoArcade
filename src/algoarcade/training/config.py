@@ -76,12 +76,17 @@ class TrainConfig:
     """With a game env_id: component name to weight."""
     step_log_every: int = 4
     """With a game env_id: log every Nth decision of each episode to the steps table."""
-    second_value_head: bool = False
-    """Owned trainer only: a second value output for TRN-10's intrinsic return."""
+    archive: bool = False
+    """With a game env_id: archive resets (ENV-09) for training episodes. Evaluation never uses
+    them. Off in the baseline."""
+    archive_p: float = 0.5
+    """With archive: the chance a training reset loads an archived cell. A starting guess."""
     experiment_id: str = ""
     """Set by the run queue. Logged in the runs table, and the run's W&B group."""
     arm: str = ""
     """Set by the run queue. Logged in the runs table."""
+    second_value_head: bool = False
+    """Owned trainer only: a second value output for TRN-10's intrinsic return."""
     pqn: PQNConfig | None = None
     """Train PQN (algoarcade.training.pqn) with these values instead of PPO. The ppo block is then
     unused."""

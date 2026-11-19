@@ -500,6 +500,8 @@ def run(
     trainer "owned"."""
     if config.norm_reward:
         raise ValueError("The owned trainers do not normalise rewards; the plan never does")
+    if config.archive:
+        raise ValueError("Archive resets (ENV-09) run on the SB3 runner only")
     run_dir, env_fn, backend, rom_sha1, commit = runner.prepare(config, tag)
     game = config.env_id in runner.GAMES
     # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
