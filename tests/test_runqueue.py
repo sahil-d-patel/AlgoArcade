@@ -35,6 +35,7 @@ BASE = dataclasses.replace(
     total_timesteps=64,
     n_envs=1,
     checkpoint_every=64,
+    eval_every=64,
     eval_episodes=1,
     reward_weights={{"events": 1.0, "explore": 0.1}},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=64, batch_size=32),
