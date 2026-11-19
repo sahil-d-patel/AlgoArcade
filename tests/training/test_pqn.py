@@ -171,6 +171,14 @@ def test_smoke_run_writes_the_runner_artifacts(tmp_path: Path) -> None:
     q_network.load_state_dict(torch.load(run_dir / "checkpoints" / "step_2000.pt"))
 
 
+def test_evaluation_waits_for_eval_every(tmp_path: Path) -> None:
+    config = dataclasses.replace(SMOKE, checkpoint_every=500, runs_dir=tmp_path)
+    run_dir = pqn.train(config)
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [1_000, 2_000]
+    assert len(list((run_dir / "checkpoints").iterdir())) == 4
+
+
 def test_fake_run_passes_the_schema(tmp_path: Path) -> None:
     run_dir = pqn.train(dataclasses.replace(FAKE, runs_dir=tmp_path))
     for name in TABLES:

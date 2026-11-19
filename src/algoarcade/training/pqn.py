@@ -163,7 +163,7 @@ def learn(
     assert isinstance(action_space, spaces.Discrete)
     q_network = QNetwork(obs.shape[1], int(action_space.n)).to(device)
     optimizer = torch.optim.RAdam(q_network.parameters(), lr=pqn.learning_rate)
-    steps = ppo.Steps(config, log, lambda step: checkpoint(q_network, obs_rms, step))
+    steps = ppo.Steps(config, log, lambda step, due: checkpoint(q_network, obs_rms, step, due))
 
     def after_step(*args: Any) -> None:
         # Afterwards: a checkpoint inside steps() evaluates with the evaluation epsilon.

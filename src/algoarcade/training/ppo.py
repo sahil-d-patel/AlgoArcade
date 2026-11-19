@@ -108,7 +108,8 @@ class Policy(Protocol):
 
 
 ObsRms = dict[str, RunningMeanStd] | None
-Checkpoint = Callable[[nn.Module, ObsRms, int], None]
+# The network, its observation statistics, the step, and whether to evaluate it.
+Checkpoint = Callable[[nn.Module, ObsRms, int, bool], None]
 Learn = Callable[[TrainConfig, gym.vector.VectorEnv, Checkpoint, RunLog | None, Any], None]
 # Writes the network to path's checkpoint file(s) and returns what evaluate() plays.
 Save = Callable[[nn.Module, Path, int], PolicyPredictor]
@@ -396,9 +397,10 @@ def begin(
 
 class Steps:
     """collect()'s after_step: counts env steps, logs each step to the Parquet tables and the
-    progress scalars, and calls `save(steps)` every checkpoint_every steps before the last."""
+    progress scalars, and calls `save(steps, evaluate_it)` every checkpoint_every steps before the
+    last, evaluating where the scheduled step is a multiple of eval_every."""
 
-    def __init__(self, config: TrainConfig, log: RunLog | None, save: Callable[[int], None]):
+    def __init__(self, config: TrainConfig, log: RunLog | None, save: Callable[[int, bool], None]):
         self.config = config
         self.log = log
         self.save = save
@@ -421,17 +423,20 @@ class Steps:
             self.log.begin(np.flatnonzero(dones), current)
         self.progress.step(rewards, dones, step_infos)
         if self.next_checkpoint <= self.n < self.config.total_timesteps:
+            # The scheduled step, not n, which can overshoot it by up to n_envs - 1.
+            due = self.next_checkpoint % self.config.eval_every == 0
             self.next_checkpoint += self.config.checkpoint_every
-            self.save(self.n)
+            self.save(self.n, due)
 
     @property
     def done(self) -> bool:
         return self.n >= self.config.total_timesteps
 
     def dump(self, logger: Any) -> None:
-        """End an update: the final checkpoint if the budget is spent, then progress.csv's row."""
+        """End an update: the final checkpoint, always evaluated, if the budget is spent, then
+        progress.csv's row."""
         if self.done:
-            self.save(self.n)
+            self.save(self.n, True)
         self.progress.record(logger)
         logger.record("time/fps", int(self.n / (time.time() - self.start)))
         logger.record("time/total_timesteps", self.n)
@@ -457,7 +462,7 @@ def learn(
     assert isinstance(action_space, spaces.Discrete)
     agent = Agent(obs.shape[1], int(action_space.n), config.second_value_head).to(device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=ppo.learning_rate, eps=ADAM_EPS)
-    steps = Steps(config, log, lambda step: checkpoint(agent, obs_rms, step))
+    steps = Steps(config, log, lambda step, due: checkpoint(agent, obs_rms, step, due))
     while not steps.done:
         rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, steps)
         with torch.no_grad():
@@ -512,7 +517,7 @@ def run(
     save = saver(config, eval_env)
     logger = runner.make_logger(config, run_dir)
 
-    def checkpoint(agent: nn.Module, obs_rms: ObsRms, step: int) -> None:
+    def checkpoint(agent: nn.Module, obs_rms: ObsRms, step: int, evaluate_it: bool) -> None:
         path = run_dir / "checkpoints" / f"step_{step}"
         model = save(agent, path, step)
         if obs_rms is not None:
@@ -520,6 +525,8 @@ def run(
             dict_obs = isinstance(eval_env.observation_space, spaces.Dict)
             eval_env.obs_rms = deepcopy(obs_rms if dict_obs else obs_rms[""])
             eval_env.save(str(path.with_suffix(".pkl")))
+        if not evaluate_it:
+            return
         mean = runner.evaluate(model, eval_env, config, run_dir, step, start)
         logger.record("eval/mean_return", mean)
 
