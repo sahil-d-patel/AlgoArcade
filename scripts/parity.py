@@ -4,16 +4,19 @@
 
 Each task is a folder of run directories from both trainers; a run directory with `-owned-` in
 its name is the owned trainer's. The curve is the IQM over seeds of eval.csv's mean_return, with
-a 95% percentile bootstrap band over seeds. The gate passes on a task when the two bands
+a 95% percentile bootstrap band over seeds, both from algoarcade.training.stats (OPS-05). The gate passes on a task when the two bands
 intersect at the last checkpoint and at 8 or more of 10 evenly spaced checkpoints.
 """
 
 import csv
+import json
 from pathlib import Path
 
 import matplotlib as mpl
 import numpy as np
 import tyro
+
+from algoarcade.training import stats
 
 mpl.use("Agg")
 import matplotlib.pyplot as plt
@@ -23,23 +26,10 @@ POINTS = 10
 NEEDED = 8
 
 
-def iqm(scores: np.ndarray) -> np.ndarray:
-    """The interquartile mean over axis 0: scipy.stats.trim_mean(scores, 0.25), which cuts
-    int(0.25 * n) values from each end. Below four seeds it cuts nothing and is the mean."""
-    n = len(scores)
-    cut = int(0.25 * n)
-    return np.sort(scores, axis=0)[cut : n - cut].mean(axis=0)
-
-
-def bootstrap(
-    scores: np.ndarray, resamples: int = 2000, seed: int = 0
-) -> tuple[np.ndarray, np.ndarray]:
-    """A 95% percentile interval of the IQM, resampling whole seeds (rows) with replacement."""
-    rng = np.random.default_rng(seed)
-    rows = rng.integers(len(scores), size=(resamples, len(scores)))
-    estimates = np.stack([iqm(scores[r]) for r in rows])
-    low, high = np.percentile(estimates, [2.5, 97.5], axis=0)
-    return low, high
+def curve(scores: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """IQM and 95% bootstrap interval at each checkpoint (a column of seeds x checkpoints)."""
+    bounds = np.array([stats.interval(column) for column in scores.T])
+    return np.array([stats.iqm(column) for column in scores.T]), bounds[:, 0], bounds[:, 1]
 
 
 def intersect(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
@@ -47,22 +37,26 @@ def intersect(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]
 
 
 def read_runs(task: Path) -> dict[str, tuple[list[int], np.ndarray]]:
-    """Per trainer: the checkpoint steps and a seeds x checkpoints array of mean returns."""
-    curves: dict[str, list[tuple[list[int], list[float]]]] = {t: [] for t in TRAINERS}
+    """Per trainer: the checkpoint steps and a seeds x checkpoints array of mean returns. Both
+    trainers must have run the same seeds and checkpointed at the same steps."""
+    runs: dict[str, dict[int, tuple[list[int], list[float]]]] = {t: {} for t in TRAINERS}
     for run in sorted(task.glob("run_id=*")):
+        seed = json.loads((run / "config.json").read_text())["seed"]
         with (run / "eval.csv").open() as f:
             rows = list(csv.DictReader(f))
         trainer = "owned" if "-owned-" in run.name else "sb3"
-        curves[trainer].append(
-            ([int(r["step"]) for r in rows], [float(r["mean_return"]) for r in rows])
+        runs[trainer][seed] = (
+            [int(r["step"]) for r in rows],
+            [float(r["mean_return"]) for r in rows],
         )
-    out = {}
-    for trainer, runs in curves.items():
-        steps = runs[0][0]
-        if any(s != steps for s, _ in runs):
-            raise ValueError(f"{task}: {trainer} runs checkpoint at different steps")
-        out[trainer] = (steps, np.array([r for _, r in runs]))
-    return out
+    if runs["sb3"].keys() != runs["owned"].keys():
+        raise ValueError(
+            f"{task.name}: seeds differ, {sorted(runs['sb3'])} against {sorted(runs['owned'])}"
+        )
+    steps = next(iter(runs["sb3"].values()))[0]
+    if any(s != steps for by_seed in runs.values() for s, _ in by_seed.values()):
+        raise ValueError(f"{task.name}: runs checkpoint at different steps")
+    return {t: (steps, np.array([runs[t][seed][1] for seed in sorted(runs[t])])) for t in TRAINERS}
 
 
 def main(runs_dir: Path, out: Path) -> None:
@@ -75,13 +69,11 @@ def main(runs_dir: Path, out: Path) -> None:
     for ax, task in zip(axes[0], tasks, strict=True):
         runs = read_runs(task)
         steps = runs["sb3"][0]
-        if runs["owned"][0] != steps:
-            raise ValueError(f"{task.name}: the trainers checkpoint at different steps")
-        bands = {}
+        bands, centres = {}, {}
         for trainer in TRAINERS:
-            scores = runs[trainer][1]
-            bands[trainer] = bootstrap(scores)
-            ax.plot(steps, iqm(scores), label=f"{trainer} (n={len(scores)})")
+            centres[trainer], low, high = curve(runs[trainer][1])
+            bands[trainer] = (low, high)
+            ax.plot(steps, centres[trainer], label=f"{trainer} (n={len(runs[trainer][1])})")
             ax.fill_between(steps, *bands[trainer], alpha=0.25)
         points = np.linspace(0, len(steps) - 1, POINTS).round().astype(int)
         meet = intersect(bands["sb3"], bands["owned"])
@@ -90,8 +82,7 @@ def main(runs_dir: Path, out: Path) -> None:
         label = "" if min(seeds) >= 5 else ", exploratory"
         gate = "pass" if last and hits >= NEEDED else "fail"
         finals = [
-            f"{iqm(runs[t][1])[-1]:.1f} [{bands[t][0][-1]:.1f}, {bands[t][1][-1]:.1f}]"
-            for t in TRAINERS
+            f"{centres[t][-1]:.1f} [{bands[t][0][-1]:.1f}, {bands[t][1][-1]:.1f}]" for t in TRAINERS
         ]
         print(
             f"| {task.name} | {seeds[0]}, {seeds[1]} | {finals[0]} | {finals[1]} "

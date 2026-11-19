@@ -3,8 +3,11 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
+from numpy.typing import NDArray
+
 from algoarcade.backends import fake
-from algoarcade.backends.base import GameBackend, read_u8, read_u32
+from algoarcade.backends.base import Button, GameBackend, read_u8, read_u32
 
 
 @dataclass(frozen=True)
@@ -57,3 +60,23 @@ FEATURES: dict[str, Callable[[FakeState], float]] = {
     "y": lambda s: s.y / (len(fake.ROOMS[0]) - 1),
     "chest_opened": lambda s: s.chest_opened,
 }
+
+
+class FakeField:
+    """The toy game's overworld for the agent's tools. It has no battles, text or menus."""
+
+    def walkable(self, backend: GameBackend, /) -> NDArray[np.bool_]:
+        room = fake.ROOMS[read_u8(backend, fake.RAM_BASE + fake.ROOM)]
+        return np.array([[tile != "#" for tile in row] for row in room])
+
+    def text(self, _backend: GameBackend, _state: FakeState, /) -> str:
+        return ""
+
+    def choice(self, _backend: GameBackend, /) -> bool:
+        return False
+
+    def battle(self, _state: FakeState, /) -> bool:
+        return False
+
+    def ledges(self, _state: FakeState, /) -> dict[tuple[int, int], Button]:
+        return {}

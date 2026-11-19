@@ -43,6 +43,7 @@ from stable_baselines3.common.vec_env import (
 from algoarcade.envs.env import HOLD, RELEASE
 from algoarcade.logs.schema import RUNS
 from algoarcade.logs.writer import RollingWriter
+from algoarcade.training.archive import ArchiveResets
 from algoarcade.training.config import PRESETS, TrainConfig, save_config
 from algoarcade.training.games import env_factory
 from algoarcade.training.parquet import ParquetLog, RunLog
@@ -70,14 +71,23 @@ class CheckpointEval(BaseCallback):
     for _on_training_end; a periodic one in the last rollout would miss the last update.
 
     When the env reports `continues` (Super Mario Land), the total across the training envs so
-    far goes to progress.csv and W&B as rollout/continues.
+    far goes to progress.csv and W&B as rollout/continues. With archive resets, each rollout
+    logs the share of training resets so far that loaded a cell, the number of cells and their
+    mean save state size in bytes.
     """
 
-    def __init__(self, run_dir: Path, config: TrainConfig, eval_env: VecEnv) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        config: TrainConfig,
+        eval_env: VecEnv,
+        resets: ArchiveResets | None = None,
+    ) -> None:
         super().__init__()
         self.run_dir = run_dir
         self.config = config
         self.eval_env = eval_env
+        self.resets = resets
         self.next_at = config.checkpoint_every
         self.start = time.time()
         self.continues: dict[int, int] = {}
@@ -94,6 +104,12 @@ class CheckpointEval(BaseCallback):
     def _on_rollout_end(self) -> None:
         if self.continues:
             self.logger.record("rollout/continues", sum(self.continues.values()))
+        if self.resets is not None:
+            cells = self.resets.archive.cells.values()
+            size = sum(len(cell.state) for cell in cells)
+            self.logger.record("rollout/archive_share", self.resets.share)
+            self.logger.record("rollout/archive_cells", len(cells))
+            self.logger.record("rollout/archive_bytes_per_cell", size / len(cells) if cells else 0)
 
     def _on_training_end(self) -> None:
         self.checkpoint()
@@ -179,9 +195,8 @@ def run_row(
     """The per-run table's fields that do not change between the start and end rows."""
     return {
         "run_id": run_id,
-        # Set by the run queue (OPS-04); a run launched by hand has neither.
-        "experiment_id": "",
-        "arm": "",
+        "experiment_id": config.experiment_id,
+        "arm": config.arm,
         "algorithm": "ppo",
         "trainer": "sb3",
         "seed": config.seed,
@@ -213,8 +228,12 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
 def prepare(config: TrainConfig, trainer: str) -> tuple[Path, Any, str, str, str]:
     """Check the game files, make the run directory and write config.json and git.json. Returns
     the run directory, the env factory (an env id for a registered env), the backend name, the
-    ROM SHA-1 and the commit. An owned-trainer run id carries the trainer after the task."""
-    name = f"{config.env_id}-{config.start_state}" if config.start_state else config.env_id
+    ROM SHA-1 and the commit. An owned-trainer run id carries the trainer before the seed."""
+    name = (
+        f"{config.experiment_id}-{config.arm}"
+        if config.experiment_id
+        else "-".join(filter(None, (config.env_id, config.start_state)))
+    )
     tag = "" if trainer == "sb3" else f"-{trainer}"
     run_dir = (
         config.runs_dir / f"run_id={name}{tag}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -238,13 +257,16 @@ def make_eval_env(
     own process, never in this one. With normalisation on, a VecNormalize that never updates."""
     eval_env: VecEnv
     if config.env_id in GAMES:
-        eval_env = ParquetLog(
-            make_vec_env(env_fn, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET, **SPAWN),
-            config,
-            run_dir,
-            start,
-            training=training,
+        eval_venv: VecEnv = make_vec_env(
+            env_fn, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET, **SPAWN
         )
+        if config.archive:
+            # VecNormalize is outermost in both stacks, but sync_envs_normalization walks on
+            # down both and raises at the first checkpoint unless the eval stack has a wrapper
+            # wherever the training stack does. Its env is built without archive: it reports no
+            # cells and ignores a next start, so evaluation always starts from the start state.
+            eval_venv = ArchiveResets(eval_venv, config.archive_p, config.seed)
+        eval_env = ParquetLog(eval_venv, config, run_dir, start, training=training)
     else:
         eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
     if config.norm_obs or config.norm_reward:
@@ -266,6 +288,7 @@ def make_logger(config: TrainConfig, run_dir: Path) -> Logger:
             WandbOutput(
                 project="algoarcade",
                 name=run_dir.name.removeprefix("run_id="),
+                group=config.experiment_id or None,
                 dir=run_dir,
                 config=dataclasses.asdict(config),
             )
@@ -292,13 +315,18 @@ def train(config: TrainConfig) -> Path:
     # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
     start = time.time()
     env: VecEnv
+    resets = None
     if game:
-        log = ParquetLog(
-            make_vec_env(env_fn, n_envs=config.n_envs, seed=config.seed, **SPAWN),
-            config,
-            run_dir,
-            start,
+        venv = make_vec_env(
+            env_fn,
+            n_envs=config.n_envs,
+            seed=config.seed,
+            env_kwargs={"archive": config.archive},
+            **SPAWN,
         )
+        if config.archive:
+            venv = resets = ArchiveResets(venv, config.archive_p, config.seed)
+        log = ParquetLog(venv, config, run_dir, start)
         env = log
         eval_env = make_eval_env(config, env_fn, run_dir, start, log.log)
     else:
@@ -319,7 +347,7 @@ def train(config: TrainConfig) -> Path:
     try:
         model.learn(
             total_timesteps=config.total_timesteps,
-            callback=CheckpointEval(run_dir, config, eval_env),
+            callback=CheckpointEval(run_dir, config, eval_env, resets),
         )
         status = "finished"
     except EOFError as error:
