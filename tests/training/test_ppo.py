@@ -5,6 +5,7 @@ import dataclasses
 import os
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -334,7 +335,7 @@ def test_a_stop_file_ends_the_run_after_its_rollout_with_a_checkpoint(
     stop = tmp_path / "stop"
     collect = ppo.collect
 
-    def collect_then_stop(*args: object, **kwargs: object) -> tuple:
+    def collect_then_stop(*args: Any, **kwargs: Any) -> tuple:
         result = collect(*args, **kwargs)
         stop.touch()
         return result
