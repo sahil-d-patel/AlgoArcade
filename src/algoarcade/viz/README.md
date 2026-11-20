@@ -10,6 +10,18 @@ uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<
 
 `--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
 
+`video_grid.py` puts RL checkpoints and one LLM attempt side by side on the same start state, one frame per button press, and prints the press at which each reached its goal. Each checkpoint plays seed 0 until its goal or step budget. The attempt is replayed from its `presses.jsonl` on a fresh emulator, and the replay stops with an error if any state differs from the one logged. Frame 0 is the start state, and the grid refuses cells whose frame 0 differs:
+
+```
+uv run python -m algoarcade.viz.video_grid --checkpoints <run dir>/checkpoints/step_<n>.zip ... --attempt data/llm/E7/<run id> --out data/videos/grid/<segment>.mp4
+```
+
+`cost_table.py` prints one row per (agent, segment) from the Parquet logs: for RL, training steps and wall-clock hours to the first checkpoint whose evaluation reached the goal, and presses to goal; for the E7 LLM cells, the success rate with its exact binomial interval, median presses and dollars per success. `dashboard/agents.qmd` shows it with the grid clips.
+
+```
+uv run python -m algoarcade.viz.cost_table
+```
+
 `registry.py` joins each run's config to its results, one row per run, and prints its row count beside the number of `run_id=` folders, then any folder with no runs row:
 
 ```
