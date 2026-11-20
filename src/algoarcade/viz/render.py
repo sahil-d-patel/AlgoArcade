@@ -118,8 +118,9 @@ def render(  # noqa: C901 - the eval replay adds a branch and a loop
     with rng:
         try:
             for _ in range(eval_episode or 0):
-                while not envs[0].step(act(obs[0]))[3]:
-                    pass
+                done = False
+                while not done:
+                    obs[0], _, _, done, _ = envs[0].step(act(obs[0]))
                 obs[0] = envs[0].reset()[0]
             # Every episode runs to the same step budget; AlgoArcadeEnv never terminates.
             while not truncated:

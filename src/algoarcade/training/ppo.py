@@ -359,12 +359,14 @@ class Progress:
 def learn(
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
-    checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int], None],
+    checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int, bool], None],
     log: RunLog | None,
     logger: Any,
 ) -> None:
-    """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A checkpoint falls every checkpoint_every steps inside a rollout, before
-    its update, as the SB3 runner's does, and once more after the last update."""
+    """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A
+    checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
+    runner's does, and once more after the last update. It is evaluated when its scheduled step
+    is a multiple of eval_every, and always at the end."""
     ppo = config.ppo
     n = config.n_envs
     torch.manual_seed(config.seed)
@@ -403,8 +405,10 @@ def learn(
             log.begin(np.flatnonzero(dones), current)
         progress.step(rewards, dones, step_infos)
         if next_checkpoint <= steps < config.total_timesteps:
+            # The scheduled step, not `steps`, which can overshoot it by up to n_envs - 1.
+            due = next_checkpoint % config.eval_every == 0
             next_checkpoint += config.checkpoint_every
-            checkpoint(agent, obs_rms, steps)
+            checkpoint(agent, obs_rms, steps, due)
 
     start = time.time()
     while steps < config.total_timesteps:
@@ -415,14 +419,14 @@ def learn(
         for key, value in update(agent, optimizer, rollout, advantages, ppo, rng).items():
             logger.record(key, value)
         if steps >= config.total_timesteps:
-            checkpoint(agent, obs_rms, steps)
+            checkpoint(agent, obs_rms, steps, True)
         progress.record(logger)
         logger.record("time/fps", int(steps / (time.time() - start)))
         logger.record("time/total_timesteps", steps)
         logger.dump(steps)
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 - three refusals, then the run
     if config.norm_reward:
         raise ValueError("The owned trainer does not normalise rewards; the plan never does")
     if config.archive:
@@ -444,7 +448,9 @@ def train(config: TrainConfig) -> Path:
         model = runner.build_model(config, eval_env)
     logger = runner.make_logger(config, run_dir)
 
-    def checkpoint(agent: Agent, obs_rms: dict[str, RunningMeanStd] | None, step: int) -> None:
+    def checkpoint(
+        agent: Agent, obs_rms: dict[str, RunningMeanStd] | None, step: int, evaluate_it: bool
+    ) -> None:
         path = run_dir / "checkpoints" / f"step_{step}"
         model.policy.load_state_dict(sb3_state_dict(agent))
         model.num_timesteps = step
@@ -454,8 +460,9 @@ def train(config: TrainConfig) -> Path:
             dict_obs = isinstance(eval_env.observation_space, spaces.Dict)
             eval_env.obs_rms = deepcopy(obs_rms if dict_obs else obs_rms[""])
             eval_env.save(str(path.with_suffix(".pkl")))
-        mean = runner.evaluate(model, eval_env, config, run_dir, step, start)
-        logger.record("eval/mean_return", mean)
+        if evaluate_it:
+            mean = runner.evaluate(model, eval_env, config, run_dir, step, start)
+            logger.record("eval/mean_return", mean)
 
     fixed = runner.run_row(config, run_dir.name.removeprefix("run_id="), backend, rom_sha1, commit)
     fixed["trainer"] = "owned"
@@ -468,8 +475,10 @@ def train(config: TrainConfig) -> Path:
         learn(config, envs, checkpoint, log, logger)
         status = "finished"
     except EOFError as error:
+        # A worker that died without a Python exception leaves close() waiting on it forever.
+        envs.close(terminate=True)
         runner.stop_workers(eval_env)
-        raise RuntimeError("The eval worker died; its traceback is above") from error
+        raise RuntimeError("An env worker died; its traceback is above") from error
     finally:
         if log is not None:
             elapsed = time.time() - start

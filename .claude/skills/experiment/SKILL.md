@@ -8,7 +8,7 @@ paths: src/algoarcade/training/**, src/algoarcade/runqueue/**, experiments/**
 
 A result we cannot reproduce or compare is not a result. These rules exist so that every number in the writeup traces to runs that differ in exactly one way.
 
-Change one factor from the baseline. The baseline is `BASELINE_V1` in `src/algoarcade/training/config.py` (preset `baseline_v1`): the `firered` preset with 20 evaluation episodes per checkpoint. An experiment imports it by name, `from algoarcade.training.config import BASELINE_V1`, and changes one field. If you need to change two things, that is two experiments. A test pins every field, so changing the baseline fails CI until the test changes too; say why in the pull request.
+Change one factor from the baseline. The baseline is `BASELINE_V1` in `src/algoarcade/training/config.py` (preset `baseline_v1`): the `firered` preset trained for 15M steps, with a checkpoint every 500,000 steps and 20 sampled evaluation episodes every 1.5M steps and at the end. An experiment imports it by name, `from algoarcade.training.config import BASELINE_V1`, and changes one field. If you need to change two things, that is two experiments. A test pins every field, so changing the baseline fails CI until the test changes too; say why in the pull request.
 
 Set gamma explicitly. The library default of 0.99 gives a horizon of about 100 steps, and our episodes are thousands of steps long. An agent at the default does not crash. It does not learn. We start at 0.997.
 
@@ -38,7 +38,7 @@ uv run python -m algoarcade.training.runner acrobot --seed 0
 uv run python -m algoarcade.training.runner baseline --env-id <any registered env id> --seed 0
 ```
 
-Debug run on CartPole: add `--total-timesteps 1000 --n-envs 1 --checkpoint-every 500 --ppo.batch-size 32 --runs-dir <scratch dir>`. `--track` sends SB3's scalars to Weights & Biases; it is off by default.
+Debug run on CartPole: add `--total-timesteps 1000 --n-envs 1 --checkpoint-every 500 --eval-every 500 --ppo.batch-size 32 --runs-dir <scratch dir>`. `--eval-every` must be a multiple of `--checkpoint-every`; set them equal to evaluate every checkpoint. `--track` sends SB3's scalars to Weights & Biases; it is off by default.
 
 Each run writes one directory:
 
@@ -47,13 +47,13 @@ data/runs/run_id=<env_id>-seed<seed>-<YYYYmmdd-HHMMSS>/
 ├── config.json               resolved config; load_config() reads it back
 ├── git.json                  {"commit": ..., "dirty": ...}
 ├── checkpoints/step_<n>.zip  every checkpoint_every env steps, and after the last update
-├── eval.csv                  one row per checkpoint: step, mean_return, std_return, wall_time_s
+├── eval.csv                  one row per evaluated checkpoint: step, mean_return, std_return, wall_time_s
 └── progress.csv              SB3's rollout and train scalars
 ```
 
 A run from the queue is `run_id=<experiment>-<arm>-seed<n>-<YYYYmmdd-HHMMSS>` and has `experiment_id` and `arm` set in its runs table.
 
-Each `eval.csv` row is `eval_episodes` (default 10) deterministic episodes on an env reseeded to `seed + 1000` first, so every checkpoint plays the same episodes. The last row is the final result. `uv run python scripts/summarize_runs.py --out-dir <dir>` prints the table of runs and saves one learning-curve PNG per env.
+Each `eval.csv` row is `eval_episodes` (default 10) episodes on an env reseeded to `seed + 1000` first. A checkpoint is evaluated when its step is a multiple of `eval_every`, and the final checkpoint always is. With `eval_deterministic` True the policy takes its argmax, which from a segment's start state replays one episode. `BASELINE_V1` sets it False: actions are sampled from torch's generator seeded to `seed + 1000` (`runner.eval_rng`), so evaluation never moves training and `algoarcade.viz.render --eval-episode k` replays episode k. The last row is the final result. `uv run python scripts/summarize_runs.py --out-dir <dir>` prints the table of runs and saves one learning-curve PNG per env.
 
 ## The games
 
@@ -70,7 +70,7 @@ for state in seg_01_house seg_02_pallet; do
 done
 ```
 
-Debug first with `--n-envs 1 --total-timesteps 1024 --checkpoint-every 512 --ppo.n-steps 512 --ppo.batch-size 64 --eval-episodes 1 --runs-dir <scratch dir>`. On macOS, do not launch through `/usr/bin/time` or `nohup`: they drop `DYLD_FALLBACK_LIBRARY_PATH` (docs/setup.md), and every worker dies at start as an `EOFError`. A worker that dies prints its traceback to stderr; the parent only sees `EOFError`.
+Debug first with `--n-envs 1 --total-timesteps 1024 --checkpoint-every 512 --eval-every 512 --ppo.n-steps 512 --ppo.batch-size 64 --eval-episodes 1 --runs-dir <scratch dir>`; without `--eval-every 512` the preset's `eval_every` is not a multiple of 512 and the config is rejected. On macOS, do not launch through `/usr/bin/time` or `nohup`: they drop `DYLD_FALLBACK_LIBRARY_PATH` (docs/setup.md), and every worker dies at start as an `EOFError`. A worker that dies prints its traceback to stderr; the parent only sees `EOFError`.
 
 Besides the files above, a game run writes:
 

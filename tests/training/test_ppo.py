@@ -2,6 +2,7 @@
 
 import csv
 import dataclasses
+import os
 from functools import partial
 from pathlib import Path
 
@@ -175,6 +176,23 @@ def test_smoke_run_writes_the_runner_artifacts(tmp_path: Path) -> None:
     ]
 
 
+def test_every_checkpoint_is_saved_and_every_eval_every_steps_evaluated(tmp_path: Path) -> None:
+    # As the SB3 runner's test: checkpoints at 128, 256, 384 and the final 512. Evaluations at
+    # 256, the one multiple of eval_every, and at the final checkpoint, which always evaluates.
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, checkpoint_every=128, eval_every=256)
+    run_dir = ppo.train(config)
+    assert sorted(p.name for p in (run_dir / "checkpoints").glob("*.zip")) == [
+        "step_128.zip",
+        "step_256.zip",
+        "step_384.zip",
+        "step_512.zip",
+    ]
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [256, 512]
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [256, 512]
+
+
 @pytest.fixture(scope="module")
 def fake_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return ppo.train(dataclasses.replace(FAKE, runs_dir=tmp_path_factory.mktemp("runs")))
@@ -264,6 +282,34 @@ class CrashOnSecondWorker(gym.Wrapper):
 
 def crashing_env(weights: dict[str, float]) -> gym.Env:
     return CrashOnSecondWorker(fake_env(weights))
+
+
+class ExitOnSecondWorker(CrashOnSecondWorker):
+    def step(self, action):
+        self.steps += 1
+        if getattr(self, "rank", 0) == 1 and self.steps == 10:
+            os._exit(1)
+        return self.env.step(action)
+
+
+def exiting_env(weights: dict[str, float]) -> gym.Env:
+    return ExitOnSecondWorker(fake_env(weights))
+
+
+def test_a_worker_that_exits_raises_and_marks_the_run_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def factory(_env_id: str, _start: str, weights: dict[str, float], _obs_mode: str) -> tuple:
+        return partial(exiting_env, dict(weights)), "fake", ""
+
+    monkeypatch.setattr(runner, "env_factory", factory)
+    with pytest.raises(RuntimeError, match="An env worker died"):
+        ppo.train(dataclasses.replace(FAKE, runs_dir=tmp_path))
+    (run_dir,) = tmp_path.iterdir()
+    assert [r["status"] for r in pq.read_table(run_dir / "runs").to_pylist()] == [
+        "running",
+        "crashed",
+    ]
 
 
 def test_pixels_are_refused_because_the_agent_has_no_cnn(tmp_path: Path) -> None:
