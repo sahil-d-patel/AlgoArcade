@@ -8,7 +8,7 @@ Renderers and dashboard sources: the schematic Kanto map, the exploration heatma
 uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<n>.zip --seed 0 --out data/videos/<name>.mp4
 ```
 
-`--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
+`--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. `--eval-episode k` replays the k-th evaluation episode the runner logged at that checkpoint, sampled actions included, so a logged success can be clipped. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
 
 `video_grid.py` puts RL checkpoints and one LLM attempt side by side on the same start state, one frame per button press, and prints the press at which each reached its goal. Each checkpoint plays seed 0 until its goal or step budget. The attempt is replayed from its `presses.jsonl` on a fresh emulator, and the replay stops with an error if any state differs from the one logged. Frame 0 is the start state, and the grid refuses cells whose frame 0 differs:
 

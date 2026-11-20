@@ -126,7 +126,8 @@ def caption(con: duckdb.DuckDBPyConnection) -> str:
     names = ", ".join(name for (name,) in machines) or "none yet"
     return (
         "First success is the earliest checkpoint at which an evaluation episode from the "
-        "segment's start state reached its goal. Training steps are the environment steps at "
+        "segment's start state reached its goal; runs evaluate every eval_every steps, so it is "
+        "exact to that interval. Training steps are the environment steps at "
         "that checkpoint. GPU-hours are wall-clock hours from the run's start to the end of that "
         "checkpoint's evaluation, on the machine each run logged "
         f"({names}); the training box is the Windows desktop with an RTX-class GPU. RL cells "
