@@ -1,2 +1,7 @@
 /.quarto/
 **/*.quarto_ipynb
+# What `python -m algoarcade.viz.site` writes before each render, and the site.
+/_site/
+/_variables.yml
+/plotly.min.js
+/videos/
