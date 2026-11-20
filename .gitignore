@@ -27,8 +27,3 @@ __pycache__/
 wandb/
 
 .DS_Store
-
-# Generated interactive heatmap; rebuild from local logs.
-/src/algoarcade/viz/dashboard/heatmap-view.html
-
-/src/algoarcade/viz/dashboard/milestone-timeline.html

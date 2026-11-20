@@ -1,21 +1,28 @@
 ---
 title: "Exploration heatmap"
 format: html
-resources:
-  - heatmap-view.html
-  - milestone-timeline.html
+execute:
+  echo: false
 ---
 
-Move the slider to compare visits during successive training windows. Colors use the same logarithmic scale throughout; hover over a visited tile for its map, local coordinates and exact count.
+Visits per tile in each training window, on one log scale for every window. Hover a tile for its map, position and count. The page reads `data/runs/`, or the folder in `ALGOARCADE_RUNS`: the heatmap shows the first run there, and the timeline shows every run, so point it at one arm's finished FireRed runs, one per seed.
 
-<iframe src="heatmap-view.html" title="Kanto exploration by training window" style="width:100%;height:980px;border:0;"></iframe>
+```{python}
+#| output: asis
+from algoarcade.games.firered.maps import load_maps
+from algoarcade.viz.heatmap import PIXELATED, RUNS, interactive, load
+from algoarcade.viz.timeline import record, timeline
 
-The forest and gym are shown separately from the 37 connected mainland maps. Each frame reports visits to areas outside these panels. Synthetic runs are demonstrations, not training results; their walkers do not obey the game's collision rules.
+runs = sorted(RUNS.glob("run_id=*"))
+heatmap = interactive(*load(runs[0]), load_maps())
+# plotly.js is embedded in this figure only; the timeline below reuses it.
+print(f"```{{=html}}\n{PIXELATED}\n{heatmap.to_html(full_html=False, include_plotlyjs=True)}\n```")
+```
 
 ## Recorded progress by seed
 
-Each marker shows the first sampled observation at or beyond a progress stage. Hover for the stages and logged training step. A first-sample marker may represent progress inherited from a saved state; it does not establish when the agent earned it.
-
-<iframe src="milestone-timeline.html" title="First recorded progress by seed" style="width:100%;height:720px;border:0;"></iframe>
-
-The progress counter records the furthest stage, so reaching a later stage does not prove every earlier event occurred. Missing markers mean the threshold was not observed in sampled logs.
+```{python}
+#| output: asis
+progress = timeline([record(run) for run in runs])
+print(f"```{{=html}}\n{progress.to_html(full_html=False, include_plotlyjs=False)}\n```")
+```
