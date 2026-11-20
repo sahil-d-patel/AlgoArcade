@@ -20,6 +20,9 @@ agent = [
     { name = "anthropic" },
     { name = "mcp" },
 ]
+dashboard = [
+    { name = "quarto-cli" },
+]
 dev = [
     { name = "poethepoet" },
     { name = "prek" },
@@ -40,7 +43,6 @@ train = [
 viz = [
     { name = "duckdb" },
     { name = "plotly" },
-    { name = "quarto-cli" },
 ]
 
 [package.metadata]
@@ -58,6 +60,7 @@ agent = [
     { name = "anthropic" },
     { name = "mcp", specifier = ">=2.3,<3" },
 ]
+dashboard = [{ name = "quarto-cli", specifier = ">=1.11.9,<2" }]
 dev = [
     { name = "poethepoet" },
     { name = "prek" },
@@ -76,9 +79,8 @@ train = [
     { name = "wandb" },
 ]
 viz = [
-    { name = "duckdb", specifier = ">=2.0.0,<3" },
-    { name = "plotly", specifier = ">=7.1.0,<8" },
-    { name = "quarto-cli", specifier = ">=1.11.9,<2" },
+    { name = "duckdb", specifier = ">=2,<3" },
+    { name = "plotly", specifier = ">=7.1,<8" },
 ]
 
 [[package]]

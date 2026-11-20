@@ -17,11 +17,9 @@ dependencies = [
 dev = ["ruff", "pyrefly", "pytest", "poethepoet", "prek", "typos"]
 train = ["torch", "stable-baselines3", "wandb", "matplotlib", "scipy", "imageio-ffmpeg", "pillow"]
 agent = ["mcp>=2.3,<3", "anthropic"]
-viz = [
-    "duckdb>=2.0.0,<3",
-    "plotly>=7.1.0,<8",
-    "quarto-cli>=1.11.9,<2",
-]
+viz = ["duckdb>=2,<3", "plotly>=7.1,<8"]
+# Not a default group: quarto-cli downloads Quarto (140 to 240 MB) at install and pulls in Jupyter.
+dashboard = ["quarto-cli>=1.11.9,<2"]
 
 [build-system]
 requires = ["hatchling"]
@@ -84,5 +82,5 @@ lint = { cmd = "ruff check", help = "Lint" }
 types = { cmd = "pyrefly check", help = "Type check" }
 test = { cmd = "pytest", help = "Run the tests" }
 items = { cmd = "python tools/github/bootstrap.py --check", help = "Validate the work item files" }
-dashboard = { cmd = "quarto render src/algoarcade/viz/dashboard", help = "Render the dashboard to src/algoarcade/viz/dashboard/_site/" }
+dashboard = { cmd = "uv run --group dashboard quarto render src/algoarcade/viz/dashboard", help = "Install the dashboard group if needed and render the dashboard to src/algoarcade/viz/dashboard/_site/" }
 check = { sequence = [{ cmd = "ruff format --check" }, "lint", "types", "test"], help = "What CI runs: format check, lint, types, tests" }

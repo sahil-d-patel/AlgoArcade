@@ -19,7 +19,7 @@ uv run prek install
 
 Members work from a fork because only the PMs have write access. `origin` is your fork and `upstream` is the team repository. PMs can clone the team repository directly.
 
-- `uv sync` creates `.venv` with Python 3.12 and everything in the lockfile, including PyTorch and Quarto. The first run downloads a few hundred megabytes; Quarto alone is 140 to 240 MB, fetched from GitHub when `quarto-cli` installs.
+- `uv sync` creates `.venv` with Python 3.12 and everything in the lockfile, including PyTorch. The first run downloads a few hundred megabytes.
 - `uv run poe check` should end with every step passing. If it does not, your setup is broken and nothing else will work. Ask in the channel.
 - `uv run prek install` adds the git hook that runs the same checks on each commit.
 

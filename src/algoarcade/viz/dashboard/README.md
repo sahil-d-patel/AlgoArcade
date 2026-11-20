@@ -9,7 +9,9 @@ uv run poe dashboard
 
 Then open `src/algoarcade/viz/dashboard/_site/index.html` in a browser.
 
-`uv run poe dashboard` runs `quarto render` on this folder. Quarto comes from the `quarto-cli` package in the `viz` group; there is nothing to install by hand. Before rendering, Quarto runs `python -m algoarcade.viz.site`, which reads every run under `data/runs/` and writes:
+`uv run poe dashboard` runs `uv run --group dashboard quarto render` on this folder. The first time, that installs the `dashboard` group into `.venv`; nothing else needs installing by hand. The group is opt-in because `quarto-cli` downloads Quarto from GitHub when it installs (139 MB on Linux, 141 MB on Windows, 237 MB on macOS) and pulls in 76 more packages, mostly Jupyter. Members who never render the site, and CI, skip all of it. The next plain `uv sync` removes the group again; `poe dashboard` puts it back.
+
+Before rendering, Quarto runs `python -m algoarcade.viz.site`, which reads every run under `data/runs/` and writes:
 
 - `_variables.yml`: the git commit, the render date and the number of runs read, shown in every page's footer;
 - `plotly.min.js`, which every page's header loads;
