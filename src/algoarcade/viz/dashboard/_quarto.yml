@@ -11,6 +11,7 @@ website:
   navbar:
     left:
       - index.qmd
+      - heatmap.qmd
   page-footer:
     center: "Commit {{< var commit >}}, rendered {{< var date >}}, runs read: {{< var runs >}}"
 
