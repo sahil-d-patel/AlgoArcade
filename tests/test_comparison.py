@@ -102,16 +102,17 @@ def test_an_experiment_with_no_runs_shows_the_shared_baseline(
 
 
 def test_every_figure_names_each_arm_with_its_seed_count(root: Path) -> None:
-    figures = comparison.figures(comparison.load(site.connect(root), "E1"))
+    figures = comparison.figures("E1", comparison.load(site.connect(root), "E1"))
     assert len(figures) == 4
     for figure in figures:
         text = str(figure.to_dict())
+        assert figure.to_dict()["layout"]["title"]["text"].startswith("E1: ")
         assert "baseline (n=5)" in text
         assert "pqn (n=3, exploratory)" in text
 
 
 def test_wall_clock_axis_names_the_machines(root: Path) -> None:
-    _, hours, _, _ = comparison.figures(comparison.load(site.connect(root), "E1"))
+    _, hours, _, _ = comparison.figures("E1", comparison.load(site.connect(root), "E1"))
     title = hours.to_dict()["layout"]["xaxis"]["title"]["text"]
     assert "baseline: fake" in title
     assert "pqn: mac" in title
@@ -125,6 +126,8 @@ def test_iqm_curve_draws_the_iqm_inside_its_band() -> None:
     )
     upper, lower, line = figure.select_traces()
     assert line["name"] == "level_1_1 (n=5)"
+    assert not upper["showlegend"]
+    assert not lower["showlegend"]
     assert (lower["y"] <= line["y"]).all()
     assert (line["y"] <= upper["y"]).all()
     assert figure.to_dict()["layout"]["xaxis"]["title"]["text"] == "environment steps"

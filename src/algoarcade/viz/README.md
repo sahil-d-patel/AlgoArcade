@@ -22,6 +22,19 @@ uv run python -m algoarcade.viz.registry
 uv run python -m algoarcade.viz.render_all
 ```
 
+`comparison.py` prints one table each for E1, E2 and E4 against the shared baseline arm: per arm the seed count, IQM, 95% bootstrap interval, probability of improvement over the baseline and every seed's final score. Only finished runs count; the table says how many were left out.
+
+```
+uv run python -m algoarcade.viz.comparison --root data/runs
+```
+
+A run's score is the mean `milestone_count` over a checkpoint's evaluation episodes, E1's metric. Arms are runs whose `experiment_id` is the experiment, by `arm`. The baseline is every run whose `experiment_id` is `comparison.BASELINE`, `"baseline"` until OPS-06 names it. `figures(experiment, arms)` draws the IQM curve against steps and against wall-clock hours on the runs' `machine`, the performance profile and the probability of improvement. `iqm_curve` draws any curves given as `(x, scores)` with scores shaped seeds by x. `dashboard/comparison.qmd` shows the tables and figures. Fake arms for it:
+
+```
+uv run python -m algoarcade.logs.fake --run-id baseline-ppo-seed0 --experiment-id baseline --arm ppo --seed 0
+uv run python -m algoarcade.logs.fake --run-id E1-pqn-seed10 --experiment-id E1 --arm pqn --seed 10
+```
+
 `dashboard/` is the Quarto site, rendered with `uv run poe dashboard`. `site.py` gives its pages a DuckDB view of the logs and runs before each render. `dashboard/README.md` says how to add a panel.
 
 Contract: `docs/technical-plan.md`, Visualization.

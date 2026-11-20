@@ -114,8 +114,8 @@ def iqm_curve(
         bands = np.array([stats.interval(column) for column in columns])
         color = DEFAULT_PLOTLY_COLORS[i % len(DEFAULT_PLOTLY_COLORS)]
         label = _label(name, columns.shape[1])
-        band = {"x": x, "mode": "lines", "line_width": 0, "legendgroup": label}
-        figure.add_scatter(y=bands[:, 1], showlegend=False, hoverinfo="skip", **band)
+        band = {"x": x, "mode": "lines", "line_width": 0, "legendgroup": label, "showlegend": False}
+        figure.add_scatter(y=bands[:, 1], hoverinfo="skip", **band)
         fill = color.replace("rgb", "rgba").replace(")", ", 0.2)")
         figure.add_scatter(y=bands[:, 0], fill="tonexty", fillcolor=fill, name=label, **band)
         iqm = [stats.iqm(column) for column in columns]
@@ -123,13 +123,13 @@ def iqm_curve(
     return figure
 
 
-def figures(arms: Mapping[str, Arm]) -> list[go.Figure]:
+def figures(experiment: str, arms: Mapping[str, Arm]) -> list[go.Figure]:
     """The IQM curve against steps and against hours, the performance profile, and, when the
     baseline ran, the probability of improvement over it."""
     y_title = f"eval {METRIC}, IQM"
     steps = iqm_curve(
         {name: (arm.steps, arm.scores) for name, arm in arms.items()},
-        "IQM learning curve, 95% bootstrap band",
+        f"{experiment}: IQM learning curve, 95% bootstrap band",
         "environment steps",
         y_title,
     )
@@ -138,25 +138,25 @@ def figures(arms: Mapping[str, Arm]) -> list[go.Figure]:
     where = machines.pop() if len(machines) == 1 else "; ".join(f"{k}: {v}" for k, v in on.items())
     hours = iqm_curve(
         {name: (np.median(arm.hours, axis=0), arm.scores) for name, arm in arms.items()},
-        "IQM against wall-clock time, each checkpoint at its median hour over seeds",
+        f"{experiment}: IQM against wall-clock time, each checkpoint at its median hour over seeds",
         f"wall-clock hours on {where}",
         y_title,
     )
 
+    # From 0, the lowest milestone_count, so every profile starts at 1.
     finals = np.concatenate([arm.scores[:, -1] for arm in arms.values()])
-    thresholds = np.linspace(finals.min(), finals.max(), 101)
+    thresholds = np.linspace(0, finals.max(), 101)
     profile = go.Figure(
         layout={
-            "title": "Performance profile of final scores",
+            "title": f"{experiment}: performance profile of final scores",
             "xaxis_title": f"threshold, final eval {METRIC}",
             "yaxis_title": "fraction of runs above the threshold",
         }
     )
-    for name, arm in arms.items():
+    for (name, arm), color in zip(arms.items(), DEFAULT_PLOTLY_COLORS, strict=False):
         fraction = stats.performance_profile(arm.scores[:, -1], thresholds)
-        profile.add_scatter(
-            x=thresholds, y=fraction, line_shape="hv", name=_label(name, len(arm.seeds))
-        )
+        label = _label(name, len(arm.seeds))
+        profile.add_scatter(x=thresholds, y=fraction, line_shape="hv", line_color=color, name=label)
 
     result = [steps, hours, profile]
     if "baseline" in arms:
@@ -165,7 +165,7 @@ def figures(arms: Mapping[str, Arm]) -> list[go.Figure]:
         p = list(improvement(arms).values())
         bars = go.Figure(
             layout={
-                "title": f"Probability of improvement over {_label('baseline', n)}",
+                "title": f"{experiment}: probability of improvement over {_label('baseline', n)}",
                 "xaxis": {
                     "title": "P(a run of the arm scores above a baseline run)",
                     "range": [0, 1],
