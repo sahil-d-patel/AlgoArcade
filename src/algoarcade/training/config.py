@@ -27,6 +27,9 @@ class PPOConfig:
     gae_lambda: float
     clip_range: float
     ent_coef: float
+    vf_coef: float
+    """Weight of the value loss, the mean squared error to the return."""
+    max_grad_norm: float
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,8 @@ class TrainConfig:
     """Set by the run queue. Logged in the runs table, and the run's W&B group."""
     arm: str = ""
     """Set by the run queue. Logged in the runs table."""
+    second_value_head: bool = False
+    """Owned trainer only: a second value output for TRN-10's intrinsic return."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
@@ -71,13 +76,16 @@ def save_config(config: TrainConfig, path: Path) -> None:
 
 def load_config(path: Path) -> TrainConfig:
     raw = json.loads(path.read_text())
-    raw["ppo"] = PPOConfig(**raw["ppo"])
+    # Runs saved before TRN-07 wrote neither field; SB3 trained them with 0.5 and 0.5.
+    raw["ppo"] = PPOConfig(**{"vf_coef": 0.5, "max_grad_norm": 0.5} | raw["ppo"])
     raw["runs_dir"] = Path(raw["runs_dir"])
     return TrainConfig(**raw)
 
 
 # The project baseline from docs/technical-plan.md, "PPO starting point". batch_size is not in
 # that table; 4,096 (8 minibatches per 32,768-step rollout) is a guess for TRN-05 to tune.
+# vf_coef and max_grad_norm are SB3's defaults in every preset, written out so the owned trainer
+# (TRN-07) takes the same values from config.
 BASELINE = TrainConfig(
     env_id=tyro.MISSING,
     total_timesteps=15_000_000,
@@ -92,6 +100,8 @@ BASELINE = TrainConfig(
         gae_lambda=0.95,
         clip_range=0.2,
         ent_coef=0.01,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
     ),
     norm_obs=True,
     norm_reward=False,
@@ -140,6 +150,8 @@ CARTPOLE = TrainConfig(
         gae_lambda=0.8,
         clip_range=0.2,
         ent_coef=0.0,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
     ),
     norm_obs=False,
     norm_reward=False,
@@ -160,6 +172,8 @@ ACROBOT = TrainConfig(
         gae_lambda=0.94,
         clip_range=0.2,
         ent_coef=0.0,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
     ),
     norm_obs=False,
     norm_reward=False,
