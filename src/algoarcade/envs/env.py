@@ -34,7 +34,6 @@ MAX_NOOP_FRAMES = 7
 NOT_READY_FRAMES = 8
 # Rows and columns of tiles around the player. A guess: FireRed shows 15 by 10 tiles.
 CROP = (9, 15)
-# The grid's channels.
 VISITED = 0
 WALKABLE = 1
 ObsMode = Literal["symbolic", "pixels", "both"]
