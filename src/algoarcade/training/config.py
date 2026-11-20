@@ -10,6 +10,7 @@ from pathlib import Path
 
 import tyro
 
+from algoarcade.envs.env import ObsMode
 from algoarcade.games.super_mario_land import rewards as sml_rewards
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 
@@ -74,6 +75,10 @@ class TrainConfig:
     """Set by the run queue. Logged in the runs table."""
     second_value_head: bool = False
     """Owned trainer only: a second value output for TRN-10's intrinsic return."""
+    obs_mode: ObsMode = "symbolic"
+    """With a game env_id: AlgoArcadeEnv's observation (docs/harness-spec.md, AlgoArcadeEnv).
+    The SB3 policy gives the frames of pixels and both to its NatureCNN; the owned trainer has
+    no CNN and refuses them."""
 
     def __post_init__(self) -> None:
         if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:

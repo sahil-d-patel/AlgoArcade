@@ -77,6 +77,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "experiment_id": "",
         "arm": "",
         "second_value_head": False,
+        "obs_mode": "symbolic",
     }
 
 

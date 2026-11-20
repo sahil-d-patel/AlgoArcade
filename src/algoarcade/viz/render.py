@@ -92,7 +92,9 @@ def render(  # noqa: C901 - the eval replay adds a branch and a loop
         seed = config.seed + EVAL_SEED_OFFSET
         deterministic, rng, device = config.eval_deterministic, eval_rng(config), "auto"
     weights = config.reward_weights
-    make, _, _ = env_factory(config.env_id, config.start_state, weights, render=True)
+    make, _, _ = env_factory(
+        config.env_id, config.start_state, weights, config.obs_mode, render=True
+    )
     envs = [make() for _ in range(grid)]
     model = PPO.load(checkpoint, device=device)
     normalize = None

@@ -91,7 +91,7 @@ def test_the_preset_plays_through_a_game_over_without_paying_for_it() -> None:
     if not (manifest.STATES / f"{CONFIG.start_state}.state").is_file():
         pytest.skip("no level_1_1.state; run scripts/capture_sml_states.py")
     env_fn, backend, rom_sha1 = env_factory(
-        CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights
+        CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights, CONFIG.obs_mode
     )
     assert (backend, rom_sha1) == ("pyboy", manifest.ROM_SHA1)
     env = env_fn()
