@@ -119,6 +119,27 @@ def test_the_preset_plays_through_a_game_over_without_paying_for_it() -> None:
 
 
 @pytest.mark.rom
+def test_the_env_clears_the_pipe_at_x_tile_103_with_one_button_per_decision() -> None:
+    needs_rom()
+    if not (manifest.STATES / f"{CONFIG.start_state}.state").is_file():
+        pytest.skip("no level_1_1.state; run scripts/capture_sml_states.py")
+    env_fn, _, _ = env_factory(CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights)
+    env = env_fn()
+    env.reset(seed=0)
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    reader = SuperMarioLandReader()
+    # Found by a search from this reset; at the 8-frame hold every TRN-05 seed stopped at 103.
+    x_tiles = []
+    for action in "33333343333433334333433333333334333333330403043333343":
+        _, _, _, _, info = env.step(int(action))
+        x_tiles.append(info["location"][2])
+        assert reader.read(unwrapped.backend).lives_left == 2
+    env.close()
+    assert max(x_tiles) > 103
+
+
+@pytest.mark.rom
 def test_pausing_leaves_the_menu_flag_clear() -> None:
     needs_rom()
     backend = PyBoyBackend(SML_ROM, render=False)
