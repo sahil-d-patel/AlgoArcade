@@ -99,10 +99,12 @@ class CheckpointEval(BaseCallback):
         for i, info in enumerate(self.locals["infos"]):
             if "continues" in info:
                 self.continues[i] = info["continues"]
+        if self.stop is not None and self.stop.exists():
+            return False
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
             self.next_at += self.config.checkpoint_every
             self.checkpoint()
-        return self.stop is None or not self.stop.exists()
+        return True
 
     def _on_rollout_end(self) -> None:
         if self.continues:
