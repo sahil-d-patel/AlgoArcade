@@ -27,7 +27,10 @@ def test_a_run_scores_its_last_checkpoint_and_its_first_goal() -> None:
 
 
 def test_three_seeds_are_labelled_exploratory() -> None:
-    arms = {"curriculum": [(1.0, 200), (0.5, 300), (0.0, None)], "none": [(0.0, None)] * 3}
+    arms: dict[str, list[tuple[float, int | None]]] = {
+        "curriculum": [(1.0, 200), (0.5, 300), (0.0, None)],
+        "none": [(0.0, None)] * 3,
+    }
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         lines = summary(arms).splitlines()

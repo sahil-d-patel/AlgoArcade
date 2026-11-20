@@ -41,7 +41,7 @@ def keep(  # noqa: PLR0913 the trace, both folders and the attempt's facts
     visited = {first.location}
     previous = first
     milestone_count = 0
-    states = []
+    states: list[dict[str, Any]] = []
     for action, press in enumerate(presses[1:goal_step], start=1):
         if press["state"] is None:
             continue

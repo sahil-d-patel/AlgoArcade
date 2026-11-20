@@ -233,8 +233,10 @@ class CrashOnSecondWorker(gym.Wrapper):
         return self.env.step(action)
 
 
-def crashing_env(weights: dict[str, float], archive: bool = False) -> gym.Env:
-    return CrashOnSecondWorker(fake_env(weights, archive))
+def crashing_env(
+    weights: dict[str, float], archive: bool = False, curriculum: bool = False
+) -> gym.Env:
+    return CrashOnSecondWorker(fake_env(weights, archive, curriculum))
 
 
 def test_a_dead_worker_raises_and_marks_the_run_crashed(
