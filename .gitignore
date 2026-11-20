@@ -27,3 +27,10 @@ __pycache__/
 wandb/
 
 .DS_Store
+
+# Dashboard build output and inputs the pre-render step writes.
+/src/algoarcade/viz/dashboard/_site/
+/src/algoarcade/viz/dashboard/.quarto/
+/src/algoarcade/viz/dashboard/_variables.yml
+/src/algoarcade/viz/dashboard/plotly.min.js
+/src/algoarcade/viz/dashboard/videos/

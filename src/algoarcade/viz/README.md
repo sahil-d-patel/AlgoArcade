@@ -12,4 +12,6 @@ uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<
 
 `--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
 
+`dashboard/` is the Quarto site, rendered with `uv run poe dashboard`. `site.py` gives its pages a DuckDB view of the logs and runs before each render. `dashboard/README.md` says how to add a panel.
+
 Contract: `docs/technical-plan.md`, Visualization.
