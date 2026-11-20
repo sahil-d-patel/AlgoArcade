@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from algoarcade.logs.schema import TABLES, validate
@@ -34,13 +33,15 @@ def validated(run_dir: Path) -> dict[str, pa.Table]:
 
 
 def final_progress(steps: pa.Table, env_steps: int) -> float:
-    late = steps.filter(pc.greater(steps["env_steps"], (1 - FINAL_SHARE) * env_steps))
-    episodes = set(zip(late["env_idx"].to_pylist(), late["episode_id"].to_pylist(), strict=True))
-    in_1_1 = steps.filter(pc.and_(pc.equal(steps["map_group"], 1), pc.equal(steps["map_num"], 1)))
-    furthest = in_1_1.group_by(["env_idx", "episode_id"]).aggregate([("x", "max")]).to_pylist()
-    return float(
-        np.mean([e["x_max"] for e in furthest if (e["env_idx"], e["episode_id"]) in episodes])
-    )
+    names = ("env_steps", "env_idx", "episode_id", "map_group", "map_num", "x")
+    column = {name: steps[name].to_numpy().astype(np.int64) for name in names}
+    episode = column["env_idx"] << 32 | column["episode_id"]
+    late = np.unique(episode[column["env_steps"] > (1 - FINAL_SHARE) * env_steps])
+    keep = (column["map_group"] == 1) & (column["map_num"] == 1) & np.isin(episode, late)
+    ids, index = np.unique(episode[keep], return_inverse=True)
+    furthest = np.zeros(len(ids), np.int64)
+    np.maximum.at(furthest, index, column["x"][keep])
+    return float(furthest.mean())
 
 
 def main(run_dirs: list[Path]) -> None:
