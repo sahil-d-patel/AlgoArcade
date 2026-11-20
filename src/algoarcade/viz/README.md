@@ -25,3 +25,27 @@ uv run python -m algoarcade.viz.render_all
 `dashboard/` is the Quarto site, rendered with `uv run poe dashboard`. `site.py` gives its pages a DuckDB view of the logs and runs before each render. `dashboard/README.md` says how to add a panel.
 
 Contract: `docs/technical-plan.md`, Visualization.
+
+## Kanto heatmap and progress timeline
+
+```sh
+uv run python scripts/fetch_maps.py
+uv run python -m algoarcade.viz.kanto_map --out /tmp/kanto.png
+```
+
+Terrain of the 37 maps ENV-10's `place()` connects to Pallet Town, with an inset panel for each map in `kanto_map.INSETS`.
+
+```sh
+uv run python -m algoarcade.logs.fake --run-id heatmap-demo --seed 0 --env-steps 1000040
+uv run python -m algoarcade.viz.heatmap --run data/runs/run_id=heatmap-demo --out /tmp/heatmap.html
+```
+
+Exact visits per tile for one finished run, checked against its `env_steps`: `.html` has a slider frame per 500,000-step window, `.png` sums the run, and visits no panel can draw are counted in the title.
+
+```sh
+uv run python -m algoarcade.viz.timeline --runs data/runs/run_id=<seed 0> data/runs/run_id=<seed 1> --out /tmp/timeline.html
+```
+
+One row per seed. Schema v1 logs only `milestone_count`, so each point is the first sampled step at or beyond a stage, under `step_log_every` times `num_envs` steps after the true step.
+
+`dashboard/heatmap.qmd` shows both, reading `data/runs/` or the folder in `ALGOARCADE_RUNS`.
