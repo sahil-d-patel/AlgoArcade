@@ -11,13 +11,15 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 import torch
+from stable_baselines3.common.env_util import make_vec_env
 
 pytest.importorskip("stable_baselines3")
 
 from algoarcade.logs.schema import TABLES, validate
-from algoarcade.training import ppo, pqn
+from algoarcade.training import ppo, pqn, runner
 from algoarcade.training.config import PQN_CLEANRL, PRESETS
 from algoarcade.training.games import FAKE_STEP_BUDGET
+from algoarcade.training.runner import EVAL_SEED_OFFSET
 
 CARTPOLE = PRESETS["pqn_cartpole"][1]
 FIRERED = PRESETS["firered"][1]
@@ -167,8 +169,27 @@ def test_smoke_run_writes_the_runner_artifacts(tmp_path: Path) -> None:
         "step_1000.pt",
         "step_2000.pt",
     ]
+
+
+@pytest.mark.parametrize("deterministic", [True, False])
+def test_a_saved_checkpoint_replays_its_evaluation(tmp_path: Path, deterministic: bool) -> None:
+    # end_e 1.0 makes sampled evaluation uniform, so its return depends on the eval RNG; at
+    # CleanRL's 0.05 an untrained network plays the same 10-step episodes under any seed.
+    assert SMOKE.pqn is not None
+    sampled = dataclasses.replace(SMOKE.pqn, end_e=1.0)
+    config = dataclasses.replace(
+        SMOKE, runs_dir=tmp_path, eval_deterministic=deterministic, pqn=sampled
+    )
+    run_dir = pqn.train(config)
+    with (run_dir / "eval.csv").open() as f:
+        logged = float(list(csv.DictReader(f))[-1]["mean_return"])
     q_network = pqn.QNetwork(4, 2)
     q_network.load_state_dict(torch.load(run_dir / "checkpoints" / "step_2000.pt"))
+    eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
+    player = pqn.Player(q_network, eval_env.observation_space, sampled.end_e)
+    replay = tmp_path / "replay"
+    replay.mkdir()
+    assert runner.evaluate(player, eval_env, config, replay, 2_000, 0.0) == logged
 
 
 def test_evaluation_waits_for_eval_every(tmp_path: Path) -> None:
