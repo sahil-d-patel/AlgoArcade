@@ -35,6 +35,8 @@ uv run python -m algoarcade.logs.fake --run-id baseline-ppo-seed0 --experiment-i
 uv run python -m algoarcade.logs.fake --run-id E1-pqn-seed10 --experiment-id E1 --arm pqn --seed 10
 ```
 
+With more than one arm under `data/runs/`, the heatmap page stops the render unless `ALGOARCADE_RUNS` names a folder holding one arm's runs.
+
 `dashboard/` is the Quarto site, rendered with `uv run poe dashboard`. `site.py` gives its pages a DuckDB view of the logs and runs before each render. `dashboard/README.md` says how to add a panel.
 
 Contract: `docs/technical-plan.md`, Visualization.
