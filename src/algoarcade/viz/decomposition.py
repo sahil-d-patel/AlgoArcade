@@ -1,9 +1,9 @@
 """What each reward component paid per training episode, per checkpoint window (VIZ-05).
 
 A component's share of an episode is its weight times the raw total the episodes table logs, so
-the shares of an episode sum to its `episode_return`. Bars are raw values stacked from zero:
-penalties go below the axis, so the stack never normalises mixed signs. Contract:
-docs/harness-spec.md, Logging schema (Reward columns).
+the shares of an episode sum to its `episode_return`. Bars stack raw values from zero, penalties
+below the axis: a percentage stack breaks with mixed signs. Contract: docs/harness-spec.md,
+Logging schema (Reward columns).
 
 Check the sum on one run, printing the largest gap over its windows:
 
@@ -26,14 +26,6 @@ from algoarcade.viz.site import RUNS, connect
 # The checkpoint and visit-table window (docs/harness-spec.md, Visit-count table).
 WINDOW_STEPS = 500_000
 COLORS = dict(zip(REWARD_COMPONENTS, qualitative.Plotly, strict=True))
-
-
-def runs_of(con: duckdb.DuckDBPyConnection, experiment_id: str, arm: str) -> list[str]:
-    rows = con.execute(
-        "SELECT DISTINCT run_id FROM runs WHERE experiment_id = ? AND arm = ? ORDER BY run_id",
-        [experiment_id, arm],
-    ).fetchall()
-    return [run_id for (run_id,) in rows]
 
 
 def decompose(
@@ -98,7 +90,11 @@ def largest_gap(con: duckdb.DuckDBPyConnection, run_id: str) -> float:
 def figure(con: duckdb.DuckDBPyConnection, arms: dict[str, tuple[str, str]]) -> go.Figure:
     """One panel per arm, `arms` mapping its label to (experiment_id, arm), each pooling the
     arm's seeds. The markers are the mean episode return the bars must stack to."""
-    run_ids = {label: runs_of(con, *key) for label, key in arms.items()}
+    query = "SELECT DISTINCT run_id FROM runs WHERE experiment_id = ? AND arm = ? ORDER BY 1"
+    run_ids = {
+        label: [run_id for (run_id,) in con.execute(query, list(key)).fetchall()]
+        for label, key in arms.items()
+    }
     fig = make_subplots(
         cols=len(arms),
         shared_yaxes=True,
