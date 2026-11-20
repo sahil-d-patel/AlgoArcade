@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -158,6 +158,25 @@ class Prices:
         input_price, output_price, cache_write_price, _ = self.card(prompt_tokens)
         prompt_price = max(input_price, cache_write_price)
         return (prompt_tokens * prompt_price + max_tokens * output_price) / 1_000_000
+
+
+# Only cards with a source. Add a model's card, with the date read, before running its cells.
+PRICES = {
+    "claude-haiku-5-5": Prices(),
+    # Anthropic's model table (cached 2026-11-03; read 2026-11-14 and 2026-11-19): $4 input, $20
+    # output, $0.20 cache read per million tokens, with no long-prompt card. It lists no cache-write rate; this assumes 1.25x input,
+    # as on Haiku's card.
+    "claude-opus-5-5": Prices(
+        input=4.0,
+        output=20.0,
+        cache_write=5.0,
+        cache_read=0.20,
+        long_input=4.0,
+        long_output=20.0,
+        long_cache_write=5.0,
+        long_cache_read=0.20,
+    ),
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -569,6 +588,13 @@ def report(attempt: Attempt, prices: Prices) -> str:
 
 def main() -> None:
     settings = tyro.cli(Run)
+    card = PRICES.get(settings.model)
+    if card is None:
+        raise SystemExit(f"no prices for {settings.model}: add its card to PRICES in loop.py")
+    # A partial set of --prices flags would mix this model's prices with Haiku's defaults.
+    if settings.prices not in (Prices(), card):
+        raise SystemExit("prices come from PRICES in loop.py; drop the --prices flags")
+    settings = replace(settings, prices=card)
     attempt = asyncio.run(run(settings, AsyncAnthropic().messages.create))
     print(report(attempt, settings.prices))  # noqa: T201
 
