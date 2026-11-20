@@ -87,7 +87,8 @@ def test_chart_groups_tied_stages_and_retains_a_row_with_no_observations(run: di
     assert initial["x"] == [16]
     assert "Starter chosen" in initial["text"][0]
     assert "Rival beaten" in initial["text"][0]
-    assert "not exact event-completion times" in figure["layout"]["title"]["text"]
+    assert "only milestone_count" in figure["layout"]["title"]["text"]
+    assert "under 16 steps" in initial["text"][0]
 
 
 def test_chart_refuses_duplicate_seeds_and_different_start_states(run: dict) -> None:

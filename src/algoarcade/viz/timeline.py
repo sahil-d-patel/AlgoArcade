@@ -97,8 +97,8 @@ def timeline(records: list[tuple[dict, dict[int, tuple[int, bool]]]]) -> go.Figu
             names = "<br>".join(f"{stage}. {STAGES[stage - 1]}" for stage in stages)
             detail = (
                 f"Run: {escape(run['run_id'])}<br>Start state: {escape(run['start_state'])}<br>"
-                f"First recorded at/above:<br>{names}<br>"
-                f"Logging interval: every {run['step_log_every']} episode steps"
+                f"First sampled at or beyond:<br>{names}<br>"
+                f"Lags the true step by under {run['step_log_every'] * run['num_envs']:,} steps"
             )
             points[initial].append((step, label, detail))
         missing = ", ".join(STAGES[i - 1] for i in range(1, len(STAGES) + 1) if i not in observed)
@@ -137,11 +137,13 @@ def timeline(records: list[tuple[dict, dict[int, tuple[int, bool]]]]) -> go.Figu
                 if synthetic
                 else "First recorded progress by seed"
             )
-            + "<br><sup>At or beyond each stage; not exact event-completion times</sup>",
+            + "<br><sup>Each point is the first sampled step at or beyond a stage. Schema v1 logs"
+            " only milestone_count, so a point lags the true step by under"
+            " step_log_every times num_envs steps.</sup>",
             "x": 0.03,
         },
         height=max(460, 230 + 65 * len(records)),
-        margin={"l": 85, "r": 40, "t": 95, "b": 150},
+        margin={"l": 85, "r": 40, "t": 95, "b": 100},
         xaxis={
             "title": "Training steps across all environments",
             "range": [
@@ -160,38 +162,31 @@ def timeline(records: list[tuple[dict, dict[int, tuple[int, bool]]]]) -> go.Figu
         plot_bgcolor="#faf9f5",
         font={"family": "Arial", "size": 13},
     )
-    fig.add_annotation(
-        x=0,
-        y=-0.45,
-        xref="paper",
-        yref="paper",
-        xanchor="left",
-        showarrow=False,
-        text="First-sample progress may predate a reset or come from a save state.<br>"
-        "No marker means not observed in sampled logs. Earlier individual events are not proven.",
-    )
     return fig
 
 
+def record(directory: Path) -> tuple[dict, dict[int, tuple[int, bool]]]:
+    """The finished run row of one run directory and its first_observed() stages."""
+    files = sorted((directory / "runs").glob("*.parquet"))
+    if not files:
+        raise ValueError(f"No run metadata in {directory}")
+    metadata = pa.concat_tables([pq.ParquetFile(path).read() for path in files])
+    validate(metadata, "runs")
+    rows = metadata.to_pylist()
+    completed = [row for row in rows if row["status"] == "finished"]
+    if len({row["run_id"] for row in rows}) != 1 or len(completed) != 1:
+        raise ValueError("Each path must hold exactly one finished run")
+    files = sorted((directory / "steps").glob("*.parquet"))
+    steps = (
+        pa.concat_tables([pq.ParquetFile(path).read(columns=COLUMNS) for path in files])
+        if files
+        else pa.Table.from_pylist([], schema=pa.schema([STEPS.field(name) for name in COLUMNS]))
+    )
+    return completed[0], first_observed(steps, completed[0])
+
+
 def main(runs: list[Path], out: Path) -> None:
-    records = []
-    for directory in runs:
-        files = sorted((directory / "runs").glob("*.parquet"))
-        if not files:
-            raise ValueError(f"No run metadata in {directory}")
-        metadata = pa.concat_tables([pq.ParquetFile(path).read() for path in files])
-        validate(metadata, "runs")
-        rows = metadata.to_pylist()
-        completed = [row for row in rows if row["status"] == "finished"]
-        if len({row["run_id"] for row in rows}) != 1 or len(completed) != 1:
-            raise ValueError("Each path must hold exactly one finished run")
-        files = sorted((directory / "steps").glob("*.parquet"))
-        steps = (
-            pa.concat_tables([pq.ParquetFile(path).read(columns=COLUMNS) for path in files])
-            if files
-            else pa.Table.from_pylist([], schema=pa.schema([STEPS.field(name) for name in COLUMNS]))
-        )
-        records.append((completed[0], first_observed(steps, completed[0])))
+    records = [record(directory) for directory in runs]
     figure = timeline(records)
     figure.write_html(out, include_plotlyjs=True, auto_play=False, config={"displaylogo": False})
     print(  # noqa: T201
