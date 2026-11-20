@@ -265,10 +265,10 @@ def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0912, PLR0915 linear l
             venv = curriculum = CurriculumResets(
                 venv, cells, config.curriculum_threshold, config.curriculum_window
             )
-            # As with archive: a wrapper at the same depth for sync_envs_normalization, around
-            # an env built without curriculum that ignores every next start.
+            # As with archive: a wrapper at the same depth for sync_envs_normalization. It has no
+            # states, and its env is built without curriculum and ignores a next start anyway.
             eval_venv = CurriculumResets(
-                eval_venv, cells, config.curriculum_threshold, config.curriculum_window
+                eval_venv, [], config.curriculum_threshold, config.curriculum_window
             )
         log = ParquetLog(venv, config, run_dir, start)
         env = log

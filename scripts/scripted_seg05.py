@@ -58,22 +58,17 @@ def results(messages: list[Any]) -> list[Any]:
     return parsed
 
 
-def reply(content: list[Any], stop_reason: str) -> Message:
+def call(name: str, **arguments: Any) -> Message:
     return Message(
         id="msg_scripted",
         type="message",
         role="assistant",
         model="scripted",
-        content=content,
-        stop_reason=stop_reason,  # pyrefly: ignore[bad-argument-type]
+        content=[ToolUseBlock(type="tool_use", id="toolu_scripted", name=name, input=arguments)],
+        stop_reason="tool_use",
         stop_sequence=None,
         usage=Usage(input_tokens=0, output_tokens=0),
     )
-
-
-def call(name: str, **arguments: Any) -> Message:
-    block = ToolUseBlock(type="tool_use", id="toolu_scripted", name=name, input=arguments)
-    return reply([block], "tool_use")
 
 
 class Walker:
