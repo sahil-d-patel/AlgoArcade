@@ -11,7 +11,9 @@ E9 = Path(__file__).resolve().parents[2] / "experiments" / "e9_super_mario_land.
 
 def test_e9_ppo_config_equals_the_firered_baseline_field_by_field() -> None:
     configs = load_experiment(E9)
-    assert len({c.seed for c in configs}) >= 8
+    assert {c.arm: c.hold for c in configs} == {"hold16": 16, "hold8": 8}
+    for arm in ("hold16", "hold8"):
+        assert len({c.seed for c in configs if c.arm == arm}) >= 8
     for config in configs:
         assert config.env_id == "super_mario_land"
         for field in dataclasses.fields(FIRERED.ppo):
