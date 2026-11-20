@@ -5,8 +5,9 @@ The Quarto site that shows every panel. Owner: Akshaj (VIZ-01). It renders to st
 ```sh
 uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0   # once, if data/runs/ is empty
 uv run poe dashboard
-open src/algoarcade/viz/dashboard/_site/index.html
 ```
+
+Then open `src/algoarcade/viz/dashboard/_site/index.html` in a browser.
 
 `uv run poe dashboard` runs `quarto render` on this folder. Quarto comes from the `quarto-cli` package in the `viz` group; there is nothing to install by hand. Before rendering, Quarto runs `python -m algoarcade.viz.site`, which reads every run under `data/runs/` and writes:
 
