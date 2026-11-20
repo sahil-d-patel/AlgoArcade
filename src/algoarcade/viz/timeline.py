@@ -137,13 +137,13 @@ def timeline(records: list[tuple[dict, dict[int, tuple[int, bool]]]]) -> go.Figu
                 if synthetic
                 else "First recorded progress by seed"
             )
-            + "<br><sup>Each point is the first sampled step at or beyond a stage. Schema v1 logs"
-            " only milestone_count, so a point lags the true step by under"
+            + "<br><sup>Each point is the first sampled step at or beyond a stage.<br>Schema v1"
+            " logs only milestone_count, so a point lags the true step by under"
             " step_log_every times num_envs steps.</sup>",
             "x": 0.03,
         },
         height=max(460, 230 + 65 * len(records)),
-        margin={"l": 85, "r": 40, "t": 95, "b": 100},
+        margin={"l": 85, "r": 40, "t": 110, "b": 100},
         xaxis={
             "title": "Training steps across all environments",
             "range": [
