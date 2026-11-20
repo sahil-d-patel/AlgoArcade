@@ -22,6 +22,8 @@ uv run python -m algoarcade.viz.registry
 uv run python -m algoarcade.viz.render_all
 ```
 
+`dashboard/` is the Quarto site, rendered with `uv run poe dashboard`. `site.py` gives its pages a DuckDB view of the logs and runs before each render. `dashboard/README.md` says how to add a panel.
+
 Contract: `docs/technical-plan.md`, Visualization.
 
 ## Kanto heatmap and progress timeline
