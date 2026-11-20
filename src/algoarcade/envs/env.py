@@ -65,7 +65,9 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     unless `add_archived` listed its key, and `set_next_start` makes the next reset load a cell
     instead of the start state. The key is
     (*map, x // CELL_TILES, y // CELL_TILES, badge_flags, the episode's best milestone_count);
-    a game without a badge byte or milestones keys 0 for them."""
+    a game without a badge byte or milestones keys 0 for them.
+
+    Every decision lasts HOLD + RELEASE frames; `hold` of them hold the button."""
 
     def __init__(  # noqa: PLR0913 the inputs harness-spec lists for the env
         self,
@@ -79,8 +81,10 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         start: bool = False,
         noop: bool = False,
         archive: bool = False,
+        hold: int = HOLD,
     ) -> None:
         self.backend = backend
+        self._hold = hold
         self._reader = reader
         self._rewards = rewards
         self._start_state = start_state
@@ -139,7 +143,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     def step(
         self, action: int | np.int64
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
-        self.backend.press(self._actions[int(action)], HOLD, RELEASE)
+        self.backend.press(self._actions[int(action)], self._hold, HOLD + RELEASE - self._hold)
         prev, self._state = self._state, self._read()
         reward, components = self._rewards.step(prev, self._state)
         self._visited.add(self._state.location)
