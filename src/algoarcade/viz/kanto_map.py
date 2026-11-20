@@ -82,7 +82,8 @@ def draw(
     panels = [figure.add_subplot(layout[:, 0])] + [
         figure.add_subplot(layout[i // 2, 1 + i % 2]) for i in range(len(INSETS))
     ]
-    for key, (panel, (x, y)) in origins(maps, offsets).items():
+    drawn = origins(maps, offsets)
+    for key, (panel, (x, y)) in drawn.items():
         grid = maps[key]
         panels[panel].imshow(
             terrain(grid),
@@ -97,7 +98,7 @@ def draw(
     panels[0].set_ylim(bottom + 8, top - 8)
     panels[0].set_title(f"Kanto mainland · {len(offsets)} connected maps", pad=14)
     for map_id, name in (((3, 0), "Pallet"), ((3, 1), "Viridian"), ((3, 2), "Pewter")):
-        x, y = offsets[map_id]
+        _, (x, y) = drawn[map_id]
         panels[0].annotate(
             name,
             (x + maps[map_id].width / 2, y + maps[map_id].height / 2),
