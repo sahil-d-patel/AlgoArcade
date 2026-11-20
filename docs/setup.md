@@ -81,6 +81,8 @@ The script replays recorded inputs from power-on, checks the location and the op
 
 With a rev 0 ROM, use `--out`. The address table is the same for both revisions, but nobody has run the script on rev 0.
 
+FireRed training also needs the map data, for the observation's walkability channel: `uv run python scripts/fetch_maps.py` writes it to `data/pokefirered/`. Without it the runner stops before starting workers and names the command.
+
 ## Checks
 
 `uv run poe check` runs, in order:

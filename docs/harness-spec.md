@@ -259,12 +259,17 @@ For TRN-05:
 - A `StateNotReady` that survives the retries kills a SubprocVecEnv worker, and the main process sees only `EOFError`. Log the worker's traceback so a reader bug is visible. Measured on rev 1: FireRed's party checksum failed for single frames while the game rewrote an entry, never on two frames in a row: 3 times in 26,186 per-frame reads replaying `scripts/capture_validation_states.py` from the new game to the Pokédex, and 4 times in 5,630 from `validate_starter` through the rival battle to Pallet Town. 18,000 random env steps, 6,000 each from `s1`, `seg_02_pallet` and `seg_04_route1`, read not ready 0 times.
 - The observation is a `Dict`, so SB3 needs `MultiInputPolicy`, not `MlpPolicy`.
 
-The observation is a `Dict` of two float32 boxes:
+The observation is a `Dict`. `obs_mode` (`symbolic`, the default, `pixels` or `both`; TrainConfig's `obs_mode` for a run) picks its keys:
 
-| Key | Shape | Contents |
-|---|---|---|
-| `vector` | (number of features,) in [0, 1] | One value per entry in the game's `FEATURES` table (`games/fake.py`, `games/firered/features.py`), clipped to [0, 1]. FireRed has 7: map_group, map_num, x, y, party_count, party_level_sum, party_hp_frac. |
-| `visited` | (1, 9, 15) in {0, 1} | Tiles visited this episode, in a crop of 9 rows by 15 columns centred on the player. The location's last two elements are x and y; the rest name the map. The crop size is a guess from FireRed's 15 by 10 tile screen. |
+| Key | Modes | Shape and type | Contents |
+|---|---|---|---|
+| `vector` | all | (number of features,) float32 in [0, 1] | One value per entry in the game's `FEATURES` table (`games/fake.py`, `games/firered/features.py`), clipped to [0, 1]. FireRed has 7: map_group, map_num, x, y, party_count, party_level_sum, party_hp_frac. |
+| `grid` | symbolic, both | (2, 9, 15) float32 in {0, 1} | A crop of 9 rows by 15 columns centred on the player. Channel 0 (`VISITED`): tiles visited this episode. Channel 1 (`WALKABLE`): tiles the env's `walkable(location)` passes. The location's last two elements are x and y; the rest name the map. The crop size is a guess from FireRed's 15 by 10 tile screen. |
+| `pixels` | pixels, both | (3, 72, 80) uint8 | The last three decisions' screens, oldest first, each 72 rows by 80 columns of greyscale. A reset fills all three with the reset screen. |
+
+Walkability. FireRed's comes from ENV-10's map data (FireRed map data, above): `maps.walkability` reads the map's `walkable` grid, and a tile off the map reads from the map `place` puts there, so Pallet Town's north exit reads walkable into Route 1. Off a map that `place` leaves out, such as an interior, a tile reads not walkable. The FireRed factory loads the map data in the parent process, so training needs `scripts/fetch_maps.py` run first. Super Mario Land has no map data, so every tile reads walkable. The fake game reads its room layout.
+
+Pixels. The frame is converted to greyscale with the ITU-R BT.601 weights (0.299 R + 0.587 G + 0.114 B) and then area-averaged: each output pixel is the mean of the screen pixels it covers, with a split pixel weighted by the share covered (`area_weights` in `envs/env.py`), rounded to uint8. The GBA's 240 by 160 frame takes 3 columns and 2.22 rows per output pixel; the Game Boy's 160 by 144 takes exactly 2 by 2. A mode with pixels needs a backend that renders, and the training factory turns rendering on for it. The policy gets the frames unnormalised: the runner leaves image keys out of VecNormalize, and SB3's `MultiInputPolicy` divides them by 255 and gives them to `NatureCNN` (256 features); the other keys are flattened beside it. On FireRed (7 features, 6 actions) the symbolic policy has 44,359 parameters and the pixels policy 610,279, 567,712 of them in the CNN. The owned trainer has no CNN and refuses `pixels` and `both`.
 
 `info` on every step:
 
@@ -276,12 +281,6 @@ The observation is a `Dict` of two float32 boxes:
 | `cell` | Only with `archive=True`, on the first step of an episode that reaches a cell whose key the archive does not hold yet: a `Cell` with its key, the zlib-compressed save state after that step, the episode's visited set, each progress term's best and the episode's best `milestone_count`. |
 
 `reset` returns `location`, `milestone_count` and `archive_start`, True when the reset loaded an archived cell.
-
-Observation modes:
-
-- `symbolic`: the only mode so far, so the env takes no mode argument yet. The walkability channel arrives in ENV-12, as a second channel of the crop.
-- `pixels`: the screen at 72 by 80 greyscale, three frames stacked, plus the same state vector (ENV-12).
-- `both` (ENV-12).
 
 The environment must pass Gymnasium's environment checker on all three backends. `uv run python scripts/env_trace.py <fake|mgba|pyboy> --state <file>` prints a hash of a 500-step trace; two processes with the same seed must print the same hash.
 
