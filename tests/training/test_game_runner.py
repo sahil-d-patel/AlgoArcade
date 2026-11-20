@@ -251,3 +251,18 @@ def test_a_dead_worker_raises_and_marks_the_run_crashed(
         "running",
         "crashed",
     ]
+
+
+def test_a_stop_file_ends_the_run_with_a_checkpoint_at_the_step_reached(tmp_path: Path) -> None:
+    # `runqueue stop` at the results cutoff. The run must keep its step count and a checkpoint.
+    stop = tmp_path / "stop"
+    stop.touch()
+
+    run_dir = train(dataclasses.replace(FAKE, runs_dir=tmp_path / "runs"), stop=stop)
+
+    end = pq.read_table(run_dir / "runs").to_pylist()[-1]
+    assert end["status"] == "finished"
+    assert 0 < end["env_steps"] < FAKE.total_timesteps
+    assert (run_dir / "checkpoints" / f"step_{end['env_steps']}.zip").exists()
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [end["env_steps"]]

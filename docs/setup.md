@@ -136,11 +136,13 @@ uv run python -m algoarcade.runqueue submit experiments/e5.py --dry-run   # prin
 uv run python -m algoarcade.runqueue submit experiments/e5.py
 uv run python -m algoarcade.runqueue status
 uv run python -m algoarcade.runqueue run
+uv run python -m algoarcade.runqueue stop
 ```
 
 - `submit` queues one run per arm and seed, named `<experiment>-<arm>-seed<n>`: seed 0 of every arm, then seed 1, so a queue cut short leaves the arms with the same seeds. It refuses a name already in the queue. The config is fixed at submit. The code is whatever the clone has checked out when the run starts, and the run records that commit.
 - `run` trains the queued runs in submit order, each in its own process, until none is left. A run that exits with an error is retried once, from step 0, then marked failed, and the next run starts. An attempt still running after 1 hour plus `total_timesteps` / 100 seconds (43 hours for 15M steps; `run --min-steps-per-s` changes the 100) is killed with its workers and counts as a crash. A second `run` exits at once while one is working. Ctrl+C stops the queue and puts the current run back without using up an attempt.
-- `status` prints each run's status (queued, running, done or failed), attempts, start and end time, then a count per experiment.
+- `status` prints each run's status (queued, running, done, failed or stopped), attempts, start and end time, then a count per experiment.
+- `stop` ends the queue at a cutoff, from any terminal while `run` works. Every queued run becomes stopped. The run in progress stops at its next step: the trainer saves a checkpoint, evaluates it, writes its end row (status `finished`, with the steps it reached) and exits, and `run` marks it stopped and exits. Only the Stable-Baselines3 runner reads the stop request. The next `run` clears it. Run with no `run` working, `stop` also marks stopped a run left running by a reboot or a killed `run`.
 
 Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
 

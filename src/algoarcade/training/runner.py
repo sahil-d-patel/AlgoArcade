@@ -73,6 +73,8 @@ class CheckpointEval(BaseCallback):
     far goes to progress.csv and W&B as rollout/continues. With archive resets, each rollout
     logs the share of training resets so far that loaded a cell, the number of cells and their
     mean save state size in bytes.
+
+    Training ends early, through the final checkpoint, once the file `stop` exists.
     """
 
     def __init__(
@@ -81,12 +83,14 @@ class CheckpointEval(BaseCallback):
         config: TrainConfig,
         eval_env: VecEnv,
         resets: ArchiveResets | None = None,
+        stop: Path | None = None,
     ) -> None:
         super().__init__()
         self.run_dir = run_dir
         self.config = config
         self.eval_env = eval_env
         self.resets = resets
+        self.stop = stop
         self.next_at = config.checkpoint_every
         self.start = time.time()
         self.continues: dict[int, int] = {}
@@ -98,7 +102,7 @@ class CheckpointEval(BaseCallback):
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
             self.next_at += self.config.checkpoint_every
             self.checkpoint()
-        return True
+        return self.stop is None or not self.stop.exists()
 
     def _on_rollout_end(self) -> None:
         if self.continues:
@@ -208,7 +212,7 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
     runs.close()
 
 
-def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 linear launch steps; a split gives single-use helpers
+def train(config: TrainConfig, stop: Path | None = None) -> Path:  # noqa: C901, PLR0915 linear launch steps; a split gives single-use helpers
     name = (
         f"{config.experiment_id}-{config.arm}"
         if config.experiment_id
@@ -285,7 +289,7 @@ def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 linear launch ste
     try:
         model.learn(
             total_timesteps=config.total_timesteps,
-            callback=CheckpointEval(run_dir, config, eval_env, resets),
+            callback=CheckpointEval(run_dir, config, eval_env, resets, stop),
         )
         status = "finished"
     except EOFError as error:

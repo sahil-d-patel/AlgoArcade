@@ -3,9 +3,12 @@
 import sys
 from pathlib import Path
 
+from algoarcade.runqueue.queue import STOP
 from algoarcade.training.config import load_config
 from algoarcade.training.runner import train
 
 # SubprocVecEnv with spawn re-imports this module in every worker.
 if __name__ == "__main__":
-    print(train(load_config(Path(sys.argv[1]))))
+    config = Path(sys.argv[1])
+    # The config is <queue>/configs/<run>.json.
+    print(train(load_config(config), stop=config.parent.parent / STOP))
