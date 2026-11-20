@@ -5,8 +5,9 @@ Experiments and Visualization.
     uv run python -m algoarcade.viz.comparison [--root data/runs]
 
 A run's score at a checkpoint is the mean milestone_count over that checkpoint's evaluation
-episodes, the metric experiments/e1_pqn.py fixed before any run. Its final score is its last
-checkpoint's. Only finished runs count; the table states how many were left out.
+episodes, the metric experiments/e1_pqn.py fixed before any run. Its final score is the one at
+the last checkpoint every run of its arm reached. Only finished runs count; the table states how
+many were left out.
 """
 
 import warnings
@@ -60,26 +61,27 @@ def load(con: duckdb.DuckDBPyConnection, experiment: str) -> dict[str, Arm]:
             FROM ({CURRENT})
             WHERE status = 'finished' AND experiment_id IN ($baseline, $experiment)
         )
-        SELECT arm, finished.seed, machine, checkpoint_step, avg({METRIC}), max(wall_clock_s) / 3600
+        SELECT arm, run_id, finished.seed, machine, checkpoint_step, avg({METRIC}),
+            max(wall_clock_s) / 3600
         FROM episodes JOIN finished USING (run_id)
         WHERE is_eval
-        GROUP BY 1, 2, 3, 4
-        ORDER BY arm != 'baseline', 1, 2, 4
+        GROUP BY 1, 2, 3, 4, 5
+        ORDER BY arm != 'baseline', 1, 3, 2, 5
         """,
         params={"baseline": BASELINE, "experiment": experiment},
     ).fetchall()
-    runs: dict[str, dict[tuple[int, str], dict[int, tuple[float, float]]]] = defaultdict(
+    runs: dict[str, dict[tuple[str, int, str], dict[int, tuple[float, float]]]] = defaultdict(
         lambda: defaultdict(dict)
     )
-    for arm, seed, machine, step, score, hours in rows:
-        runs[arm][seed, machine][step] = (score, hours)
+    for arm, run_id, seed, machine, step, score, hours in rows:
+        runs[arm][run_id, seed, machine][step] = (score, hours)
     arms = {}
-    for name, seeds in runs.items():
-        steps = sorted(set.intersection(*(set(points) for points in seeds.values())))
-        points = np.array([[run[step] for step in steps] for run in seeds.values()])
+    for name, members in runs.items():
+        steps = sorted(set.intersection(*(set(points) for points in members.values())))
+        points = np.array([[run[step] for step in steps] for run in members.values()])
         arms[name] = Arm(
-            seeds=[seed for seed, _ in seeds],
-            machines=sorted({machine for _, machine in seeds}),
+            seeds=[seed for _, seed, _ in members],
+            machines=sorted({machine for _, _, machine in members}),
             steps=np.array(steps),
             hours=points[:, :, 1],
             scores=points[:, :, 0],
