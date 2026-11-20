@@ -25,13 +25,8 @@ class StartState:
     name: str
     sha256: str
     goal: Callable[[FireRedState], bool]
-    # None means the run sets it, as the spec says for S0, S1 and the gym states.
+    # None means the run sets it, as the spec says for the gym states.
     step_budget: int | None
-
-
-def no_goal(_state: FireRedState) -> bool:
-    """S0 and S1 run for the furthest milestone, so the episode ends only on its step budget."""
-    return False
 
 
 def left_house(state: FireRedState) -> bool:
@@ -65,16 +60,29 @@ def left_forest_north(state: FireRedState) -> bool:
 
 
 def boulder_badge(state: FireRedState) -> bool:
+    """FLAG_BADGE01_GET (0x820), the last milestone."""
     return bool(state.badge_flags & 1)
 
 
 # Map ids are (group, number) from data/maps/map_groups.json in pret/pokefirered.
+#
+# A budget is a multiple of the scripted playthrough's decisions: scripts/capture_states.py's
+# frames over 24 frames per decision. Measured on rev 1, the segments' budgets are 7.2 to 104
+# times their stage's decisions; the smallest is seg_03_rival, 3,072 over 425. s0 and s1 take
+# that 7.2, rounded up to a multiple of 1,024: from s1 to brock_goal is 9,841 decisions and
+# 71,680 steps, from s0 12,009 and 87,040. Most of s1's decisions are the grind to level 13.
 MANIFEST = (
     StartState(
-        "s0", "1182e804a325282810cb810dfb6a354b199ca56f0b90f99cf08c049ff5290bbf", no_goal, None
+        "s0",
+        "1182e804a325282810cb810dfb6a354b199ca56f0b90f99cf08c049ff5290bbf",
+        boulder_badge,
+        87_040,
     ),
     StartState(
-        "s1", "ef6d2693b4d567092a3c89bbff5d2df1b8f8103e8124fb2e9d4e13221a56d2b2", no_goal, None
+        "s1",
+        "ef6d2693b4d567092a3c89bbff5d2df1b8f8103e8124fb2e9d4e13221a56d2b2",
+        boulder_badge,
+        71_680,
     ),
     # The same bytes as s0.
     StartState(

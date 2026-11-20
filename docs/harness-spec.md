@@ -291,8 +291,8 @@ Episodes start from save states listed in a manifest in the game's package. Each
 
 | Name | Start | Goal | Step budget |
 |---|---|---|---|
-| S0 | Player's bedroom, new game | Furthest milestone | Set per run |
-| S1 | After Oak's Parcel, Squirtle | Furthest milestone | Set per run |
+| S0 | Player's bedroom, new game | Badge flag set | 87,040 |
+| S1 | After Oak's Parcel, Squirtle | Badge flag set | 71,680 |
 | seg_01_house | Player's bedroom | Leave the house | 2,048 |
 | seg_02_pallet | Pallet Town | Enter Route 1 | 4,096 |
 | seg_03_rival | Oak's Lab | Win the rival battle | 3,072 |
@@ -300,6 +300,8 @@ Episodes start from save states listed in a manifest in the game's package. Each
 | seg_05_forest | Viridian Forest entrance | Exit the north side | 8,192 |
 | gym_door, brock | Pewter Gym door; the Brock battle | Badge flag set | Set per run |
 | level_1_1 (Super Mario Land) | First frame of play in 1-1, three lives | Leave 1-1 | 2,048 |
+
+The badge flag is `FLAG_BADGE01_GET` (0x820), the last milestone. E1 to E5 score S1 runs on `milestone_count`; E6 scores `goal_reached`, whether an evaluation episode got the badge. Each step budget is a multiple of the scripted playthrough's decisions (`scripts/capture_states.py`, 24 frames to a decision). The segments' budgets are 7.2 to 104 times their stage's decisions. S0 and S1 take the smallest, seg_03_rival's 7.2, rounded up to a multiple of 1,024: the script takes 9,841 decisions from S1 to the badge, most of them grinding Squirtle to level 13, and 12,009 from S0.
 
 State files are not in git. They live in `data/states/` on each machine. Sahil (PM) regenerates them with `scripts/capture_states.py` and hands the files to members directly. The manifest hash proves everyone has the same file.
 
