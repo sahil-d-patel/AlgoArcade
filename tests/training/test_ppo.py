@@ -397,7 +397,9 @@ def test_the_network_returns_two_values_and_each_head_learns_its_return() -> Non
     rnd = ppo.RND(np.zeros((1, 3)), gamma=0.99)
     optimizer = torch.optim.Adam([*agent.parameters(), *rnd.predictor.parameters()], lr=0.01)
     rollout = hand_rollout(agent)
-    intrinsic = ppo.Intrinsic(rnd, 0.5, 1 - rollout.int_values, torch.zeros(4, 2, 3))
+    intrinsic = ppo.Intrinsic(
+        rnd, 0.5, 1 - rollout.int_values, torch.zeros(4, 2, 3), torch.zeros(4, 2)
+    )
     for _ in range(100):
         ppo.update(
             agent, optimizer, rollout, -rollout.values, UPDATE, np.random.default_rng(0), intrinsic
@@ -491,6 +493,8 @@ def test_an_rnd_run_trains_on_the_fake_game(tmp_path: Path) -> None:
     assert len(progress) == 4
     assert all(float(row["train/rnd_loss"]) > 0 for row in progress)
     assert all(float(row["train/intrinsic_value_loss"]) >= 0 for row in progress)
+    assert all(float(row["rollout/intrinsic_reward_mean"]) > 0 for row in progress)
+    assert all(float(row["rollout/intrinsic_return_std"]) > 0 for row in progress)
     for name in TABLES:
         validate(pq.read_table(run_dir / name), name)
     # The warmup's random-policy steps are not training steps.

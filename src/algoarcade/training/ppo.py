@@ -385,13 +385,14 @@ class RND(nn.Module):
 
 @dataclass
 class Intrinsic:
-    """RND's part of an update, n_steps x n_envs: the intrinsic advantages and their weight, and
-    the whitened inputs the predictor trains on."""
+    """RND's part of an update, n_steps x n_envs: the intrinsic advantages and their weight, the
+    whitened inputs the predictor trains on, and the scaled rewards the policy is paid."""
 
     rnd: RND
     coef: float
     advantages: torch.Tensor
     inputs: torch.Tensor
+    rewards: torch.Tensor
 
 
 def intrinsic_terms(
@@ -407,7 +408,7 @@ def intrinsic_terms(
         novelty = rnd.novelty(x).cpu().numpy()
     rewards = torch.as_tensor(rnd.scale(novelty), dtype=torch.float32, device=last_value.device)
     advantages = intrinsic_gae(rollout, rewards, last_value, rnd.gamma, gae_lambda)
-    return Intrinsic(rnd, coef, advantages, x)
+    return Intrinsic(rnd, coef, advantages, x, rewards)
 
 
 def step_infos(
@@ -555,7 +556,7 @@ class Progress:
             logger.record("rollout/continues", sum(self.continues.values()))
 
 
-def learn(
+def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logging
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int, bool], None],
@@ -635,6 +636,11 @@ def learn(
         if steps >= config.total_timesteps:
             checkpoint(agent, obs_rms, steps, True)
         progress.record(logger)
+        if intrinsic is not None:
+            logger.record("rollout/intrinsic_reward_mean", intrinsic.rewards.mean().item())
+            logger.record(
+                "rollout/intrinsic_return_std", float(np.sqrt(intrinsic.rnd.return_rms.var))
+            )
         logger.record("time/fps", int(steps / (time.time() - start)))
         logger.record("time/total_timesteps", steps)
         logger.dump(steps)
