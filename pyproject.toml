@@ -47,6 +47,7 @@ ignore = ["E501"]
 "scripts/**" = ["T20"]
 # A command line tool: printing is its output.
 "src/algoarcade/runqueue/**" = ["T20"]
+"src/algoarcade/results.py" = ["T20"]
 "tests/**" = ["ARG", "PLR2004"]
 
 [tool.pyrefly]
@@ -78,5 +79,6 @@ fmt = { cmd = "ruff format", help = "Format the code" }
 lint = { cmd = "ruff check", help = "Lint" }
 types = { cmd = "pyrefly check", help = "Type check" }
 test = { cmd = "pytest", help = "Run the tests" }
+results = { cmd = "python -m algoarcade.results headline", help = "Check data/runs against docs/results-v1/manifest.json, then write docs/results-v1/headline.json" }
 items = { cmd = "python tools/github/bootstrap.py --check", help = "Validate the work item files" }
 check = { sequence = [{ cmd = "ruff format --check" }, "lint", "types", "test"], help = "What CI runs: format check, lint, types, tests" }

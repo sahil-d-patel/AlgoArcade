@@ -169,6 +169,19 @@ Register-ScheduledTask -TaskName "AlgoArcade run queue" -Action $action -Trigger
 
 A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. `-Priority 4` is normal priority; the default, 7, is below normal and would lower the steps per second the runs measure. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. Not run on the box yet.
 
+### Freezing results
+
+The results freeze (OPS-07) fixes the runs every published number comes from. Parquet is git-ignored, so `docs/results-v1/manifest.json` holds each run's SHA-256 per Parquet file, and the tag `results-v1` marks the commit holding it and `headline.json`.
+
+```sh
+uv run python -m algoarcade.runqueue stop        # at the cutoff, on each machine
+uv run python -m algoarcade.results manifest     # every run under data/runs, and queued runs with no directory
+uv run python -m algoarcade.results check        # recompute every checksum: 0 mismatches or exit 1
+uv run poe results                               # check, then write docs/results-v1/headline.json
+```
+
+`manifest` reads every `run_id=*` folder and every `*/queue.json` one level under `--runs` (default `data/runs`), so the Mac's queue folder can sit beside the box's under another name. A run's steps are the most it logged, so a run killed without its end row keeps the count of its last closed file. A later attempt of the same queued run supersedes the earlier one, which stays in the manifest but not in the numbers. `headline.json` scores each run on the evaluation episodes of its last checkpoint, groups runs by experiment, arm and start state (IQM, 95% bootstrap interval, n, `exploratory` under five), lists every run with its steps, furthest milestone and badge, and gives the probability of improvement for every pair of groups on the same env, start state and step budget. The same Parquet gives the same bytes.
+
 ## Gamma
 
 > **Never leave gamma at the Stable-Baselines3 default of 0.99.** The effective horizon is about 1 / (1 - gamma), which is 100 steps at 0.99. Our segments run 2,000 to 8,000 steps. An agent at the default cannot value its goal. It throws no error. It does not learn. We start at 0.997, and gamma is always an explicit field in the config.
