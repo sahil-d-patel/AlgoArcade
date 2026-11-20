@@ -10,9 +10,11 @@ Contract: docs/harness-spec.md, Curriculum resets. The server saves a state ever
 `visited`, `bests` and `milestone_count` are what an AlgoArcadeEnv episode from the start state
 would hold after the same reads, so a reset into the state follows the archive-reset rules: the
 path to it and progress up to its bests pay nothing again. They come from the trace's ready
-reads; a press whose read was not ready is skipped.
+reads; a press whose read was not ready is skipped. `bests` also holds a rise the saved read
+shows that the next read would have confirmed.
 """
 
+import copy
 import hashlib
 import json
 import shutil
@@ -51,6 +53,10 @@ def keep(  # noqa: PLR0913 the trace, both folders and the attempt's facts
         previous = state
         if "saved" in press:
             data = (captured / press["saved"]).read_bytes()
+            # A rise this read shows is confirmed one step late, so a reset into the state
+            # would pay it on its first step, every time. The best includes it.
+            confirmed = copy.deepcopy(rewards)
+            confirmed.step(state, state)
             states.append(
                 {
                     "file": press["saved"],
@@ -58,7 +64,7 @@ def keep(  # noqa: PLR0913 the trace, both folders and the attempt's facts
                     "location": state.location,
                     "sha256": hashlib.sha256(data).hexdigest(),
                     "visited": sorted(visited),
-                    "bests": rewards.bests(),
+                    "bests": confirmed.bests(),
                     "milestone_count": milestone_count,
                 }
             )

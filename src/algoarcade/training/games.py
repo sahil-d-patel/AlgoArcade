@@ -140,11 +140,12 @@ class Continues:
         self._backend.close()
 
 
-def firered_env(
+def firered_env(  # noqa: PLR0913 the start state, its rewards and both reset modes
     state: bytes,
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
+    curriculum: bool = False,
     *,
     render: bool = False,
 ) -> gym.Env:
@@ -158,16 +159,24 @@ def firered_env(
     reads = LastRead(reader)
     rewards = RewardRegistry[FireRedState](COMPONENTS, reward_weights)
     env = AlgoArcadeEnv(
-        backend, reads, rewards, state, entry.step_budget, FIRERED_FEATURES, archive=archive
+        backend,
+        reads,
+        rewards,
+        state,
+        entry.step_budget,
+        FIRERED_FEATURES,
+        archive=archive,
+        curriculum=curriculum,
     )
     return Measures(env, reads, {"goal": entry.goal, "in_battle": lambda s: s.in_battle})
 
 
-def super_mario_land_env(
+def super_mario_land_env(  # noqa: PLR0913 the start state, its rewards and both reset modes
     state: bytes,
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
+    curriculum: bool = False,
     *,
     render: bool = False,
 ) -> gym.Env:
@@ -176,7 +185,14 @@ def super_mario_land_env(
     reads = LastRead(SuperMarioLandReader())
     rewards = RewardRegistry[SuperMarioLandState](sml_rewards.COMPONENTS, reward_weights)
     env = AlgoArcadeEnv(
-        backend, reads, rewards, state, entry.step_budget, SML_FEATURES, archive=archive
+        backend,
+        reads,
+        rewards,
+        state,
+        entry.step_budget,
+        SML_FEATURES,
+        archive=archive,
+        curriculum=curriculum,
     )
     # The game has no battles, badges, party, story flags or milestones: each count is 0.
     nothing = {
@@ -191,7 +207,9 @@ def super_mario_land_env(
     return Measures(env, reads, measures | nothing, counts=())
 
 
-def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.Env:
+def fake_env(
+    reward_weights: Mapping[str, float], archive: bool = False, curriculum: bool = False
+) -> gym.Env:
     backend = FakeBackend()
     reads = LastRead(fake.FakeReader())
     rewards = RewardRegistry(COMPONENTS, reward_weights)
@@ -203,6 +221,7 @@ def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.
         FAKE_STEP_BUDGET,
         fake.FEATURES,
         archive=archive,
+        curriculum=curriculum,
     )
     # The toy game has no battles.
     return Measures(env, reads, {"goal": lambda s: s.chest_opened, "in_battle": lambda _s: False})
@@ -212,8 +231,8 @@ def env_factory(
     env_id: str, start_state: str, reward_weights: Mapping[str, float], *, render: bool = False
 ) -> tuple[Callable[..., gym.Env], str, str]:
     """The worker factory, the backend name and the ROM SHA-1 for a run. The factory's
-    `archive` turns on archive resets for a training env. Training leaves rendering off; the
-    fake backend always renders."""
+    `archive` turns on archive resets for a training env, and `curriculum` curriculum resets.
+    Training leaves rendering off; the fake backend always renders."""
     if env_id == "fake":
         return partial(fake_env, dict(reward_weights)), "fake", ""
     manifest, rom_path, make, backend = {
