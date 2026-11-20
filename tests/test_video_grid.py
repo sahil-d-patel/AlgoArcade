@@ -13,10 +13,9 @@ pytest.importorskip("stable_baselines3")
 import imageio_ffmpeg
 from anthropic.types import Message, ToolUseBlock, Usage
 
-from algoarcade.agent import loop
+from algoarcade.agent import loop, server
 from algoarcade.agent.tools import Game
 from algoarcade.backends.base import Button
-from algoarcade.games.firered.manifest import MANIFEST
 from algoarcade.training.config import PRESETS
 from algoarcade.training.games import FAKE_STEP_BUDGET
 from algoarcade.training.runner import train
@@ -141,8 +140,6 @@ BUTTONS = {"R": Button.RIGHT, "L": Button.LEFT, "U": Button.UP, "D": Button.DOWN
 
 @pytest.mark.rom
 def test_a_scripted_seg_01_trace_replays_to_the_goal(tmp_path: Path):
-    from algoarcade.agent import server
-
     if not (server.DATA / "roms" / "firered.gba").is_file():
         pytest.skip("no FireRed ROM at data/roms/firered.gba")
     if not (server.DATA / "states" / "seg_01_house.state").is_file():
@@ -165,10 +162,8 @@ def test_a_scripted_seg_01_trace_replays_to_the_goal(tmp_path: Path):
     (folder / "attempt.json").write_text(json.dumps(attempt))
     replay = Replay(folder)
     shots = list(replay)
-    (goal,) = (entry.goal for entry in MANIFEST if entry.name == "seg_01_house")
-    last = json.loads((folder / "presses.jsonl").read_text().splitlines()[-1])["state"]
-    final = loop.firered_state(last)
-    print(f"seg_01_house: goal at press {replay.goal_step} of {len(SEG_01)}, {final.location}")  # noqa: T201
+    # The replay grades its own reads with the manifest's left_house; any read that differed
+    # from the trace would have raised.
+    print(f"seg_01_house replay: goal at press {replay.goal_step} of {len(SEG_01)}")  # noqa: T201
     assert replay.goal_step == len(SEG_01)
-    assert goal(final)
     assert len(shots) == 1 + len(SEG_01)
