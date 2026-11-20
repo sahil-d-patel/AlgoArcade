@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 import pytest
+from sml_pipe_probe import PIPE, pipe_state
 
 from algoarcade.backends.base import Button, read_u8
 from algoarcade.backends.pyboy import PyBoyBackend
@@ -121,24 +122,26 @@ def test_the_preset_plays_through_a_game_over_without_paying_for_it() -> None:
 
 
 @pytest.mark.rom
-def test_the_env_clears_the_pipe_at_x_tile_103_with_one_button_per_decision() -> None:
+@pytest.mark.parametrize(("hold", "passes"), [(None, True), (8, False)])
+def test_the_env_passes_the_pipe_at_x_tile_103_only_with_the_longer_hold(
+    hold: int | None, passes: bool
+) -> None:
+    """Exploratory: one state at the pipe, from scripts/sml_pipe_probe.py. hold None is the
+    game's default, 16; hold 8 is the negative control, where every TRN-05 seed stopped."""
     needs_rom()
     if not (manifest.STATES / f"{CONFIG.start_state}.state").is_file():
         pytest.skip("no level_1_1.state; run scripts/capture_sml_states.py")
-    env_fn, _, _ = env_factory(CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights)
+    env_fn, _, _ = env_factory(CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights, hold)
     env = env_fn()
     env.reset(seed=0)
     unwrapped = env.unwrapped
     assert isinstance(unwrapped, AlgoArcadeEnv)
-    reader = SuperMarioLandReader()
-    # Found by a search from this reset; at the 8-frame hold every TRN-05 seed stopped at 103.
-    x_tiles = []
-    for action in "33333343333433334333433333333334333333330403043333343":
-        _, _, _, _, info = env.step(int(action))
-        x_tiles.append(info["location"][2])
-        assert reader.read(unwrapped.backend).lives_left == 2
+    # Put the env's emulator in front of the pipe; each step then reads it afresh.
+    pipe_state(unwrapped.backend)
+    x_tiles = [env.step(action)[4]["location"][2] for action in (4, 3) * 20]
     env.close()
-    assert max(x_tiles) > 103
+    assert (max(x_tiles) > PIPE) is passes
+    assert max(x_tiles) >= PIPE
 
 
 @pytest.mark.rom

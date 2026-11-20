@@ -40,7 +40,8 @@ FIRERED_ROM = ROMS / "firered.gba"
 SML_ROM = ROMS / "super_mario_land.gb"
 # Frames of each 24-frame decision Super Mario Land holds its button. Mario's jump rises while A
 # is held: at 8 or 10 no button or pair of buttons clears the tall pipe at x_tile 103 in 1-1, at
-# 12 and above an A then a RIGHT does. 16 leaves margin (docs/decisions.md, 2026-11-19).
+# 12 and above an A then a RIGHT does (scripts/sml_pipe_probe.py, one state). 16 leaves margin.
+# Pending the PM's approval (docs/decisions.md, 2026-11-19).
 SML_HOLD = 16
 FAKE_STEP_BUDGET = 64
 # Logged at the episode's end. A save block read on the frame the block moves can dip or read
