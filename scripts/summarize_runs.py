@@ -54,7 +54,7 @@ def main(out_dir: Path, runs_dir: Path = Path("data/runs")) -> None:
         n_seeds = len({seed for seed, _, _ in runs})
         seeds = f"{n_seeds} seeds" + (", exploratory" if n_seeds < 5 else "")
         title = f"{name} ({seeds})" + (f"\n{reward}" if reward else "")
-        ax.set(title=title, xlabel="env steps", ylabel="mean eval return (deterministic)")
+        ax.set(title=title, xlabel="env steps", ylabel="mean eval return")
         ax.legend()
         fig.tight_layout()
         fig.savefig(out_dir / f"{name}.png", dpi=120)

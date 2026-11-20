@@ -6,6 +6,7 @@ the footer values to `_variables.yml`, the site's copy of plotly.js, and `videos
 data/videos/ plus a clip of the first run's first logged episode.
 """
 
+import os
 import shutil
 import subprocess
 from datetime import date
@@ -22,7 +23,7 @@ from plotly.offline import get_plotlyjs
 from algoarcade.logs.schema import TABLES
 
 # Anchored to the checkout: Quarto runs each page's cells from the page's own folder.
-RUNS = Path(__file__).resolve().parents[3] / "data" / "runs"
+RUNS = Path(os.environ.get("ALGOARCADE_RUNS", Path(__file__).resolve().parents[3] / "data/runs"))
 DASHBOARD = Path(__file__).parent / "dashboard"
 SCALE = 4
 FPS = 15
@@ -74,7 +75,7 @@ def walk_clip(con: duckdb.DuckDBPyConnection, out: Path) -> None:
     rows = con.sql(
         """
         SELECT map_group, map_num, x, y, episode_step FROM steps
-        WHERE run_id = (SELECT min(run_id) FROM runs) AND env_idx = 0 AND episode_id = 0
+        WHERE run_id = (SELECT min(run_id) FROM steps) AND env_idx = 0 AND episode_id = 0
         ORDER BY episode_step
         """
     ).fetchall()
@@ -107,7 +108,7 @@ def main(root: Path = RUNS, out: Path = DASHBOARD) -> None:
             "uv run python -m algoarcade.logs.fake --run-id fake0 --seed 0"
         )
     commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "describe", "--always", "--dirty"], capture_output=True, text=True, check=True
     ).stdout.strip()
     # Quoted: an all-digit or "1e5"-shaped commit would otherwise read as a number.
     (out / "_variables.yml").write_text(

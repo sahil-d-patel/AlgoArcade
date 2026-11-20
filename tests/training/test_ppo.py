@@ -32,6 +32,7 @@ SMOKE = dataclasses.replace(
     total_timesteps=2_000,
     n_envs=2,
     checkpoint_every=1_000,
+    eval_every=1_000,
     eval_episodes=2,
     ppo=dataclasses.replace(CARTPOLE.ppo, n_steps=250, batch_size=100),
 )
@@ -43,6 +44,7 @@ FAKE = dataclasses.replace(
     total_timesteps=512,
     n_envs=2,
     checkpoint_every=256,
+    eval_every=256,
     eval_episodes=1,
     reward_weights={"events": 1.0, "explore": 0.1},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
@@ -171,6 +173,23 @@ def test_smoke_run_writes_the_runner_artifacts(tmp_path: Path) -> None:
         "step_1000.zip",
         "step_2000.zip",
     ]
+
+
+def test_every_checkpoint_is_saved_and_every_eval_every_steps_evaluated(tmp_path: Path) -> None:
+    # As the SB3 runner's test: checkpoints at 128, 256, 384 and the final 512. Evaluations at
+    # 256, the one multiple of eval_every, and at the final checkpoint, which always evaluates.
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, checkpoint_every=128, eval_every=256)
+    run_dir = ppo.train(config)
+    assert sorted(p.name for p in (run_dir / "checkpoints").glob("*.zip")) == [
+        "step_128.zip",
+        "step_256.zip",
+        "step_384.zip",
+        "step_512.zip",
+    ]
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [256, 512]
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [256, 512]
 
 
 @pytest.fixture(scope="module")
