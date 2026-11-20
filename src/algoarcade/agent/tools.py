@@ -56,7 +56,8 @@ class Field(Protocol):
 class Game:
     """One emulator, its reader and its field. With a trace open, every press appends a JSON
     line {"button", "time", "state"}: the button, the wall clock and the state after it, null
-    when not ready. The server writes the start state first, with button null."""
+    when not ready. The server writes the start state first, with button null, its process id
+    as "pid" and the SHA-256 of the emulator's save state as "start_sha256"."""
 
     backend: GameBackend
     reader: StateReader
@@ -67,7 +68,7 @@ class Game:
         self.backend.press([button])
         self.record(button)
 
-    def record(self, button: Button | None) -> None:
+    def record(self, button: Button | None, **extra: object) -> None:
         if self.trace is None:
             return
         try:
@@ -78,7 +79,7 @@ class Game:
             "button": None if button is None else button.name,
             "time": time.time(),
             "state": state,
-        }
+        } | extra
         self.trace.write(json.dumps(line, separators=(",", ":")) + "\n")
         self.trace.flush()
 

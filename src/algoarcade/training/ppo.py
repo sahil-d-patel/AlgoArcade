@@ -687,8 +687,10 @@ def train(config: TrainConfig) -> Path:
         learn(config, envs, checkpoint, log, logger)
         status = "finished"
     except EOFError as error:
+        # A worker that died without a Python exception leaves close() waiting on it forever.
+        envs.close(terminate=True)
         runner.stop_workers(eval_env)
-        raise RuntimeError("The eval worker died; its traceback is above") from error
+        raise RuntimeError("An env worker died; its traceback is above") from error
     finally:
         if log is not None:
             elapsed = time.time() - start

@@ -154,9 +154,9 @@ def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to wr
     start: float,
 ) -> float:
     """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
-    and return the mean return. Both trainers evaluate through this function. The env and, inside
-    eval_rng, the sampled actions start from the eval seed, so an evaluation never moves training
-    and each episode replays from its checkpoint (algoarcade.viz.render --eval-episode)."""
+    and return the mean return. Both trainers evaluate through this function. The env and,
+    inside eval_rng, the sampled actions start from the eval seed, so an evaluation never moves
+    training and each episode replays from its checkpoint (algoarcade.viz.render --eval-episode)."""
     eval_env.seed(config.seed + EVAL_SEED_OFFSET)
     with eval_rng(config):
         returns, _ = evaluate_policy(
