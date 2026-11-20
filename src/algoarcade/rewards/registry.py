@@ -1,7 +1,7 @@
 """Builds reward components from a config of name to weight. Contract: docs/harness-spec.md."""
 
 from collections.abc import Callable, Hashable, Iterable, Mapping
-from typing import Protocol
+from typing import Protocol, cast
 
 from algoarcade.games.base import GameState
 from algoarcade.games.firered.reader import STORY_FLAGS
@@ -126,7 +126,7 @@ class RewardRegistry[S: GameState]:
         the step from `prev`. A term confirms a rise one step late, so without it every reset
         into the cell would pay that rise again on its first step."""
         bests = {
-            c.name: c.confirmed_best(prev, curr)
+            c.name: c.confirmed_best(cast("Progress", prev), cast("Progress", curr))
             for c in self._components
             if isinstance(c, NewMaximum)
         }
