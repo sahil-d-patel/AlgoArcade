@@ -452,7 +452,8 @@ def learn(
 ) -> None:
     """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A
     checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
-    runner's does, and once more after the last update."""
+    runner's does, and once more after the last update. It is evaluated when its scheduled step
+    is a multiple of eval_every, and always at the end."""
     ppo = config.ppo
     torch.manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
@@ -525,10 +526,9 @@ def run(
             dict_obs = isinstance(eval_env.observation_space, spaces.Dict)
             eval_env.obs_rms = deepcopy(obs_rms if dict_obs else obs_rms[""])
             eval_env.save(str(path.with_suffix(".pkl")))
-        if not evaluate_it:
-            return
-        mean = runner.evaluate(model, eval_env, config, run_dir, step, start)
-        logger.record("eval/mean_return", mean)
+        if evaluate_it:
+            mean = runner.evaluate(model, eval_env, config, run_dir, step, start)
+            logger.record("eval/mean_return", mean)
 
     fixed = runner.run_row(config, run_dir.name.removeprefix("run_id="), backend, rom_sha1, commit)
     fixed |= {"algorithm": algorithm, "trainer": "owned"}
@@ -541,8 +541,10 @@ def run(
         learn(config, envs, checkpoint, log, logger)
         status = "finished"
     except EOFError as error:
+        # A worker that died without a Python exception leaves close() waiting on it forever.
+        envs.close(terminate=True)
         runner.stop_workers(eval_env)
-        raise RuntimeError("The eval worker died; its traceback is above") from error
+        raise RuntimeError("An env worker died; its traceback is above") from error
     finally:
         if log is not None:
             elapsed = time.time() - start
