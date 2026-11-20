@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 
 from algoarcade.games.firered.addresses import LAYOUT_COMMIT
-from algoarcade.games.firered.maps import MARKER, MapGrid, load_maps
-from algoarcade.viz.kanto_map import terrain
+from algoarcade.games.firered.maps import MARKER, Connection, MapGrid, load_maps, place
+from algoarcade.viz.kanto_map import INSETS, locate, terrain
 
 
 def test_terrain_preserves_blockers_and_distinguishes_special_tiles() -> None:
@@ -65,3 +65,21 @@ def test_synthetic_map_bin_cell_0x1401(tmp_path: Path) -> None:
     assert grid.blocked[0, 0]
     assert cell >> 12 == 1
     assert terrain(grid)[0, 0] == 1
+
+
+def blank(width: int, height: int, *connections: Connection) -> MapGrid:
+    cells = np.zeros((height, width), dtype=np.uint16)
+    return MapGrid("MAP_TEST", cells, cells, connections)
+
+
+def test_locate_offsets_mainland_tiles_and_keeps_inset_tiles_local() -> None:
+    maps = {
+        (3, 0): blank(24, 20, Connection("up", 0, (3, 19))),
+        (3, 19): blank(24, 40, Connection("down", 0, (3, 0))),
+        (1, 0): blank(54, 69),
+    }
+    offsets = place(maps)
+    assert locate(offsets, 3, 0, 5, 7) == (0, (5, 7))
+    assert locate(offsets, 3, 19, 5, 7) == (0, (5, 7 - 40))
+    assert locate(offsets, 1, 0, 5, 7) == (list(INSETS).index((1, 0)) + 1, (5, 7))
+    assert locate(offsets, 9, 9, 5, 7) is None

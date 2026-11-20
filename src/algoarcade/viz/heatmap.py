@@ -1,5 +1,6 @@
 """Exact visit counts on the Kanto schematic for one completed run."""
 
+import os
 from collections import Counter
 from html import escape
 from math import ceil
@@ -12,17 +13,35 @@ import pyarrow.parquet as pq
 import tyro
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LogNorm, to_rgb
+from numpy.typing import NDArray
 from PIL import Image
 from plotly.subplots import make_subplots
 
 from algoarcade.games.firered.maps import MapGrid, load_maps, place
 from algoarcade.logs.schema import validate
-from algoarcade.viz.kanto_map import COLORS, LABELS, draw, terrain
+from algoarcade.viz.kanto_map import COLORS, INSETS, LABELS, draw, mainland, origins, terrain
 
 WINDOW_STEPS = 500_000
+# Anchored to the checkout like VIZ-01's site.RUNS: Quarto runs a page's cells from its folder.
+RUNS = Path(os.environ.get("ALGOARCADE_RUNS", Path(__file__).resolve().parents[3] / "data/runs"))
+PIXELATED = "<style>.imagelayer image {image-rendering: pixelated;}</style>"
+
+Location = tuple[int, int, int, int]
+MapId = tuple[int, int]
 
 
-def counts(visits: pa.Table, runs: pa.Table) -> Counter[tuple[int, int, int, int]]:
+def load(run: Path) -> tuple[pa.Table, pa.Table]:
+    """The visits and runs tables of one run directory, from its closed Parquet files."""
+    tables = []
+    for name in ("visits", "runs"):
+        files = sorted((run / name).glob("*.parquet"))
+        if not files:
+            raise ValueError(f"No closed Parquet files in {run / name}")
+        tables.append(pa.concat_tables([pq.ParquetFile(path).read() for path in files]))
+    return tables[0], tables[1]
+
+
+def counts(visits: pa.Table, runs: pa.Table) -> Counter[Location]:
     validate(visits, "visits")
     validate(runs, "runs")
     rows = runs.to_pylist()
@@ -34,7 +53,7 @@ def counts(visits: pa.Table, runs: pa.Table) -> Counter[tuple[int, int, int, int
     end = ends[0]
     if end["env_id"] not in ("firered", "fake"):
         raise ValueError("The Kanto heatmap requires FireRed or synthetic FireRed logs")
-    result: Counter[tuple[int, int, int, int]] = Counter()
+    result: Counter[Location] = Counter()
     for row in visits.to_pylist():
         if row["run_id"] != end["run_id"]:
             raise ValueError("Visit rows belong to another run")
@@ -46,16 +65,12 @@ def counts(visits: pa.Table, runs: pa.Table) -> Counter[tuple[int, int, int, int
     return result
 
 
-def windows(
-    visits: pa.Table, runs: pa.Table
-) -> list[tuple[int, int, Counter[tuple[int, int, int, int]]]]:
+def windows(visits: pa.Table, runs: pa.Table) -> list[tuple[int, int, Counter[Location]]]:
     total = counts(visits, runs).total()
     if total == 0:
         raise ValueError("A slider requires at least one visit")
     width = WINDOW_STEPS * ceil(ceil(total / WINDOW_STEPS) / 50)
-    frames: dict[int, Counter[tuple[int, int, int, int]]] = {
-        start: Counter() for start in range(0, total, width)
-    }
+    frames: dict[int, Counter[Location]] = {start: Counter() for start in range(0, total, width)}
     totals: Counter[int] = Counter()
     for row in visits.to_pylist():
         start = row["window_start_step"]
@@ -70,24 +85,54 @@ def windows(
     return [(start, min(start + width, total), frame) for start, frame in frames.items()]
 
 
-def interactive(
-    visits: pa.Table, runs: pa.Table, maps: dict[tuple[int, int], MapGrid]
-) -> go.Figure:
+def tiles(
+    batch: Counter[Location],
+    maps: dict[MapId, MapGrid],
+    drawn: dict[MapId, tuple[int, tuple[int, int]]],
+) -> tuple[dict[MapId, NDArray[np.int64]], int, int]:
+    """Visits per drawn map as [y, x] arrays, the visits on maps no panel draws, and the visits
+    off their map's grid or on an unknown map. A real run can log such a tile; it is counted and
+    reported, not drawn."""
+    grids: dict[MapId, NDArray[np.int64]] = {}
+    hidden = off = 0
+    for (group, num, x, y), value in batch.items():
+        grid = maps.get((group, num))
+        if grid is None or not (0 <= x < grid.width and 0 <= y < grid.height):
+            off += value
+        elif (group, num) not in drawn:
+            hidden += value
+        else:
+            cells = grids.setdefault((group, num), np.zeros(grid.blocks.shape, dtype=np.int64))
+            cells[y, x] += value
+    return grids, hidden, off
+
+
+def skipped(hidden: int, off: int) -> str:
+    return f"{hidden:,} in areas not shown" + (f" · {off:,} off the map grid" if off else "")
+
+
+def interactive(visits: pa.Table, runs: pa.Table, maps: dict[MapId, MapGrid]) -> go.Figure:
     batches = windows(visits, runs)
     offsets = place(maps)
-    panels = dict.fromkeys(offsets, (1, 1)) | {(1, 0): (1, 2), (6, 2): (2, 2)}
+    drawn = origins(maps, offsets)
+    rows = (len(INSETS) + 1) // 2
+    slots = [{} if i < len(INSETS) else None for i in range(2 * rows)]
     fig = make_subplots(
-        rows=2,
-        cols=2,
-        specs=[[{"rowspan": 2}, {}], [None, {}]],
-        column_widths=[0.72, 0.28],
-        horizontal_spacing=0.05,
-        subplot_titles=[f"Kanto · {len(offsets)} connected maps", "Viridian Forest", "Pewter Gym"],
+        rows=rows,
+        cols=3,
+        specs=[
+            [{"rowspan": rows} if r == 0 else None, *slots[2 * r : 2 * r + 2]] for r in range(rows)
+        ],
+        column_widths=[0.6, 0.2, 0.2],
+        horizontal_spacing=0.03,
+        vertical_spacing=0.06,
+        subplot_titles=[f"Kanto · {len(offsets)} connected maps", *INSETS.values()],
     )
+    # Panel i of locate() is subplot i + 1 in row-major order.
+    cells = [(1, 1)] + [(i // 2 + 1, i % 2 + 2) for i in range(len(INSETS))]
     palette = (np.array([to_rgb(color) for color in COLORS]) * 255).astype(np.uint8)
-    for key, (row, col) in panels.items():
+    for key, (panel, (x, y)) in drawn.items():
         grid = maps[key]
-        x, y = offsets.get(key, (0, 0))
         fig.add_layout_image(
             source=Image.fromarray(palette[terrain(grid)]),
             x=x,
@@ -98,13 +143,15 @@ def interactive(
             yanchor="top",
             sizing="stretch",
             layer="below",
-            row=row,
-            col=col,
+            row=cells[panel][0],
+            col=cells[panel][1],
         )
-    shown = sorted({key[:2] for _, _, batch in batches for key in batch} & panels.keys())
+    tallies = [tiles(batch, maps, drawn) for _, _, batch in batches]
+    shown = sorted({key for grids, _, _ in tallies for key in grids})
+    peak = max(2, max((int(g.max()) for grids, _, _ in tallies for g in grids.values()), default=0))
     for index, key in enumerate(shown):
         grid = maps[key]
-        x, y = offsets.get(key, (0, 0))
+        panel, (x, y) = drawn[key]
         fig.add_trace(
             go.Heatmap(
                 name=str(index),
@@ -125,35 +172,24 @@ def interactive(
                 hoverongaps=False,
                 zsmooth=False,
             ),
-            row=panels[key][0],
-            col=panels[key][1],
+            row=cells[panel][0],
+            col=cells[panel][1],
         )
     synthetic = runs["env_id"][0].as_py() == "fake"
     heading = "Synthetic exploration · demo only" if synthetic else "Agent exploration"
     run_id = escape(runs["run_id"][0].as_py())
-    peak = max(2, max(value for _, _, batch in batches for value in batch.values()))
     frames = []
-    for index, (start, end, batch) in enumerate(batches):
-        grids = {key: np.zeros(maps[key].blocks.shape, dtype=np.int64) for key in shown}
-        omitted = 0
-        for (group, num, x, y), value in batch.items():
-            key = (group, num)
-            if key not in maps or not (0 <= x < maps[key].width and 0 <= y < maps[key].height):
-                raise ValueError(f"Visit outside map bounds: {(group, num, x, y)}")
-            if key in grids:
-                grids[key][y, x] += value
-            else:
-                omitted += value
+    for index, ((start, end, batch), (grids, hidden, off)) in enumerate(
+        zip(batches, tallies, strict=True)
+    ):
+        values = [grids.get(key, np.zeros(maps[key].blocks.shape, dtype=np.int64)) for key in shown]
         data = [
-            go.Heatmap(
-                z=np.where(grid > 0, np.log10(np.maximum(grid, 1)), np.nan),
-                customdata=grid,
-            )
-            for grid in grids.values()
+            go.Heatmap(z=np.where(grid > 0, np.log10(np.maximum(grid, 1)), np.nan), customdata=grid)
+            for grid in values
         ]
         title = (
             f"{heading}<br><sup>{run_id} · steps {start + 1:,}-{end:,} · "
-            f"{batch.total():,} visits · {omitted:,} outside shown panels</sup>"
+            f"{batch.total():,} visits · {skipped(hidden, off)}</sup>"
         )
         frames.append(
             go.Frame(
@@ -166,16 +202,13 @@ def interactive(
     for index, first in enumerate(frames[0].data):
         fig.update_traces(z=first.z, customdata=first.customdata, selector={"name": str(index)})
     fig.frames = frames
-    bounds = (
-        min(x for x, _ in offsets.values()),
-        min(y for _, y in offsets.values()),
-        max(x + maps[key].width for key, (x, _) in offsets.items()),
-        max(y + maps[key].height for key, (_, y) in offsets.items()),
-    )
-    for row, col, key, anchor in ((1, 1, None, "x"), (1, 2, (1, 0), "x2"), (2, 2, (6, 2), "x3")):
-        left, top, right, bottom = (
-            bounds if key is None else (0, 0, maps[key].width, maps[key].height)
-        )
+    for panel, (row, col) in enumerate(cells):
+        if panel == 0:
+            left, top, right, bottom = mainland(maps, offsets)
+        else:
+            grid = maps[list(INSETS)[panel - 1]]
+            left, top, right, bottom = 0, 0, grid.width, grid.height
+        anchor = "x" if panel == 0 else f"x{panel + 1}"
         fig.update_xaxes(range=[left, right], visible=False, constrain="domain", row=row, col=col)
         fig.update_yaxes(
             range=[bottom, top], visible=False, scaleanchor=anchor, scaleratio=1, row=row, col=col
@@ -239,76 +272,45 @@ def interactive(
 
 
 def main(run: Path, out: Path) -> None:
-    tables = {}
-    for name in ("visits", "runs"):
-        files = sorted((run / name).glob("*.parquet"))
-        if not files:
-            raise ValueError(f"No closed Parquet files in {run / name}")
-        tables[name] = pa.concat_tables([pq.ParquetFile(path).read() for path in files])
-    visits = counts(tables["visits"], tables["runs"])
+    visits, runs = load(run)
     maps = load_maps()
     if out.suffix.lower() == ".html":
-        plot = interactive(tables["visits"], tables["runs"], maps)
-        html = plot.to_html(include_plotlyjs=True, auto_play=False, config={"displaylogo": False})
-        html = html.replace(
-            "<head>", "<head><style>.imagelayer image {image-rendering: pixelated;}</style>"
+        html = interactive(visits, runs, maps).to_html(
+            include_plotlyjs=True, auto_play=False, config={"displaylogo": False}
         )
-        out.write_text(html, encoding="utf-8")
+        out.write_text(html.replace("<head>", "<head>" + PIXELATED), encoding="utf-8")
         print(f"Saved interactive heatmap to {out} ({out.stat().st_size:,} bytes)")  # noqa: T201
         return
-    grids = {}
-    for (group, num, x, y), count in visits.items():
-        key = (group, num)
-        if key not in maps or not (0 <= x < maps[key].width and 0 <= y < maps[key].height):
-            raise ValueError(f"Visit outside map bounds: {(group, num, x, y)}")
-        if key not in grids:
-            grids[key] = np.zeros(maps[key].blocks.shape, dtype=np.int64)
-        grids[key][y, x] += count
-    figure, axes = draw(maps)
+    total = counts(visits, runs)
     offsets = place(maps)
-    norm = LogNorm(vmin=1, vmax=max(2, max(visits.values(), default=0)))
-    mainland = axes[(3, 0)]
-    xlim, ylim = mainland.get_xlim(), mainland.get_ylim()
-    omitted = 0
+    drawn = origins(maps, offsets)
+    grids, hidden, off = tiles(total, maps, drawn)
+    footer = f"{total.total():,} visits verified against run steps · {skipped(hidden, off)}"
+    figure, panels = draw(maps, offsets, footer)
+    norm = LogNorm(vmin=1, vmax=max(2, max((int(g.max()) for g in grids.values()), default=0)))
+    xlim, ylim = panels[0].get_xlim(), panels[0].get_ylim()
     for key, grid in grids.items():
-        if key not in axes:
-            omitted += int(grid.sum())
-            continue
-        base = axes[key].images[0] if key not in offsets else None
-        if base is not None:
-            extent = base.get_extent()
-        else:
-            x, y = offsets[key]
-            extent = (x, x + maps[key].width, y + maps[key].height, y)
-        axes[key].imshow(
+        panel, (x, y) = drawn[key]
+        panels[panel].imshow(
             np.ma.masked_equal(grid, 0),
             cmap="magma",
             norm=norm,
             interpolation="nearest",
-            extent=extent,
+            extent=(x, x + grid.shape[1], y + grid.shape[0], y),
         )
-    mainland.set_xlim(xlim)
-    mainland.set_ylim(ylim)
-    synthetic = tables["runs"]["env_id"][0].as_py() == "fake"
+    panels[0].set_xlim(xlim)
+    panels[0].set_ylim(ylim)
+    synthetic = runs["env_id"][0].as_py() == "fake"
     figure.suptitle(
         "Synthetic visits · demonstration only" if synthetic else "Agent visits · complete run",
         fontsize=22,
         y=0.97,
     )
-    figure.texts[-1].set_text(
-        f"{visits.total():,} visits verified against run steps · {omitted:,} visits in areas not shown"
-    )
     colorbar = figure.add_axes((0.19, 0.095, 0.38, 0.014))
-    figure.colorbar(
-        ScalarMappable(norm=norm, cmap="magma"),
-        cax=colorbar,
-        orientation="horizontal",
-    )
+    figure.colorbar(ScalarMappable(norm=norm, cmap="magma"), cax=colorbar, orientation="horizontal")
     colorbar.set_title("Visits per tile · logarithmic scale", fontsize=10, pad=6)
     figure.savefig(out, dpi=160, facecolor=figure.get_facecolor())
-    print(  # noqa: T201
-        f"{visits.total()} visits = run steps; {omitted} visits outside displayed panels; saved {out}"
-    )
+    print(f"{total.total()} visits = run steps; {skipped(hidden, off)}; saved {out}")  # noqa: T201
 
 
 if __name__ == "__main__":

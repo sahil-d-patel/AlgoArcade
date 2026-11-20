@@ -9,13 +9,14 @@ from algoarcade.games.firered.maps import MapGrid
 from algoarcade.logs.fake import fake_run
 from algoarcade.logs.schema import VISITS
 from algoarcade.viz.heatmap import counts, interactive, windows
+from algoarcade.viz.kanto_map import INSETS
 
 
 def test_known_walk_sums_parallel_rows_and_checkpoint_windows() -> None:
     run = fake_run("walk", seed=0, env_steps=12)
     locations = [(3, 0, 2, 3), (3, 0, 4, 5), (1, 0, 2, 3)]
     rows = []
-    for window, tile, visits in [(0, 0, 2), (0, 0, 3), (500_000, 0, 1), (0, 1, 2), (0, 2, 4)]:
+    for window, tile, visits in [(0, 0, 2), (0, 0, 3), (0, 0, 1), (0, 1, 2), (0, 2, 4)]:
         group, num, x, y = locations[tile]
         rows.append(
             {
@@ -53,6 +54,11 @@ def test_mixed_run_rows_are_rejected() -> None:
     other = fake_run("other", seed=0, env_steps=40)
     with pytest.raises(ValueError, match="another run"):
         counts(other["visits"], run["runs"])
+
+
+def blank_maps() -> dict[tuple[int, int], MapGrid]:
+    cells = np.zeros((2, 2), dtype=np.uint16)
+    return {key: MapGrid("MAP_TEST", cells, cells, ()) for key in [(3, 0), (9, 9), *INSETS]}
 
 
 @pytest.fixture
@@ -122,13 +128,7 @@ def test_long_run_groups_adjacent_windows_without_losing_visits(checkpoint_run: 
 
 
 def test_slider_clears_previous_tiles_and_keeps_one_color_scale(checkpoint_run: dict) -> None:
-    maps = {
-        key: MapGrid(
-            "MAP_TEST", np.zeros((2, 2), dtype=np.uint16), np.zeros((2, 2), dtype=np.uint16), ()
-        )
-        for key in [(3, 0), (1, 0), (6, 2)]
-    }
-    figure = interactive(checkpoint_run["visits"], checkpoint_run["runs"], maps).to_dict()
+    figure = interactive(checkpoint_run["visits"], checkpoint_run["runs"], blank_maps()).to_dict()
     assert len(figure["frames"]) == 3
     second = figure["frames"][1]["data"][0]
     z = np.frombuffer(b64decode(second["z"]["bdata"]), dtype=second["z"]["dtype"]).reshape(2, 2)
@@ -139,3 +139,28 @@ def test_slider_clears_previous_tiles_and_keeps_one_color_scale(checkpoint_run: 
     assert figure["layout"]["coloraxis"]["cmax"] == pytest.approx(np.log10(500_000))
     assert all("coloraxis" not in frame["layout"] for frame in figure["frames"])
     assert "1,000,001-1,000,040" in figure["frames"][-1]["layout"]["title"]["text"]
+
+
+def test_off_grid_and_hidden_visits_are_reported_and_leave_the_color_scale() -> None:
+    run = fake_run("skips", seed=0, env_steps=4)
+    metadata = run["runs"].to_pylist()
+    metadata[-1]["env_steps"] = 10
+    visits = pa.Table.from_pylist(
+        [
+            {
+                "run_id": "skips",
+                "window_start_step": 0,
+                "map_group": group,
+                "map_num": num,
+                "x": x,
+                "y": 0,
+                "visits": count,
+            }
+            for group, num, x, count in [(3, 0, 0, 4), (3, 0, 99, 1), (9, 9, 0, 5)]
+        ],
+        schema=VISITS,
+    )
+    runs = pa.Table.from_pylist(metadata, schema=run["runs"].schema)
+    figure = interactive(visits, runs, blank_maps()).to_dict()
+    assert figure["layout"]["coloraxis"]["cmax"] == pytest.approx(np.log10(4))
+    assert "5 in areas not shown · 1 off the map grid" in figure["layout"]["title"]["text"]
