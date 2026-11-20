@@ -18,6 +18,7 @@ from mcp import Client, StdioServerParameters
 from mcp.server.mcpserver import MCPServer
 from pydantic_core import to_jsonable_python
 
+from algoarcade.agent import loop
 from algoarcade.agent.loop import (
     SEGMENTS,
     Attempt,
@@ -480,3 +481,22 @@ def test_a_run_refuses_a_run_id_already_logged(tmp_path: Path) -> None:
     settings = Run(name="taken", out=tmp_path, runs=tmp_path / "runs", max_actions=1, max_dollars=1)
     with pytest.raises(FileExistsError):
         asyncio.run(run(settings, StubModel([END])))
+
+
+def test_the_command_refuses_a_model_with_no_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    argv = ["loop", "--name", "x", "--max-actions", "1", "--max-dollars", "1", "--model", "nope"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="no prices for nope"):
+        loop.main()
+
+
+def test_the_command_refuses_a_partial_price_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    argv = ["loop", "--name", "x", "--max-actions", "1", "--max-dollars", "1"]
+    argv += ["--model", "claude-opus-5-5", "--prices.input", "4"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="drop the --prices flags"):
+        loop.main()
+
+
+def test_opus_attempts_are_priced_on_the_opus_card() -> None:
+    assert loop.PRICES["claude-opus-5-5"].card(1_000) == (4.0, 20.0, 5.0, 0.20)

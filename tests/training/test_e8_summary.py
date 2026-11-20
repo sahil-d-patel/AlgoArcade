@@ -51,6 +51,7 @@ def test_scores_read_each_finished_e8_run_by_arm(tmp_path: Path) -> None:
         total_timesteps=128,
         n_envs=1,
         checkpoint_every=64,
+        eval_every=64,
         eval_episodes=1,
         reward_weights={"explore": 0.1},
         ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),

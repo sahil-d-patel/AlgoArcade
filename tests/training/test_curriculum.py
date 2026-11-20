@@ -23,6 +23,7 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games.fake import FEATURES, FakeField, FakeReader, FakeState
 from algoarcade.rewards.registry import COMPONENTS, DEFAULT_WEIGHTS, WEIGHTS, RewardRegistry
+from algoarcade.training import ppo
 from algoarcade.training.config import FIRERED
 from algoarcade.training.curriculum import CurriculumResets, load
 from algoarcade.training.games import FAKE_STEP_BUDGET, fake_env
@@ -176,6 +177,7 @@ FAKE = dataclasses.replace(
     total_timesteps=512,
     n_envs=2,
     checkpoint_every=512,
+    eval_every=512,
     eval_episodes=1,
     reward_weights={"events": 1.0, "explore": 0.1},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
@@ -204,3 +206,9 @@ def test_the_runner_refuses_archive_and_curriculum_together(tmp_path: Path) -> N
     config = dataclasses.replace(FAKE, archive=True, curriculum="x", runs_dir=tmp_path)
     with pytest.raises(ValueError, match="archive and curriculum"):
         train(config)
+
+
+def test_the_owned_trainer_refuses_a_curriculum(tmp_path: Path) -> None:
+    config = dataclasses.replace(FAKE, curriculum="x", runs_dir=tmp_path)
+    with pytest.raises(ValueError, match="SB3 runner only"):
+        ppo.train(config)

@@ -10,6 +10,7 @@ import gymnasium as gym
 import numpy as np
 import pyarrow.parquet as pq
 import pytest
+import torch
 
 pytest.importorskip("stable_baselines3")
 
@@ -35,6 +36,7 @@ FAKE = dataclasses.replace(
     total_timesteps=512,
     n_envs=2,
     checkpoint_every=256,
+    eval_every=256,
     eval_episodes=1,
     reward_weights={"events": 1.0, "explore": 0.1},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
@@ -160,6 +162,64 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
         for e in episodes.to_pylist()
         for name in config.reward_weights
     )
+
+
+@pytest.mark.parametrize("deterministic", [True, False])
+def test_a_sampled_evaluation_plays_different_episodes(tmp_path: Path, deterministic: bool) -> None:
+    # One rollout, then one evaluation of four episodes. The untrained policy is near uniform,
+    # so its argmax replays one episode and its samples do not.
+    config = dataclasses.replace(
+        FAKE,
+        runs_dir=tmp_path,
+        total_timesteps=FAKE.n_envs * FAKE_STEP_BUDGET,
+        eval_episodes=4,
+        eval_deterministic=deterministic,
+    )
+    episodes = pq.read_table(train(config) / "episodes").to_pylist()
+    evals = {(e["episode_return"], e["unique_tiles"]) for e in episodes if e["is_eval"]}
+    assert (len(evals) == 1) is deterministic
+
+
+def test_every_checkpoint_is_saved_and_every_eval_every_steps_evaluated(tmp_path: Path) -> None:
+    # Four rollouts of 128 steps: checkpoints at 128, 256, 384 and the final 512. Evaluations at
+    # 256, the one multiple of eval_every, and at the final checkpoint, which always evaluates.
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, checkpoint_every=128, eval_every=256)
+    run_dir = train(config)
+    assert sorted(p.name for p in (run_dir / "checkpoints").glob("*.zip")) == [
+        "step_128.zip",
+        "step_256.zip",
+        "step_384.zip",
+        "step_512.zip",
+    ]
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [256, 512]
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [256, 512]
+
+
+def test_sampled_evaluation_leaves_training_unchanged(tmp_path: Path) -> None:
+    # Evaluating twice as often must not move training: the same training episodes and weights.
+    runs = []
+    for eval_every in (128, 256):
+        config = dataclasses.replace(
+            FAKE,
+            runs_dir=tmp_path / str(eval_every),
+            checkpoint_every=128,
+            eval_every=eval_every,
+            eval_episodes=4,
+            eval_deterministic=False,
+        )
+        run_dir = train(config)
+        episodes = [
+            (e["env_idx"], e["episode_id"], e["episode_return"], e["unique_tiles"])
+            for e in pq.read_table(run_dir / "episodes").to_pylist()
+            if not e["is_eval"]
+        ]
+        weights = PPO.load(run_dir / "checkpoints" / "step_512.zip", device="cpu").policy
+        runs.append((episodes, weights.state_dict()))
+    (first, first_weights), (second, second_weights) = runs
+    assert first == second
+    assert all(torch.equal(first_weights[k], second_weights[k]) for k in first_weights)
 
 
 @pytest.mark.rom

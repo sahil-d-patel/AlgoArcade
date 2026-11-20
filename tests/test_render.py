@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 pytest.importorskip("stable_baselines3")
@@ -24,6 +25,7 @@ FAKE = dataclasses.replace(
     total_timesteps=FAKE_STEP_BUDGET,
     n_envs=1,
     checkpoint_every=FAKE_STEP_BUDGET,
+    eval_every=FAKE_STEP_BUDGET,
     eval_episodes=1,
     reward_weights=WEIGHTS,
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
@@ -93,3 +95,16 @@ def test_grid_puts_four_seeds_side_by_side(checkpoint: Path, tmp_path: Path):
     assert len(results) == 4
     assert frames == FAKE_STEP_BUDGET
     assert size == (4 * width, height)
+
+
+def test_a_sampled_evaluation_episode_replays_from_its_checkpoint(tmp_path: Path):
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, eval_episodes=3, eval_deterministic=False)
+    run_dir = train(config)
+    logged = [
+        e["episode_return"] for e in pq.read_table(run_dir / "episodes").to_pylist() if e["is_eval"]
+    ]
+    assert len(set(logged)) > 1
+    checkpoint = run_dir / "checkpoints" / f"step_{FAKE_STEP_BUDGET}.zip"
+    for k in (0, 2):
+        [(episode_return, _)] = render.render(checkpoint, tmp_path / f"{k}.mp4", eval_episode=k)
+        assert episode_return == logged[k]
