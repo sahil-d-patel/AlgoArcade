@@ -23,7 +23,7 @@ Each page is one HTML file with its scripts, styles and plotly.js inlined (`embe
 
 ## Add a panel
 
-1. Put the figure code in a module next to this folder, for example `src/algoarcade/viz/comparison.py`, as a function that takes a DuckDB connection and returns a Plotly figure. Test it on fake-logger data.
+1. Put the figure code in a module next to this folder, for example `src/algoarcade/viz/my_panel.py`, as a function that takes a DuckDB connection and returns a Plotly figure. Test it on fake-logger data.
 2. Create `<page>.qmd` at the top of this folder, not in a subfolder: the header loads `plotly.min.js` from beside the page.
 
    ````markdown
@@ -35,10 +35,10 @@ Each page is one HTML file with its scripts, styles and plotly.js inlined (`embe
 
    ```{python}
    #| output: asis
-   from algoarcade.viz.comparison import learning_curves
+   from algoarcade.viz.my_panel import my_figure
    from algoarcade.viz.site import connect, show
 
-   show(learning_curves(connect()))
+   show(my_figure(connect()))
    ```
    ````
 
