@@ -8,7 +8,7 @@ Render a clip with:
 uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<n>.zip --seed 0 --out data/videos/<name>.mp4
 ```
 
-The policy plays deterministically from the run's start state, one video frame per decision at 15 frames per second, so a clip runs six times faster than the game. Clips stay in `data/videos/`.
+The policy plays deterministically from the run's start state, one video frame per decision at 15 frames per second, so a clip runs six times faster than the game. Clips stay in `data/videos/`. To clip an episode from the evaluation logs, such as a `BASELINE_V1` success, pass `--eval-episode k` instead of `--seed`: it replays the k-th evaluation episode at that checkpoint (k counts from 0 at the checkpoint's lowest eval `episode_id`), with sampled actions when the run evaluated that way.
 
 The six signatures:
 

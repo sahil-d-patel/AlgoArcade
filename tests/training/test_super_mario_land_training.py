@@ -146,6 +146,7 @@ def test_a_run_logs_its_continues_to_progress_csv(tmp_path: Path) -> None:
         total_timesteps=2048,
         n_envs=1,
         checkpoint_every=2048,
+        eval_every=2048,
         eval_episodes=1,
         runs_dir=tmp_path,
         ppo=dataclasses.replace(CONFIG.ppo, n_steps=2048, batch_size=256),
