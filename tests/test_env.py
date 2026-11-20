@@ -374,6 +374,33 @@ def test_an_archive_reset_and_a_step_onto_a_visited_tile_pay_nothing() -> None:
     assert info["location"] == (0, 3, 1)
 
 
+def test_a_reset_into_a_cell_reached_on_a_rising_step_pays_nothing() -> None:
+    # The level sum rises on the step that reaches the cell. Its term confirms a rise one step
+    # late, so the cell's bests must already include it or every reset into the cell repays it.
+    backend = FakeBackend()
+    env = AlgoArcadeEnv(
+        backend,
+        FakeReader(),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    walk_right(env, 2)
+    poke(backend, fake.LEVEL_SUM, 9)
+    cell = walk_right(env, 1)[-1]
+    assert cell is not None
+    assert cell.key == (0, 1, 0, 0, 0)
+
+    env.set_next_start(cell)
+    env.reset(seed=1)
+    _, _, _, _, info = env.step(5)
+    raw = {name: info[f"reward/{name}"] for name in WEIGHTS}
+    assert raw == dict.fromkeys(WEIGHTS, 0.0) | {"time": 1.0}
+
+
 COUNTS = (fake.FLAGS, fake.LEVEL_SUM, fake.BADGES, fake.MILESTONES)
 
 
