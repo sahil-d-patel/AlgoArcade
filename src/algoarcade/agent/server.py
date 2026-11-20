@@ -7,7 +7,8 @@ plus structured content, and the PNG when asked for one. L2 adds `navigate_to` a
 `advance_dialogue`. `--trace FILE` writes the start state and then every press with the state
 after it, one JSON line each, for the loop to count and grade; the first line also holds the
 process id and the start state's hash, so the loop can show each attempt had its own process
-and the same start.
+and the same start. `--capture DIR` also saves the emulator every `--capture-every` presses
+(tools.Game) for E8's curriculum.
 """
 
 import argparse

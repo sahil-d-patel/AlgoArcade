@@ -43,6 +43,7 @@ A pre-commit hook and a Claude Code hook both reject these by extension and by p
 data/
 ├── roms/          # your own dumps
 ├── states/        # save states listed in the manifest
+│   └── curriculum/  # <run>/: states from a successful LLM attempt, with manifest.json (E8)
 ├── pokefirered/   # fetched symbol files and map data
 ├── runs/          # run_id=<id>/ with Parquet logs and checkpoints
 ├── videos/        # rendered clips
