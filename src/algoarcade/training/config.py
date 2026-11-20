@@ -76,7 +76,8 @@ def save_config(config: TrainConfig, path: Path) -> None:
 
 def load_config(path: Path) -> TrainConfig:
     raw = json.loads(path.read_text())
-    raw["ppo"] = PPOConfig(**raw["ppo"])
+    # Runs saved before TRN-07 wrote neither field; SB3 trained them with 0.5 and 0.5.
+    raw["ppo"] = PPOConfig(**{"vf_coef": 0.5, "max_grad_norm": 0.5} | raw["ppo"])
     raw["runs_dir"] = Path(raw["runs_dir"])
     return TrainConfig(**raw)
 

@@ -1,0 +1,28 @@
+---
+title: "Exploration heatmap"
+format: html
+execute:
+  echo: false
+---
+
+Visits per tile in each training window, on one log scale for every window. Hover a tile for its map, position and count. The page reads `data/runs/`, or the folder in `ALGOARCADE_RUNS`: the heatmap shows the first run there, and the timeline shows every run, so point it at one arm's finished FireRed runs, one per seed.
+
+```{python}
+#| output: asis
+from algoarcade.games.firered.maps import load_maps
+from algoarcade.viz.heatmap import PIXELATED, RUNS, interactive, load
+from algoarcade.viz.timeline import record, timeline
+
+runs = sorted(RUNS.glob("run_id=*"))
+heatmap = interactive(*load(runs[0]), load_maps())
+# plotly.js is embedded in this figure only; the timeline below reuses it.
+print(f"```{{=html}}\n{PIXELATED}\n{heatmap.to_html(full_html=False, include_plotlyjs=True)}\n```")
+```
+
+## Recorded progress by seed
+
+```{python}
+#| output: asis
+progress = timeline([record(run) for run in runs])
+print(f"```{{=html}}\n{progress.to_html(full_html=False, include_plotlyjs=False)}\n```")
+```

@@ -2,6 +2,7 @@
 
 import csv
 import dataclasses
+import os
 from functools import partial
 from pathlib import Path
 
@@ -261,6 +262,34 @@ class CrashOnSecondWorker(gym.Wrapper):
 
 def crashing_env(weights: dict[str, float]) -> gym.Env:
     return CrashOnSecondWorker(fake_env(weights))
+
+
+class ExitOnSecondWorker(CrashOnSecondWorker):
+    def step(self, action):
+        self.steps += 1
+        if getattr(self, "rank", 0) == 1 and self.steps == 10:
+            os._exit(1)
+        return self.env.step(action)
+
+
+def exiting_env(weights: dict[str, float]) -> gym.Env:
+    return ExitOnSecondWorker(fake_env(weights))
+
+
+def test_a_worker_that_exits_raises_and_marks_the_run_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def factory(_env_id: str, _start: str, weights: dict[str, float]) -> tuple:
+        return partial(exiting_env, dict(weights)), "fake", ""
+
+    monkeypatch.setattr(runner, "env_factory", factory)
+    with pytest.raises(RuntimeError, match="An env worker died"):
+        ppo.train(dataclasses.replace(FAKE, runs_dir=tmp_path))
+    (run_dir,) = tmp_path.iterdir()
+    assert [r["status"] for r in pq.read_table(run_dir / "runs").to_pylist()] == [
+        "running",
+        "crashed",
+    ]
 
 
 def test_a_dead_worker_raises_and_marks_the_run_crashed(

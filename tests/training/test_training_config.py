@@ -1,4 +1,5 @@
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -31,3 +32,13 @@ def test_firered_preset_pays_the_default_reward() -> None:
 
 def test_super_mario_land_trains_with_the_firered_ppo_values() -> None:
     assert PRESETS["super_mario_land"][1].ppo == PRESETS["firered"][1].ppo
+
+
+def test_a_config_saved_before_trn07_loads_with_sb3s_values(tmp_path: Path) -> None:
+    config = dataclasses.replace(PRESETS["firered"][1], start_state="seg_01_house")
+    path = tmp_path / "config.json"
+    save_config(config, path)
+    raw = json.loads(path.read_text())
+    del raw["ppo"]["vf_coef"], raw["ppo"]["max_grad_norm"]
+    path.write_text(json.dumps(raw))
+    assert load_config(path) == config
