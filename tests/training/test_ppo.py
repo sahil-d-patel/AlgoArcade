@@ -175,6 +175,23 @@ def test_smoke_run_writes_the_runner_artifacts(tmp_path: Path) -> None:
     ]
 
 
+def test_every_checkpoint_is_saved_and_every_eval_every_steps_evaluated(tmp_path: Path) -> None:
+    # As the SB3 runner's test: checkpoints at 128, 256, 384 and the final 512. Evaluations at
+    # 256, the one multiple of eval_every, and at the final checkpoint, which always evaluates.
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, checkpoint_every=128, eval_every=256)
+    run_dir = ppo.train(config)
+    assert sorted(p.name for p in (run_dir / "checkpoints").glob("*.zip")) == [
+        "step_128.zip",
+        "step_256.zip",
+        "step_384.zip",
+        "step_512.zip",
+    ]
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [256, 512]
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [256, 512]
+
+
 @pytest.fixture(scope="module")
 def fake_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return ppo.train(dataclasses.replace(FAKE, runs_dir=tmp_path_factory.mktemp("runs")))
