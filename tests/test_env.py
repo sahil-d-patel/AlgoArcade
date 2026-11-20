@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 from env_trace import fake_env, trace
-from gymnasium.spaces import Box, Discrete
+from gymnasium.spaces import Box, Dict, Discrete
 from gymnasium.utils.env_checker import check_env
 from numpy.typing import NDArray
 
@@ -214,6 +214,7 @@ def test_an_unknown_obs_mode_is_refused() -> None:
 
 def test_pixels_stack_three_greyscale_frames_beside_the_symbolic_vector() -> None:
     symbolic, pixels = make_env(walkable=walkable), make_env(obs_mode="pixels")
+    assert isinstance(pixels.observation_space, Dict)
     assert pixels.observation_space["pixels"] == Box(0, 255, (3, 72, 80), np.uint8)
     expected, _ = symbolic.reset(seed=3)
     obs, _ = pixels.reset(seed=3)

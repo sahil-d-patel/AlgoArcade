@@ -113,7 +113,9 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._walkable = walkable
         self._grid = obs_mode != "pixels"
         self._pixels = obs_mode != "symbolic"
-        observation = {"vector": spaces.Box(0.0, 1.0, (len(self._features),), np.float32)}
+        observation: dict[str, spaces.Space[Any]] = {
+            "vector": spaces.Box(0.0, 1.0, (len(self._features),), np.float32)
+        }
         if self._grid:
             observation["grid"] = spaces.Box(0.0, 1.0, (2, *CROP), np.float32)
         if self._pixels:
@@ -213,7 +215,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
 
     def _observe(self, state: GameState) -> dict[str, Any]:
         vector = np.array([feature(state) for feature in self._features], dtype=np.float32)
-        obs = {"vector": np.clip(vector, 0.0, 1.0)}
+        obs: dict[str, NDArray[Any]] = {"vector": np.clip(vector, 0.0, 1.0)}
         if self._grid:
             location: tuple[Any, ...] = state.location
             *place, x, y = location
