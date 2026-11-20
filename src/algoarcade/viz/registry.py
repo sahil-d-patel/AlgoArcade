@@ -49,6 +49,7 @@ SELECT
     start_state,
     obs_mode,
     reward_config_hash,
+    CAST(json_extract(hyperparameters, '$.archive') AS BOOLEAN) AS archive,
     env_steps AS steps,
     status,
     final_score,
@@ -76,9 +77,11 @@ def registry(root: Path = ROOT) -> pa.Table:
 
 def main(root: Path = ROOT) -> None:
     """Print the registry's row count beside the number of run folders; they should match."""
-    rows = registry(root).num_rows
-    folders = sum(1 for path in root.glob("run_id=*") if path.is_dir())
-    print(f"registry rows: {rows}, run_id= folders: {folders}")  # noqa: T201
+    ids = set(registry(root).column("run_id").to_pylist())
+    folders = {path.name.removeprefix("run_id=") for path in root.glob("run_id=*") if path.is_dir()}
+    print(f"registry rows: {len(ids)}, run_id= folders: {len(folders)}")  # noqa: T201
+    for missing in sorted(folders - ids):
+        print(f"no runs row: {missing}")  # noqa: T201
 
 
 if __name__ == "__main__":

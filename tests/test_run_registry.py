@@ -77,3 +77,8 @@ def test_furthest_milestone_is_the_best_episode_milestone(root: Path) -> None:
 
 def test_an_empty_runs_folder_gives_an_empty_registry(tmp_path: Path) -> None:
     assert registry(tmp_path).num_rows == 0
+
+
+def test_archive_is_null_when_the_config_does_not_set_it(root: Path) -> None:
+    # The fake logger's hyperparameters have no archive key; a training config always writes one.
+    assert registry(root).column("archive").to_pylist() == [None, None, None]
