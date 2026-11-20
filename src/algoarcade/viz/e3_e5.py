@@ -71,7 +71,7 @@ def table(title: str, arms: dict[str, Scores], comparisons: list[tuple[str, str]
             f"| {arm} | {len(runs)} | {stats.iqm(values):.2f} | [{low:.2f}, {high:.2f}] "
             f"| {by_seed} |"
         )
-    lines += ["", "| Comparison | P(X > Y) |", "|---|---|"]
+    lines += ["", "| Comparison | Probability of improvement |", "|---|---|"]
     for x, y in comparisons:
         empty = [arm for arm in (x, y) if not arms[arm]]
         if empty:
