@@ -68,6 +68,9 @@ class TrainConfig:
     """Set by the run queue. Logged in the runs table."""
     second_value_head: bool = False
     """Owned trainer only: a second value output for TRN-10's intrinsic return."""
+    hold: int | None = None
+    """With a game env_id: frames each 24-frame decision holds its button. None takes the game's
+    default, 16 on Super Mario Land and 8 elsewhere; the runner records the value it used."""
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
@@ -79,6 +82,10 @@ def load_config(path: Path) -> TrainConfig:
     # Runs saved before TRN-07 wrote neither field; SB3 trained them with 0.5 and 0.5.
     raw["ppo"] = PPOConfig(**{"vf_coef": 0.5, "max_grad_norm": 0.5} | raw["ppo"])
     raw["runs_dir"] = Path(raw["runs_dir"])
+    # Runs saved before ENV-11 held every game's buttons 8 frames, TRN-05's Super Mario Land
+    # runs included.
+    if raw["env_id"] in ("fake", "firered", "super_mario_land"):
+        raw.setdefault("hold", 8)
     return TrainConfig(**raw)
 
 

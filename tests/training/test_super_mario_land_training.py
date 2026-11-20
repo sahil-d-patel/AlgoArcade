@@ -3,11 +3,13 @@
 import csv
 import dataclasses
 import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 from algoarcade.backends.base import Button, read_u8
@@ -16,7 +18,7 @@ from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games.super_mario_land import manifest
 from algoarcade.games.super_mario_land.reader import MENU, SuperMarioLandReader
 from algoarcade.training.config import PRESETS
-from algoarcade.training.games import SML_ROM, Continues, env_factory
+from algoarcade.training.games import SML_HOLD, SML_ROM, Continues, env_factory
 from algoarcade.training.runner import train
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -175,3 +177,5 @@ def test_a_run_logs_its_continues_to_progress_csv(tmp_path: Path) -> None:
     with (run_dir / "progress.csv").open() as f:
         rows = [row for row in csv.DictReader(f) if row["rollout/continues"]]
     assert int(float(rows[-1]["rollout/continues"])) >= 1
+    for row in pq.read_table(run_dir / "runs").to_pylist():
+        assert json.loads(row["hyperparameters"])["hold"] == SML_HOLD

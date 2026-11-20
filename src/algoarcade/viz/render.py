@@ -79,7 +79,7 @@ def render(
     """Writes the video and returns each episode's return and final location."""
     config = load_config(checkpoint.parents[1] / "config.json")
     weights = config.reward_weights
-    make, _, _ = env_factory(config.env_id, config.start_state, weights, render=True)
+    make, _, _ = env_factory(config.env_id, config.start_state, weights, config.hold, render=True)
     envs = [make() for _ in range(grid)]
     model = PPO.load(checkpoint, device="cpu")
     normalize = None

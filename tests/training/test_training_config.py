@@ -42,3 +42,17 @@ def test_a_config_saved_before_trn07_loads_with_sb3s_values(tmp_path: Path) -> N
     del raw["ppo"]["vf_coef"], raw["ppo"]["max_grad_norm"]
     path.write_text(json.dumps(raw))
     assert load_config(path) == config
+
+
+@pytest.mark.parametrize(
+    ("name", "hold"), [("super_mario_land", 8), ("firered", 8), ("cartpole", None)]
+)
+def test_a_config_saved_before_env11_loads_with_the_hold_it_ran(
+    name: str, hold: int | None, tmp_path: Path
+) -> None:
+    path = tmp_path / "config.json"
+    save_config(PRESETS[name][1], path)
+    raw = json.loads(path.read_text())
+    del raw["hold"]
+    path.write_text(json.dumps(raw))
+    assert load_config(path).hold == hold

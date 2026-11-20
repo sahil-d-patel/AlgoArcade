@@ -18,7 +18,7 @@ from algoarcade.backends.base import Button, GameBackend, read_u8
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.backends.pyboy import PyBoyBackend
-from algoarcade.envs.env import AlgoArcadeEnv
+from algoarcade.envs.env import HOLD, AlgoArcadeEnv
 from algoarcade.games import fake
 from algoarcade.games.base import GameState, StateReader
 from algoarcade.games.firered import manifest as firered_manifest
@@ -144,12 +144,13 @@ class Continues:
         self._backend.close()
 
 
-def firered_env(
+def firered_env(  # noqa: PLR0913 env_factory binds all but archive
     state: bytes,
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
     *,
+    hold: int,
     render: bool = False,
 ) -> gym.Env:
     entry = next(e for e in firered_manifest.MANIFEST if e.name == start_state)
@@ -162,17 +163,25 @@ def firered_env(
     reads = LastRead(reader)
     rewards = RewardRegistry[FireRedState](COMPONENTS, reward_weights)
     env = AlgoArcadeEnv(
-        backend, reads, rewards, state, entry.step_budget, FIRERED_FEATURES, archive=archive
+        backend,
+        reads,
+        rewards,
+        state,
+        entry.step_budget,
+        FIRERED_FEATURES,
+        archive=archive,
+        hold=hold,
     )
     return Measures(env, reads, {"goal": entry.goal, "in_battle": lambda s: s.in_battle})
 
 
-def super_mario_land_env(
+def super_mario_land_env(  # noqa: PLR0913 env_factory binds all but archive
     state: bytes,
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
     *,
+    hold: int,
     render: bool = False,
 ) -> gym.Env:
     entry = next(e for e in sml_manifest.MANIFEST if e.name == start_state)
@@ -187,7 +196,7 @@ def super_mario_land_env(
         entry.step_budget,
         SML_FEATURES,
         archive=archive,
-        hold=SML_HOLD,
+        hold=hold,
     )
     # The game has no battles, badges, party, story flags or milestones: each count is 0.
     nothing = {
@@ -202,7 +211,9 @@ def super_mario_land_env(
     return Measures(env, reads, measures | nothing, counts=())
 
 
-def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.Env:
+def fake_env(
+    reward_weights: Mapping[str, float], archive: bool = False, *, hold: int = HOLD
+) -> gym.Env:
     backend = FakeBackend()
     reads = LastRead(fake.FakeReader())
     rewards = RewardRegistry(COMPONENTS, reward_weights)
@@ -214,19 +225,31 @@ def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.
         FAKE_STEP_BUDGET,
         fake.FEATURES,
         archive=archive,
+        hold=hold,
     )
     # The toy game has no battles.
     return Measures(env, reads, {"goal": lambda s: s.chest_opened, "in_battle": lambda _s: False})
 
 
+def game_hold(env_id: str) -> int:
+    """The frames a game's decisions hold their button when the config leaves `hold` unset."""
+    return SML_HOLD if env_id == "super_mario_land" else HOLD
+
+
 def env_factory(
-    env_id: str, start_state: str, reward_weights: Mapping[str, float], *, render: bool = False
+    env_id: str,
+    start_state: str,
+    reward_weights: Mapping[str, float],
+    hold: int | None = None,
+    *,
+    render: bool = False,
 ) -> tuple[Callable[..., gym.Env], str, str]:
     """The worker factory, the backend name and the ROM SHA-1 for a run. The factory's
-    `archive` turns on archive resets for a training env. Training leaves rendering off; the
-    fake backend always renders."""
+    `archive` turns on archive resets for a training env. `hold` None takes `game_hold`.
+    Training leaves rendering off; the fake backend always renders."""
+    hold = game_hold(env_id) if hold is None else hold
     if env_id == "fake":
-        return partial(fake_env, dict(reward_weights)), "fake", ""
+        return partial(fake_env, dict(reward_weights), hold=hold), "fake", ""
     manifest, rom_path, make, backend = {
         "firered": (firered_manifest, FIRERED_ROM, firered_env, "mgba"),
         "super_mario_land": (sml_manifest, SML_ROM, super_mario_land_env, "pyboy"),
@@ -243,4 +266,5 @@ def env_factory(
     if rom.sha1 != manifest.ROM_SHA1:
         expected = KNOWN_ROMS[manifest.ROM_SHA1].name
         raise ValueError(f"{rom_path} is {rom.name}; the start states were captured on {expected}")
-    return partial(make, state, entry.name, dict(reward_weights), render=render), backend, rom.sha1
+    factory = partial(make, state, entry.name, dict(reward_weights), hold=hold, render=render)
+    return factory, backend, rom.sha1
