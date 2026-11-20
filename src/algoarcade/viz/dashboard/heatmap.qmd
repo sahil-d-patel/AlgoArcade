@@ -1,8 +1,5 @@
 ---
 title: "Exploration heatmap"
-format: html
-execute:
-  echo: false
 ---
 
 Visits per tile in each training window, on one log scale for every window. Hover a tile for its map, position and count. The page reads `data/runs/`, or the folder in `ALGOARCADE_RUNS`: the heatmap shows the first run there, and the timeline shows every run, so point it at one arm's finished FireRed runs, one per seed.
@@ -17,9 +14,9 @@ from algoarcade.viz.timeline import record, timeline
 runs = sorted(RUNS.glob("run_id=*"))
 try:
     maps = load_maps()
-except FileNotFoundError as missing:
+except FileNotFoundError:
     maps = None
-    print(f"No heatmap: {missing}.")
+    print("No heatmap: the map data is not fetched. Run `uv run python scripts/fetch_maps.py`.")
 if maps is not None and runs:
     print(f"```{{=html}}\n{PIXELATED}\n```")
     show(interactive(*load(runs[0]), maps))

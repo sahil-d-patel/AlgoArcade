@@ -57,6 +57,19 @@ def test_walk_clip_has_a_frame_per_logged_step(root: Path, tmp_path: Path) -> No
     assert frames == fake.EPISODE_STEPS // fake.STEP_LOG_EVERY
 
 
+def test_walk_clip_skips_a_run_whose_steps_are_still_open(root: Path, tmp_path: Path) -> None:
+    # A run copied mid-training has its runs row but no closed steps file.
+    fake.main(
+        ["--run-id", "a-live", "--seed", "2", "--env-steps", str(ENV_STEPS), "--root", str(root)]
+    )
+    for path in (root / "run_id=a-live" / "steps").glob("*.parquet"):
+        path.rename(path.with_name(path.name + ".inprogress"))
+    out = tmp_path / "walk.mp4"
+    site.walk_clip(site.connect(root), out)
+    frames, _ = imageio_ffmpeg.count_frames_and_secs(str(out))
+    assert frames == fake.EPISODE_STEPS // fake.STEP_LOG_EVERY
+
+
 def test_main_writes_the_footer_and_the_assets(root: Path, tmp_path: Path) -> None:
     out = tmp_path / "dashboard"
     out.mkdir()
