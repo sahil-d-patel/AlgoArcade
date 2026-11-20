@@ -1,11 +1,14 @@
 """Curriculum resets on the fake game (AGT-06, E8)."""
 
+import csv
+import dataclasses
 import json
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 pytest.importorskip("stable_baselines3")
@@ -20,14 +23,18 @@ from algoarcade.backends.fake import FakeBackend
 from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games.fake import FEATURES, FakeField, FakeReader, FakeState
 from algoarcade.rewards.registry import COMPONENTS, DEFAULT_WEIGHTS, WEIGHTS, RewardRegistry
+from algoarcade.training.config import FIRERED
 from algoarcade.training.curriculum import CurriculumResets, load
-from algoarcade.training.games import fake_env
+from algoarcade.training.games import FAKE_STEP_BUDGET, fake_env
+from algoarcade.training.runner import train
 
 START = (0, 1, 1)
 A, RIGHT = 4, 3
 
 
-def capture(tmp_path: Path, buttons: list[Button], every: int, goal_step: int) -> Path:
+def capture(
+    tmp_path: Path, buttons: list[Button], every: int, goal_step: int, start_state: str = "fake"
+) -> Path:
     """A fake attempt pressing `buttons` through the server's Game, kept as a curriculum with
     the goal at `goal_step`. Between the first and second press every count rises."""
     captured = tmp_path / "captured"
@@ -42,7 +49,7 @@ def capture(tmp_path: Path, buttons: list[Button], every: int, goal_step: int) -
             game.press(button)
     presses = [json.loads(line) for line in (tmp_path / "presses.jsonl").read_text().splitlines()]
     folder = tmp_path / "curriculum"
-    keep(presses, captured, folder, goal_step, lambda s: FakeState(**s), "fake", every)
+    keep(presses, captured, folder, goal_step, lambda s: FakeState(**s), start_state, every)
     return folder
 
 
@@ -159,3 +166,41 @@ def test_a_curriculum_from_another_start_state_or_a_changed_file_is_refused(
     (folder / "00001.state").write_bytes(b"\0" * fake.RAM_SIZE)
     with pytest.raises(ValueError, match="manifest hash"):
         load(folder, "fake")
+
+
+# 2 envs x 64 steps per rollout, 4 rollouts: 4 episodes per env, one checkpoint at the end.
+FAKE = dataclasses.replace(
+    FIRERED,
+    env_id="fake",
+    start_state="",
+    total_timesteps=512,
+    n_envs=2,
+    checkpoint_every=512,
+    eval_episodes=1,
+    reward_weights={"events": 1.0, "explore": 0.1},
+    ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
+)
+
+
+def test_the_runner_logs_each_rollouts_curriculum_state(tmp_path: Path) -> None:
+    folder = capture(tmp_path, [Button.RIGHT, Button.RIGHT, Button.A], 1, 3, start_state="")
+    config = dataclasses.replace(
+        FAKE, curriculum=str(folder), curriculum_window=2, runs_dir=tmp_path / "runs"
+    )
+    run_dir = train(config)
+    with (run_dir / "progress.csv").open() as f:
+        rows = list(csv.DictReader(f))
+    # One row per rollout; the final dump after training has no rollout values.
+    stages = [
+        int(row["rollout/curriculum_state"]) for row in rows if row["rollout/curriculum_state"]
+    ]
+    assert len(stages) == 4
+    assert set(stages) <= {-1, 0, 1}
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert not any(episode["archive_start"] for episode in episodes)
+
+
+def test_the_runner_refuses_archive_and_curriculum_together(tmp_path: Path) -> None:
+    config = dataclasses.replace(FAKE, archive=True, curriculum="x", runs_dir=tmp_path)
+    with pytest.raises(ValueError, match="archive and curriculum"):
+        train(config)
