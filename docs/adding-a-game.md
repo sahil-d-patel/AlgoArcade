@@ -14,7 +14,7 @@ A draft, written from the Super Mario Land port ([port diary](port-diary-super-m
 
 6. **Pick the reward table.** Create `src/algoarcade/games/<game>/rewards.py` with `COMPONENTS` (the registry components that make sense for the game) and `DEFAULT_WEIGHTS`. A new component follows `.claude/skills/reward-component/SKILL.md`, with an isolation test and an exploit note. Check: `uv run pytest tests/test_registry.py tests/test_exploits.py -q`.
 
-7. **Wire the env.** In `src/algoarcade/training/games.py`, add a `<game>_env` factory that builds the backend, reader, reward registry and `AlgoArcadeEnv`, and an entry in `env_factory`. Pass `hold` if a button must be held longer than 8 of the decision's 24 frames, as Super Mario Land's jump does. Log 0 for any FireRed count the game lacks. Check: `uv run pytest tests/training/test_<game>_training.py -q`.
+7. **Wire the env.** In `src/algoarcade/training/games.py`, add a `<game>_env` factory that builds the backend, reader, reward registry and `AlgoArcadeEnv`, and an entry in `env_factory`. If a button must be held longer than 8 of the decision's 24 frames, as Super Mario Land's jump is, give the game its default in `game_hold`; a config can still set `hold`. Log 0 for any FireRed count the game lacks. Check: `uv run pytest tests/training/test_<game>_training.py -q`.
 
 8. **Add the preset.** In `src/algoarcade/training/config.py`, add a preset made with `dataclasses.replace(BASELINE, ...)` that sets `env_id`, `start_state` and `reward_weights`, and list it in `PRESETS`. Leave `ppo`, `n_envs` and the normalization switches as they are. Check: `uv run pytest tests/training/test_training_config.py -q`.
 
