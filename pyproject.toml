@@ -17,7 +17,7 @@ dependencies = [
 dev = ["ruff", "pyrefly", "pytest", "poethepoet", "prek", "typos"]
 train = ["torch", "stable-baselines3", "wandb", "matplotlib", "scipy", "imageio-ffmpeg", "pillow"]
 agent = ["mcp>=2.3,<3", "anthropic"]
-viz = ["duckdb>=2,<3", "plotly>=7.1,<8"]
+viz = ["duckdb>=2,<3", "plotly>=7.1,<8", "pillow", "imageio-ffmpeg"]
 # Not a default group: quarto-cli downloads Quarto (140 to 240 MB) at install and pulls in Jupyter.
 dashboard = ["quarto-cli>=1.11.9,<2"]
 

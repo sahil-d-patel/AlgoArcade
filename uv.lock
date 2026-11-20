@@ -42,6 +42,8 @@ train = [
 ]
 viz = [
     { name = "duckdb" },
+    { name = "imageio-ffmpeg" },
+    { name = "pillow" },
     { name = "plotly" },
 ]
 
@@ -80,6 +82,8 @@ train = [
 ]
 viz = [
     { name = "duckdb", specifier = ">=2,<3" },
+    { name = "imageio-ffmpeg" },
+    { name = "pillow" },
     { name = "plotly", specifier = ">=7.1,<8" },
 ]
 

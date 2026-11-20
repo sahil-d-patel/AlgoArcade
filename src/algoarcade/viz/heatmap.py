@@ -1,6 +1,5 @@
 """Exact visit counts on the Kanto schematic for one completed run."""
 
-import os
 from collections import Counter
 from html import escape
 from math import ceil
@@ -22,8 +21,6 @@ from algoarcade.logs.schema import validate
 from algoarcade.viz.kanto_map import COLORS, INSETS, LABELS, draw, mainland, origins, terrain
 
 WINDOW_STEPS = 500_000
-# Anchored to the checkout like VIZ-01's site.RUNS: Quarto runs a page's cells from its folder.
-RUNS = Path(os.environ.get("ALGOARCADE_RUNS", Path(__file__).resolve().parents[3] / "data/runs"))
 PIXELATED = "<style>.imagelayer image {image-rendering: pixelated;}</style>"
 
 Location = tuple[int, int, int, int]
