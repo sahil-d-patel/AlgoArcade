@@ -356,17 +356,19 @@ class Progress:
             logger.record("rollout/continues", sum(self.continues.values()))
 
 
-def learn(
+def learn(  # noqa: PLR0913 - the run, its checkpoint and logs, and the stop request
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int, bool], None],
     log: RunLog | None,
     logger: Any,
+    stop: Path | None = None,
 ) -> None:
     """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A
     checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
     runner's does, and once more after the last update. It is evaluated when its scheduled step
-    is a multiple of eval_every, and always at the end."""
+    is a multiple of eval_every, and always at the end. Once the file `stop` exists, training
+    ends after the rollout in progress and its update, through the final checkpoint."""
     ppo = config.ppo
     n = config.n_envs
     torch.manual_seed(config.seed)
@@ -412,6 +414,9 @@ def learn(
 
     start = time.time()
     while steps < config.total_timesteps:
+        if stop is not None and stop.exists():
+            checkpoint(agent, obs_rms, steps, True)
+            return
         rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, after_step)
         with torch.no_grad():
             last_value = agent.get_value(torch.as_tensor(obs, device=device))[:, 0]
@@ -426,7 +431,7 @@ def learn(
         logger.dump(steps)
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig, stop: Path | None = None) -> Path:
     if config.norm_reward:
         raise ValueError("The owned trainer does not normalise rewards; the plan never does")
     if config.archive:
@@ -470,7 +475,7 @@ def train(config: TrainConfig) -> Path:
         )
     status = "crashed"
     try:
-        learn(config, envs, checkpoint, log, logger)
+        learn(config, envs, checkpoint, log, logger, stop)
         status = "finished"
     except EOFError as error:
         # A worker that died without a Python exception leaves close() waiting on it forever.

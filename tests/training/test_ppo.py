@@ -325,3 +325,27 @@ def test_a_dead_worker_raises_and_marks_the_run_crashed(
         "running",
         "crashed",
     ]
+
+
+def test_a_stop_file_ends_the_run_after_its_rollout_with_a_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `runqueue stop` at the results cutoff, arriving during the first rollout.
+    stop = tmp_path / "stop"
+    collect = ppo.collect
+
+    def collect_then_stop(*args: object, **kwargs: object) -> tuple:
+        result = collect(*args, **kwargs)
+        stop.touch()
+        return result
+
+    monkeypatch.setattr(ppo, "collect", collect_then_stop)
+
+    run_dir = ppo.train(dataclasses.replace(FAKE, runs_dir=tmp_path / "runs"), stop=stop)
+
+    rollout = FAKE.n_envs * FAKE.ppo.n_steps
+    end = pq.read_table(run_dir / "runs").to_pylist()[-1]
+    assert (end["status"], end["env_steps"]) == ("finished", rollout)
+    assert (run_dir / "checkpoints" / f"step_{rollout}.zip").exists()
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [rollout]
