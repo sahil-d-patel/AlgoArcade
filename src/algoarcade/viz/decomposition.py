@@ -137,8 +137,10 @@ def figure(con: duckdb.DuckDBPyConnection, arms: dict[str, tuple[str, str]]) -> 
         barmode="relative",
         title="Mean reward per training episode by component, per checkpoint window",
         yaxis_title="weighted reward per episode",
+        height=520,
+        margin={"t": 110},
     )
-    fig.update_xaxes(title="window start (environment steps)")
+    fig.update_xaxes(title="window start, steps")
     return fig
 
 
