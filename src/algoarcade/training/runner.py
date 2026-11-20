@@ -20,14 +20,18 @@ import json
 import socket
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import torch
 import tyro
 from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -45,7 +49,7 @@ from algoarcade.logs.writer import RollingWriter
 from algoarcade.training.archive import ArchiveResets
 from algoarcade.training.config import PRESETS, TrainConfig, save_config
 from algoarcade.training.games import env_factory
-from algoarcade.training.parquet import ParquetLog
+from algoarcade.training.parquet import ParquetLog, RunLog
 
 # Training envs take seeds seed .. seed + n_envs - 1; the eval env sits clear of them.
 EVAL_SEED_OFFSET = 1_000
@@ -61,11 +65,11 @@ def build_model(config: TrainConfig, env: VecEnv) -> PPO:
 
 
 class CheckpointEval(BaseCallback):
-    """Every `every` env steps and at the end: save a checkpoint, evaluate it, append to eval.csv.
+    """Every checkpoint_every env steps and at the end, save a checkpoint. Evaluate it through
+    evaluate() when its scheduled step is a multiple of eval_every, and always at the end.
 
     With VecNormalize, its statistics are saved beside the checkpoint as step_<n>.pkl and copied
-    to the eval env, which never updates them. The eval env is reseeded before each evaluation,
-    so every checkpoint plays the same episodes.
+    to the eval env, which never updates them.
     _on_step runs during a rollout, before that rollout's update, so the final checkpoint waits
     for _on_training_end; a periodic one in the last rollout would miss the last update.
 
@@ -96,8 +100,10 @@ class CheckpointEval(BaseCallback):
             if "continues" in info:
                 self.continues[i] = info["continues"]
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
+            # The scheduled step, not num_timesteps, which can overshoot it by up to n_envs - 1.
+            due = self.next_at % self.config.eval_every == 0
             self.next_at += self.config.checkpoint_every
-            self.checkpoint()
+            self.checkpoint(evaluate_it=due)
         return True
 
     def _on_rollout_end(self) -> None:
@@ -111,40 +117,71 @@ class CheckpointEval(BaseCallback):
             self.logger.record("rollout/archive_bytes_per_cell", size / len(cells) if cells else 0)
 
     def _on_training_end(self) -> None:
-        self.checkpoint()
+        self.checkpoint(evaluate_it=True)
         self.logger.dump(self.num_timesteps)
 
-    def checkpoint(self) -> None:
+    def checkpoint(self, *, evaluate_it: bool) -> None:
         path = self.run_dir / "checkpoints" / f"step_{self.num_timesteps}"
         self.model.save(path.with_suffix(".zip"))
         normalize = self.model.get_vec_normalize_env()
         if normalize is not None:
             normalize.save(str(path.with_suffix(".pkl")))
+        if not evaluate_it:
+            return
+        if normalize is not None:
             sync_envs_normalization(self.training_env, self.eval_env)
-        self.eval_env.seed(self.config.seed + EVAL_SEED_OFFSET)
+        mean = evaluate(
+            self.model, self.eval_env, self.config, self.run_dir, self.num_timesteps, self.start
+        )
+        self.logger.record("eval/mean_return", mean)
+
+
+@contextmanager
+def eval_rng(config: TrainConfig) -> Iterator[None]:
+    """Torch's generators, CPU and every CUDA device, seeded from the eval seed and restored after.
+    Sampled actions draw from them; without the fork they would draw from training's stream."""
+    with torch.random.fork_rng(devices=range(torch.cuda.device_count())):
+        torch.manual_seed(config.seed + EVAL_SEED_OFFSET)
+        yield
+
+
+def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to write it
+    model: BaseAlgorithm,
+    eval_env: VecEnv,
+    config: TrainConfig,
+    run_dir: Path,
+    step: int,
+    start: float,
+) -> float:
+    """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
+    and return the mean return. Both trainers evaluate through this function. The env and,
+    inside eval_rng, the sampled actions start from the eval seed, so an evaluation never moves
+    training and each episode replays from its checkpoint (algoarcade.viz.render --eval-episode)."""
+    eval_env.seed(config.seed + EVAL_SEED_OFFSET)
+    with eval_rng(config):
         returns, _ = evaluate_policy(
-            self.model,
-            self.eval_env,
-            n_eval_episodes=self.config.eval_episodes,
-            deterministic=True,
+            model,
+            eval_env,
+            n_eval_episodes=config.eval_episodes,
+            deterministic=config.eval_deterministic,
             return_episode_rewards=True,
         )
-        mean = float(np.mean(returns))
-        self.logger.record("eval/mean_return", mean)
-        path = self.run_dir / "eval.csv"
-        new = not path.exists()
-        with path.open("a", newline="") as f:
-            writer = csv.DictWriter(f, EVAL_FIELDS)
-            if new:
-                writer.writeheader()
-            writer.writerow(
-                {
-                    "step": self.num_timesteps,
-                    "mean_return": mean,
-                    "std_return": float(np.std(returns)),
-                    "wall_time_s": round(time.time() - self.start, 1),
-                }
-            )
+    mean = float(np.mean(returns))
+    path = run_dir / "eval.csv"
+    new = not path.exists()
+    with path.open("a", newline="") as f:
+        writer = csv.DictWriter(f, EVAL_FIELDS)
+        if new:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "step": step,
+                "mean_return": mean,
+                "std_return": float(np.std(returns)),
+                "wall_time_s": round(time.time() - start, 1),
+            }
+        )
+    return mean
 
 
 class WandbOutput(KVWriter):
@@ -208,29 +245,96 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
     runs.close()
 
 
-def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 linear launch steps; a split gives single-use helpers
+def prepare(config: TrainConfig, trainer: str) -> tuple[Path, Any, str, str, str]:
+    """Check the game files, make the run directory and write config.json and git.json. Returns
+    the run directory, the env factory (an env id for a registered env), the backend name, the
+    ROM SHA-1 and the commit. An owned-trainer run id carries the trainer before the seed."""
     name = (
         f"{config.experiment_id}-{config.arm}"
         if config.experiment_id
         else "-".join(filter(None, (config.env_id, config.start_state)))
     )
-    run_id = f"{name}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
-    run_dir = config.runs_dir / f"run_id={run_id}"
-    game = config.env_id in GAMES
+    tag = "" if trainer == "sb3" else f"-{trainer}"
+    run_dir = (
+        config.runs_dir / f"run_id={name}{tag}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
     env_fn, backend, rom_sha1 = (
         env_factory(config.env_id, config.start_state, config.reward_weights)
-        if game
+        if config.env_id in GAMES
         else (config.env_id, "", "")
     )
     (run_dir / "checkpoints").mkdir(parents=True)
     save_config(config, run_dir / "config.json")
     git_info = {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
     (run_dir / "git.json").write_text(json.dumps(git_info) + "\n")
+    return run_dir, env_fn, backend, rom_sha1, git_info["commit"]
+
+
+def make_eval_env(
+    config: TrainConfig, env_fn: Any, run_dir: Path, start: float, training: RunLog | None
+) -> VecEnv:
+    """One env on the eval seed. A game logs its episodes against `training`, and runs in its
+    own process, never in this one. With normalisation on, a VecNormalize that never updates."""
+    eval_env: VecEnv
+    if config.env_id in GAMES:
+        eval_venv: VecEnv = make_vec_env(
+            env_fn, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET, **SPAWN
+        )
+        if config.archive:
+            # VecNormalize is outermost in both stacks, but sync_envs_normalization walks on
+            # down both and raises at the first checkpoint unless the eval stack has a wrapper
+            # wherever the training stack does. Its env is built without archive: it reports no
+            # cells and ignores a next start, so evaluation always starts from the start state.
+            eval_venv = ArchiveResets(eval_venv, config.archive_p, config.seed)
+        eval_env = ParquetLog(eval_venv, config, run_dir, start, training=training)
+    else:
+        eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
+    if config.norm_obs or config.norm_reward:
+        eval_env = VecNormalize(
+            eval_env,
+            training=False,
+            norm_obs=config.norm_obs,
+            norm_reward=False,
+            gamma=config.ppo.gamma,
+        )
+    return eval_env
+
+
+def make_logger(config: TrainConfig, run_dir: Path) -> Logger:
+    """progress.csv, and W&B with --track."""
+    outputs: list[KVWriter] = [CSVOutputFormat(str(run_dir / "progress.csv"))]
+    if config.track:
+        outputs.append(
+            WandbOutput(
+                project="algoarcade",
+                name=run_dir.name.removeprefix("run_id="),
+                group=config.experiment_id or None,
+                dir=run_dir,
+                config=dataclasses.asdict(config),
+            )
+        )
+    return Logger(str(run_dir), outputs)
+
+
+def stop_workers(*envs: VecEnv) -> None:
+    """After a worker died: close() would wait forever on the workers that already answered."""
+    for vec in envs:
+        if isinstance(vec.unwrapped, SubprocVecEnv):
+            for process in vec.unwrapped.processes:
+                process.terminate()
+            vec.unwrapped.closed = True
+
+
+def train(config: TrainConfig) -> Path:
+    if config.second_value_head:
+        raise ValueError("second_value_head is for the owned trainer: algoarcade.training.ppo")
+    run_dir, env_fn, backend, rom_sha1, commit = prepare(config, "sb3")
+    run_id = run_dir.name.removeprefix("run_id=")
+    game = config.env_id in GAMES
 
     # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
     start = time.time()
     env: VecEnv
-    eval_env: VecEnv
     resets = None
     if game:
         venv = make_vec_env(
@@ -240,45 +344,23 @@ def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 linear launch ste
             env_kwargs={"archive": config.archive},
             **SPAWN,
         )
-        # The emulator for evaluation runs in its own process too, never in this one.
-        eval_venv = make_vec_env(env_fn, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET, **SPAWN)
         if config.archive:
             venv = resets = ArchiveResets(venv, config.archive_p, config.seed)
-            # VecNormalize is outermost in both stacks, but sync_envs_normalization walks on
-            # down both and raises at the first checkpoint unless the eval stack has a wrapper
-            # wherever the training stack does. Its env is built without archive: it reports no
-            # cells and ignores a next start, so evaluation always starts from the start state.
-            eval_venv = ArchiveResets(eval_venv, config.archive_p, config.seed)
         log = ParquetLog(venv, config, run_dir, start)
         env = log
-        eval_env = ParquetLog(eval_venv, config, run_dir, start, training=log)
+        eval_env = make_eval_env(config, env_fn, run_dir, start, log.log)
     else:
         env = make_vec_env(config.env_id, n_envs=config.n_envs, seed=config.seed, **SPAWN)
-        eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
+        eval_env = make_eval_env(config, env_fn, run_dir, start, None)
     if config.norm_obs or config.norm_reward:
         env = VecNormalize(
             env, norm_obs=config.norm_obs, norm_reward=config.norm_reward, gamma=config.ppo.gamma
         )
-        eval_env = VecNormalize(
-            eval_env, training=False, norm_obs=config.norm_obs, norm_reward=False
-        )
     model = build_model(config, env)
-
-    outputs: list[KVWriter] = [CSVOutputFormat(str(run_dir / "progress.csv"))]
-    if config.track:
-        outputs.append(
-            WandbOutput(
-                project="algoarcade",
-                name=run_id,
-                group=config.experiment_id or None,
-                dir=run_dir,
-                config=dataclasses.asdict(config),
-            )
-        )
-    logger = Logger(str(run_dir), outputs)
+    logger = make_logger(config, run_dir)
     model.set_logger(logger)
 
-    fixed = run_row(config, run_id, backend, rom_sha1, git_info["commit"])
+    fixed = run_row(config, run_id, backend, rom_sha1, commit)
     if game:
         write_run_row(run_dir, fixed | {"status": "running", "env_steps": 0, "wall_clock_s": 0.0})
     status = "crashed"
@@ -289,12 +371,7 @@ def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 linear launch ste
         )
         status = "finished"
     except EOFError as error:
-        # close() would wait forever on the workers that already answered this step.
-        for vec in (env.unwrapped, eval_env.unwrapped):
-            if isinstance(vec, SubprocVecEnv):
-                for process in vec.processes:
-                    process.terminate()
-                vec.closed = True
+        stop_workers(env, eval_env)
         raise RuntimeError("A SubprocVecEnv worker died; its traceback is above") from error
     finally:
         if game:

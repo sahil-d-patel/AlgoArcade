@@ -5,13 +5,16 @@ a save state in data/states/ named by `--state`. `--level` picks the tools. At L
 and `press` return only a 2x PNG of the screen. At L1 they return the state as compact JSON text
 plus structured content, and the PNG when asked for one. L2 adds `navigate_to` and
 `advance_dialogue`. `--trace FILE` writes the start state and then every press with the state
-after it, one JSON line each, for the loop to count and grade.
+after it, one JSON line each, for the loop to count and grade; the first line also holds the
+process id and the start state's hash, so the loop can show each attempt had its own process
+and the same start.
 """
 
 import argparse
 import hashlib
 import json
 import logging
+import os
 import struct
 import zlib
 from collections.abc import AsyncGenerator, Callable
@@ -140,7 +143,8 @@ def build(  # noqa: C901 one nested function per tool
                 yield game
             else:
                 with trace.open("w") as game.trace:
-                    game.record(None)
+                    start = hashlib.sha256(game.backend.save_state()).hexdigest()
+                    game.record(None, pid=os.getpid(), start_sha256=start)
                     yield game
         finally:
             game.backend.close()

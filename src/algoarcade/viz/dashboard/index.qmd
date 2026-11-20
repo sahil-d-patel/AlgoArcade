@@ -1,0 +1,16 @@
+---
+title: Overview
+---
+
+Every figure here is built from the Parquet logs under `data/runs/` when the site renders. Hover a point for its run and value.
+
+```{python}
+#| output: asis
+from algoarcade.viz.site import connect, returns_figure, show
+
+show(returns_figure(connect()))
+```
+
+The first logged episode of the first run, one frame per logged step.
+
+<video controls src="videos/walk.mp4" data-external="1"></video>
