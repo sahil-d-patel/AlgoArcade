@@ -401,6 +401,30 @@ def test_a_reset_into_a_cell_reached_on_a_rising_step_pays_nothing() -> None:
     assert raw == dict.fromkeys(WEIGHTS, 0.0) | {"time": 1.0}
 
 
+def test_a_cell_reached_on_a_one_frame_high_read_keeps_the_real_best() -> None:
+    # A count that reads far too high for one frame is refused by its term's max_rise guard. The
+    # cell reached on that step must not store the bad read as its best, or a reset into the
+    # cell would silence the term until the count passed it.
+    backend = FakeBackend()
+    env = AlgoArcadeEnv(
+        backend,
+        FakeReader(),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    first = walk_right(env, 2)[0]
+    assert first is not None
+    # Five badges at once: the badge term refuses a rise of more than one between reads.
+    poke(backend, fake.BADGES, 0b11111)
+    cell = walk_right(env, 1)[-1]
+    assert cell is not None
+    assert cell.bests["badge"] == first.bests["badge"]
+
+
 COUNTS = (fake.FLAGS, fake.LEVEL_SUM, fake.BADGES, fake.MILESTONES)
 
 

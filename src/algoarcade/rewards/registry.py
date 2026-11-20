@@ -121,6 +121,17 @@ class RewardRegistry[S: GameState]:
             if isinstance(c, NewMaximum) and c.best is not None
         }
 
+    def cell_bests(self, prev: S, curr: S) -> dict[str, int]:
+        """bests() with the rise `curr` shows already confirmed, for an archive cell reached on
+        the step from `prev`. A term confirms a rise one step late, so without it every reset
+        into the cell would pay that rise again on its first step."""
+        bests = {
+            c.name: c.confirmed_best(prev, curr)
+            for c in self._components
+            if isinstance(c, NewMaximum)
+        }
+        return {name: best for name, best in bests.items() if best is not None}
+
     def step(self, prev: S, curr: S) -> tuple[float, dict[str, float]]:
         """The weighted reward, and each component's raw value as `reward/<name>`."""
         raw = {c.name: c.score(prev, curr) for c in self._components}

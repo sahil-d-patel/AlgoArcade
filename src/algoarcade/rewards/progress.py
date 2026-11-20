@@ -64,6 +64,16 @@ class NewMaximum(RewardComponent[Progress]):
     def best(self) -> int | None:
         return self._best
 
+    def confirmed_best(self, prev: Progress, curr: Progress) -> int | None:
+        """The best once `curr` is confirmed, for an archive cell reached on the step from `prev`.
+        A rise this step's guards refuse as a bad read stays out of it."""
+        prev_value, value = self._count(prev), self._count(curr)
+        if self._best is None or max(prev_value, value) > self._maximum:
+            return self._best
+        if value - prev_value > self._max_rise:
+            return self._best
+        return max(self._best, value)
+
     @override
     def reset(self, state: Progress, best: int | None = None) -> None:
         self._best = best

@@ -1,6 +1,5 @@
 """The Gymnasium environment. Contract: docs/harness-spec.md, AlgoArcadeEnv."""
 
-import copy
 import zlib
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
@@ -152,15 +151,11 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
             if key not in self._cells:
                 self._cells.add(key)
                 if key not in self._archived:
-                    # A progress term confirms a rise one step late. A rise this read shows is
-                    # not in bests() yet, so a reset into the cell would pay it every time.
-                    confirmed = copy.deepcopy(self._rewards)
-                    confirmed.step(self._state, self._state)
                     info["cell"] = Cell(
                         key,
                         zlib.compress(self.backend.save_state(), CELL_COMPRESSION),
                         frozenset(self._visited),
-                        confirmed.bests(),
+                        self._rewards.cell_bests(prev, self._state),
                         self._milestone_count,
                     )
         return self._observe(self._state), float(reward), False, truncated, info
