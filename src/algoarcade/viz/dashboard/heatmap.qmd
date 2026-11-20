@@ -2,30 +2,39 @@
 title: "Exploration heatmap"
 ---
 
-Visits per tile in each training window, on one log scale for every window. Hover a tile for its map, position and count. The page reads `data/runs/`, or the folder in `ALGOARCADE_RUNS`: the heatmap shows the first run there, and the timeline shows every run, so point it at one arm's finished FireRed runs, one per seed.
+Visits per tile in each training window, on one log scale for every window. Hover a tile for its map, position and count. The page reads `data/runs/`, or the folder in `ALGOARCADE_RUNS`. It shows the first FireRed arm there by run id: the heatmap draws that arm's first run, and the timeline one run per seed of the same arm.
 
 ```{python}
 #| output: asis
 from algoarcade.games.firered.maps import load_maps
-from algoarcade.viz.heatmap import PIXELATED, RUNS, interactive, load
-from algoarcade.viz.site import show
+from algoarcade.viz.heatmap import PIXELATED, interactive, load
+from algoarcade.viz.site import RUNS, show
 from algoarcade.viz.timeline import record, timeline
 
-runs = sorted(RUNS.glob("run_id=*"))
+ARM = ("experiment_id", "arm", "env_id", "algorithm", "trainer", "start_state", "obs_mode",
+       "reward_config_hash")
+logged = [(path, record(path)) for path in sorted(RUNS.glob("run_id=*"))]
+firered = [(path, rec) for path, rec in logged if rec[0]["env_id"] in ("firered", "fake")]
+arm = [(path, rec) for path, rec in firered
+       if all(rec[0][key] == firered[0][1][0][key] for key in ARM)] if firered else []
+# One run per seed: a retried seed's later run replaces the earlier one.
+by_seed = {rec[0]["seed"]: (path, rec) for path, rec in arm}
 try:
     maps = load_maps()
 except FileNotFoundError:
     maps = None
     print("No heatmap: the map data is not fetched. Run `uv run python scripts/fetch_maps.py`.")
-if maps is not None and runs:
+if not arm:
+    print("No FireRed runs to draw.")
+elif maps is not None:
     print(f"```{{=html}}\n{PIXELATED}\n```")
-    show(interactive(*load(runs[0]), maps))
+    show(interactive(*load(arm[0][0]), maps))
 ```
 
 ## Recorded progress by seed
 
 ```{python}
 #| output: asis
-if runs:
-    show(timeline([record(run) for run in runs]))
+if by_seed:
+    show(timeline([rec for _, rec in by_seed.values()]))
 ```
