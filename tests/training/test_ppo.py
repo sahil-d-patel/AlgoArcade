@@ -300,7 +300,9 @@ def exiting_env(weights: dict[str, float]) -> gym.Env:
 def test_a_worker_that_exits_raises_and_marks_the_run_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def factory(_env_id: str, _start: str, weights: dict[str, float], _obs_mode: str) -> tuple:
+    def factory(
+        _env_id: str, _start: str, weights: dict[str, float], _obs_mode: str, _hold: int | None
+    ) -> tuple:
         return partial(exiting_env, dict(weights)), "fake", ""
 
     monkeypatch.setattr(runner, "env_factory", factory)
@@ -322,7 +324,9 @@ def test_pixels_are_refused_because_the_agent_has_no_cnn(tmp_path: Path) -> None
 def test_a_dead_worker_raises_and_marks_the_run_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def factory(_env_id: str, _start: str, weights: dict[str, float], _obs_mode: str) -> tuple:
+    def factory(
+        _env_id: str, _start: str, weights: dict[str, float], _obs_mode: str, _hold: int | None
+    ) -> tuple:
         return partial(crashing_env, dict(weights)), "fake", ""
 
     monkeypatch.setattr(runner, "env_factory", factory)

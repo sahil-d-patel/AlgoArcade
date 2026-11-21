@@ -79,7 +79,9 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
 
     `obs_mode` picks the observation (docs/harness-spec.md, AlgoArcadeEnv). `walkable(location)`
     fills the grid's walkable channel; without it every tile reads walkable. A mode with pixels
-    needs a backend that renders."""
+    needs a backend that renders.
+
+    Every decision lasts HOLD + RELEASE frames; `hold` of them hold the button."""
 
     def __init__(  # noqa: PLR0913 the inputs harness-spec lists for the env
         self,
@@ -94,12 +96,14 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         noop: bool = False,
         archive: bool = False,
         curriculum: bool = False,
+        hold: int = HOLD,
         obs_mode: ObsMode = "symbolic",
         walkable: Callable[[Any], bool] = lambda _tile: True,
     ) -> None:
         if obs_mode not in get_args(ObsMode):
             raise ValueError(f"obs_mode {obs_mode!r}: use one of {get_args(ObsMode)}")
         self.backend = backend
+        self._hold = hold
         self._reader = reader
         self._rewards = rewards
         self._start_state = start_state
@@ -171,7 +175,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     def step(
         self, action: int | np.int64
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
-        self.backend.press(self._actions[int(action)], HOLD, RELEASE)
+        self.backend.press(self._actions[int(action)], self._hold, HOLD + RELEASE - self._hold)
         prev, self._state = self._state, self._read()
         if self._pixels:
             self._frames[:-1] = self._frames[1:]

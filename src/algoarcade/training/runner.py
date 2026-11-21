@@ -50,7 +50,7 @@ from algoarcade.logs.writer import RollingWriter
 from algoarcade.training.archive import ArchiveResets
 from algoarcade.training.config import PRESETS, TrainConfig, save_config
 from algoarcade.training.curriculum import ROOT, CurriculumResets, load
-from algoarcade.training.games import env_factory
+from algoarcade.training.games import env_factory, game_hold
 from algoarcade.training.parquet import ParquetLog, RunLog
 
 # Training envs take seeds seed .. seed + n_envs - 1; the eval env sits clear of them.
@@ -255,7 +255,7 @@ def run_row(
             json.dumps(config.reward_weights, sort_keys=True).encode()
         ).hexdigest(),
         "git_commit": commit,
-        "hyperparameters": json.dumps(dataclasses.asdict(config), default=str),
+        "hyperparameters": json.dumps(dataclasses.asdict(with_hold(config)), default=str),
         "step_log_every": config.step_log_every,
         "machine": socket.gethostname(),
     }
@@ -267,6 +267,13 @@ def write_run_row(run_dir: Path, row: dict[str, Any]) -> None:
     runs = RollingWriter(run_dir, "runs", "train", resume=True)
     runs.write(pa.Table.from_pylist([row], schema=RUNS))
     runs.close()
+
+
+def with_hold(config: TrainConfig) -> TrainConfig:
+    """`config` with a game's hold filled in, so config.json and the runs table record it."""
+    if config.env_id in GAMES and config.hold is None:
+        return dataclasses.replace(config, hold=game_hold(config.env_id))
+    return config
 
 
 def prepare(config: TrainConfig, trainer: str) -> tuple[Path, Any, str, str, str]:
@@ -283,12 +290,14 @@ def prepare(config: TrainConfig, trainer: str) -> tuple[Path, Any, str, str, str
         config.runs_dir / f"run_id={name}{tag}-seed{config.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
     )
     env_fn, backend, rom_sha1 = (
-        env_factory(config.env_id, config.start_state, config.reward_weights, config.obs_mode)
+        env_factory(
+            config.env_id, config.start_state, config.reward_weights, config.obs_mode, config.hold
+        )
         if config.env_id in GAMES
         else (config.env_id, "", "")
     )
     (run_dir / "checkpoints").mkdir(parents=True)
-    save_config(config, run_dir / "config.json")
+    save_config(with_hold(config), run_dir / "config.json")
     git_info = {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
     (run_dir / "git.json").write_text(json.dumps(git_info) + "\n")
     return run_dir, env_fn, backend, rom_sha1, git_info["commit"]

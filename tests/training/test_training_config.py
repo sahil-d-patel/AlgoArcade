@@ -94,6 +94,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "int_coef": 0.0,
         "int_gamma": 0.99,
         "obs_mode": "symbolic",
+        "hold": None,
         "pqn": None,
     }
 
@@ -140,3 +141,23 @@ def test_a_config_saved_before_eval_every_loads_as_it_ran(tmp_path: Path) -> Non
     del raw["eval_every"], raw["eval_deterministic"]
     path.write_text(json.dumps(raw))
     assert load_config(path) == config
+
+
+@pytest.mark.parametrize(
+    ("name", "hold"), [("super_mario_land", 8), ("firered", 8), ("cartpole", None)]
+)
+def test_a_config_saved_before_env11_loads_with_the_hold_it_ran(
+    name: str, hold: int | None, tmp_path: Path
+) -> None:
+    path = tmp_path / "config.json"
+    save_config(PRESETS[name][1], path)
+    raw = json.loads(path.read_text())
+    del raw["hold"]
+    path.write_text(json.dumps(raw))
+    assert load_config(path).hold == hold
+
+
+@pytest.mark.parametrize("hold", [0, -1, 24, 30])
+def test_a_hold_must_leave_both_press_and_release_a_frame(hold: int) -> None:
+    with pytest.raises(ValueError, match="hold"):
+        dataclasses.replace(BASELINE_V1, hold=hold)

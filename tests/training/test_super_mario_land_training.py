@@ -3,12 +3,15 @@
 import csv
 import dataclasses
 import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
+from sml_pipe_probe import PIPE, pipe_state
 
 from algoarcade.backends.base import Button, read_u8
 from algoarcade.backends.pyboy import PyBoyBackend
@@ -16,7 +19,7 @@ from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games.super_mario_land import manifest
 from algoarcade.games.super_mario_land.reader import MENU, SuperMarioLandReader
 from algoarcade.training.config import PRESETS
-from algoarcade.training.games import SML_ROM, Continues, env_factory
+from algoarcade.training.games import SML_HOLD, SML_ROM, Continues, env_factory
 from algoarcade.training.runner import train
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -119,6 +122,31 @@ def test_the_preset_plays_through_a_game_over_without_paying_for_it() -> None:
 
 
 @pytest.mark.rom
+@pytest.mark.parametrize(("hold", "passes"), [(None, True), (8, False)])
+def test_the_env_passes_the_pipe_at_x_tile_103_only_with_the_longer_hold(
+    hold: int | None, passes: bool
+) -> None:
+    """Exploratory: one state at the pipe, from scripts/sml_pipe_probe.py. hold None is the
+    game's default, 16; hold 8 is the negative control, where every TRN-05 seed stopped."""
+    needs_rom()
+    if not (manifest.STATES / f"{CONFIG.start_state}.state").is_file():
+        pytest.skip("no level_1_1.state; run scripts/capture_sml_states.py")
+    env_fn, _, _ = env_factory(
+        CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights, CONFIG.obs_mode, hold
+    )
+    env = env_fn()
+    env.reset(seed=0)
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    # Put the env's emulator in front of the pipe; each step then reads it afresh.
+    pipe_state(unwrapped.backend)
+    x_tiles = [env.step(action)[4]["location"][2] for action in (4, 3) * 20]
+    env.close()
+    assert (max(x_tiles) > PIPE) is passes
+    assert max(x_tiles) >= PIPE
+
+
+@pytest.mark.rom
 def test_pausing_leaves_the_menu_flag_clear() -> None:
     needs_rom()
     backend = PyBoyBackend(SML_ROM, render=False)
@@ -155,3 +183,5 @@ def test_a_run_logs_its_continues_to_progress_csv(tmp_path: Path) -> None:
     with (run_dir / "progress.csv").open() as f:
         rows = [row for row in csv.DictReader(f) if row["rollout/continues"]]
     assert int(float(rows[-1]["rollout/continues"])) >= 1
+    for row in pq.read_table(run_dir / "runs").to_pylist():
+        assert json.loads(row["hyperparameters"])["hold"] == SML_HOLD
