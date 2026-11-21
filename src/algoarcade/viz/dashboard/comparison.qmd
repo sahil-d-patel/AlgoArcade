@@ -1,0 +1,23 @@
+---
+title: Comparison
+execute:
+  # The tables and legends label every arm under five seeds exploratory; the statistics
+  # module's warning would print the same thing into the page.
+  warning: false
+---
+
+E1, E2 and E4 against the shared baseline arm: PPO, symbolic observations, count-based exploration, archive off, from S1. A run's score is the mean `milestone_count` over a checkpoint's evaluation episodes. Only finished runs count. Intervals and bands are 95% bootstrap intervals over seeds, and every legend gives each arm's seed count.
+
+```{python}
+#| output: asis
+from algoarcade.viz.comparison import EXPERIMENTS, figures, load, table
+from algoarcade.viz.site import connect, show
+
+con = connect()
+for experiment in EXPERIMENTS:
+    print(table(con, experiment))
+    arms = load(con, experiment)
+    if arms:
+        for figure in figures(experiment, arms):
+            show(figure)
+```

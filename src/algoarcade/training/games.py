@@ -18,11 +18,12 @@ from algoarcade.backends.base import Button, GameBackend, read_u8
 from algoarcade.backends.fake import FakeBackend
 from algoarcade.backends.mgba import MgbaBackend
 from algoarcade.backends.pyboy import PyBoyBackend
-from algoarcade.envs.env import AlgoArcadeEnv
+from algoarcade.envs.env import AlgoArcadeEnv, ObsMode
 from algoarcade.games import fake
 from algoarcade.games.base import GameState, StateReader
 from algoarcade.games.firered import manifest as firered_manifest
 from algoarcade.games.firered.features import FEATURES as FIRERED_FEATURES
+from algoarcade.games.firered.maps import MapGrid, load_maps, walkability
 from algoarcade.games.firered.reader import FireRedReader, FireRedState
 from algoarcade.games.super_mario_land import manifest as sml_manifest
 from algoarcade.games.super_mario_land import rewards as sml_rewards
@@ -39,10 +40,10 @@ ROMS = Path(__file__).resolve().parents[3] / "data" / "roms"
 FIRERED_ROM = ROMS / "firered.gba"
 SML_ROM = ROMS / "super_mario_land.gb"
 FAKE_STEP_BUDGET = 64
-# Logged at the episode's end. A save block read on the frame the block moves can dip or read
-# high (docs/harness-spec.md, FireRed memory map), so each is the value of the latest two
-# consecutive reads that agreed.
-COUNTS = ("badge_count", "party_level_sum", "story_flags")
+# Logged at the episode's end, and the badge byte for RND's input. A save block read on the frame
+# the block moves can dip or read high (docs/harness-spec.md, FireRed memory map), so each is the
+# value of the latest two consecutive reads that agreed.
+COUNTS = ("badge_count", "party_level_sum", "story_flags", "badge_flags")
 
 
 class LastRead:
@@ -140,12 +141,14 @@ class Continues:
         self._backend.close()
 
 
-def firered_env(
+def firered_env(  # noqa: PLR0913 the factory's inputs, then the env's
     state: bytes,
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
     *,
+    maps: dict[tuple[int, int], MapGrid],
+    obs_mode: ObsMode,
     render: bool = False,
 ) -> gym.Env:
     entry = next(e for e in firered_manifest.MANIFEST if e.name == start_state)
@@ -158,25 +161,42 @@ def firered_env(
     reads = LastRead(reader)
     rewards = RewardRegistry[FireRedState](COMPONENTS, reward_weights)
     env = AlgoArcadeEnv(
-        backend, reads, rewards, state, entry.step_budget, FIRERED_FEATURES, archive=archive
+        backend,
+        reads,
+        rewards,
+        state,
+        entry.step_budget,
+        FIRERED_FEATURES,
+        archive=archive,
+        obs_mode=obs_mode,
+        walkable=walkability(maps),
     )
     return Measures(env, reads, {"goal": entry.goal, "in_battle": lambda s: s.in_battle})
 
 
-def super_mario_land_env(
+def super_mario_land_env(  # noqa: PLR0913 the factory's inputs, then the env's
     state: bytes,
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
     *,
+    obs_mode: ObsMode,
     render: bool = False,
 ) -> gym.Env:
     entry = next(e for e in sml_manifest.MANIFEST if e.name == start_state)
     backend = Continues(PyBoyBackend(SML_ROM, render=render), state)
     reads = LastRead(SuperMarioLandReader())
     rewards = RewardRegistry[SuperMarioLandState](sml_rewards.COMPONENTS, reward_weights)
+    # The game has no map data, so every tile reads walkable.
     env = AlgoArcadeEnv(
-        backend, reads, rewards, state, entry.step_budget, SML_FEATURES, archive=archive
+        backend,
+        reads,
+        rewards,
+        state,
+        entry.step_budget,
+        SML_FEATURES,
+        archive=archive,
+        obs_mode=obs_mode,
     )
     # The game has no battles, badges, party, story flags or milestones: each count is 0.
     nothing = {
@@ -191,7 +211,9 @@ def super_mario_land_env(
     return Measures(env, reads, measures | nothing, counts=())
 
 
-def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.Env:
+def fake_env(
+    reward_weights: Mapping[str, float], archive: bool = False, *, obs_mode: ObsMode = "symbolic"
+) -> gym.Env:
     backend = FakeBackend()
     reads = LastRead(fake.FakeReader())
     rewards = RewardRegistry(COMPONENTS, reward_weights)
@@ -203,19 +225,27 @@ def fake_env(reward_weights: Mapping[str, float], archive: bool = False) -> gym.
         FAKE_STEP_BUDGET,
         fake.FEATURES,
         archive=archive,
+        obs_mode=obs_mode,
+        walkable=fake.walkable,
     )
     # The toy game has no battles.
     return Measures(env, reads, {"goal": lambda s: s.chest_opened, "in_battle": lambda _s: False})
 
 
 def env_factory(
-    env_id: str, start_state: str, reward_weights: Mapping[str, float], *, render: bool = False
+    env_id: str,
+    start_state: str,
+    reward_weights: Mapping[str, float],
+    obs_mode: ObsMode,
+    *,
+    render: bool = False,
 ) -> tuple[Callable[..., gym.Env], str, str]:
     """The worker factory, the backend name and the ROM SHA-1 for a run. The factory's
-    `archive` turns on archive resets for a training env. Training leaves rendering off; the
-    fake backend always renders."""
+    `archive` turns on archive resets for a training env. Training renders only for an obs_mode
+    with pixels; the fake backend always renders. FireRed's map data is loaded here, so a
+    missing fetch fails before the workers start."""
     if env_id == "fake":
-        return partial(fake_env, dict(reward_weights)), "fake", ""
+        return partial(fake_env, dict(reward_weights), obs_mode=obs_mode), "fake", ""
     manifest, rom_path, make, backend = {
         "firered": (firered_manifest, FIRERED_ROM, firered_env, "mgba"),
         "super_mario_land": (sml_manifest, SML_ROM, super_mario_land_env, "pyboy"),
@@ -232,4 +262,12 @@ def env_factory(
     if rom.sha1 != manifest.ROM_SHA1:
         expected = KNOWN_ROMS[manifest.ROM_SHA1].name
         raise ValueError(f"{rom_path} is {rom.name}; the start states were captured on {expected}")
-    return partial(make, state, entry.name, dict(reward_weights), render=render), backend, rom.sha1
+    if env_id == "firered":
+        make = partial(make, maps=load_maps())
+    render = render or obs_mode != "symbolic"
+    weights = dict(reward_weights)
+    return (
+        partial(make, state, entry.name, weights, obs_mode=obs_mode, render=render),
+        backend,
+        rom.sha1,
+    )

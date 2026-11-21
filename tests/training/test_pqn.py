@@ -63,6 +63,7 @@ def test_q_lambda_returns_by_hand() -> None:
         values=torch.tensor([[10.0] * 3, [20.0] * 3, [30.0] * 3], dtype=f64),
         dones=torch.tensor([[no, no, no], [no, no, no], [yes, yes, no]]),
         final_values=torch.tensor([[0.0] * 3, [0.0] * 3, [0.0, 40.0, 0.0]], dtype=f64),
+        int_values=torch.zeros(3, 3, dtype=f64),
     )
     returns = pqn.q_lambda_returns(rollout, torch.full((3,), 50.0, dtype=f64), GAMMA, LAMBDA)
     # R_2 = r_2 + g * next; R_t = r_t + g * (l * R_{t+1} + (1 - l) * maxQ_{t+1}).
