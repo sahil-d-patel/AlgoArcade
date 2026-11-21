@@ -9,8 +9,6 @@ in: a PQN that loses is the result.
 
 The metric, fixed before any run: the mean milestone_count over the evaluation episodes of each
 run's last checkpoint, one score per seed. scripts/e1.py computes it and the comparison.
-
-S1 has no step budget yet, so these runs stop at startup. Submit them once OPS-06 sets one.
 """
 
 import dataclasses
