@@ -409,6 +409,28 @@ def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, name: str) -
     assert statuses(queue_dir) == [("running", 1)]
 
 
+def test_a_pqn_arm_trains_pqn(tmp_path: Path) -> None:
+    arms = (
+        '{"ppo": {}, "pqn": {"pqn": dataclasses.replace(PRESETS["pqn_cartpole"][1].pqn, '
+        "n_steps=64)}}"
+    )
+    queue_dir = tmp_path / "queue"
+    queue.main(["submit", str(write_experiment(tmp_path, "algo", arms, [0]))], queue_dir)
+
+    queue.main(["run"], queue_dir)
+
+    assert [r["status"] for r in queue.load(queue_dir)] == ["done", "done"]
+    rows = [
+        row
+        for path in sorted((tmp_path / "runs").glob("*/runs/*.parquet"))
+        for row in pq.read_table(path, columns=["arm", "algorithm", "trainer"]).to_pylist()
+    ]
+    assert {(r["arm"], r["algorithm"], r["trainer"]) for r in rows} == {
+        ("ppo", "ppo", "sb3"),
+        ("pqn", "pqn", "owned"),
+    }
+
+
 def test_stop_during_a_run_ends_it_and_every_queued_run_stopped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, webhook: list[dict[str, str]]
 ) -> None:

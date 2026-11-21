@@ -37,6 +37,25 @@ class PPOConfig:
 
 
 @dataclass(frozen=True)
+class PQNConfig:
+    """CleanRL's pqn.py arguments, under our names. The learning rate falls linearly to 0 over the
+    run, as CleanRL's anneal_lr does."""
+
+    learning_rate: float
+    n_steps: int
+    """Steps per environment per update."""
+    n_minibatches: int
+    n_epochs: int
+    gamma: float
+    q_lambda: float
+    start_e: float
+    end_e: float
+    exploration_fraction: float
+    """Epsilon falls from start_e to end_e over this fraction of total_timesteps."""
+    max_grad_norm: float
+
+
+@dataclass(frozen=True)
 class TrainConfig:
     env_id: str
     """Any registered Gymnasium env id."""
@@ -87,6 +106,9 @@ class TrainConfig:
     """With a game env_id: AlgoArcadeEnv's observation (docs/harness-spec.md, AlgoArcadeEnv).
     The SB3 policy gives the frames of pixels and both to its NatureCNN; the owned trainer has
     no CNN and refuses them."""
+    pqn: PQNConfig | None = None
+    """Train PQN (algoarcade.training.pqn) with these values instead of PPO. The ppo block is then
+    unused."""
 
     def __post_init__(self) -> None:
         if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:
@@ -108,6 +130,8 @@ def load_config(path: Path) -> TrainConfig:
     raw = json.loads(path.read_text())
     # Runs saved before TRN-07 wrote neither field; SB3 trained them with 0.5 and 0.5.
     raw["ppo"] = PPOConfig(**{"vf_coef": 0.5, "max_grad_norm": 0.5} | raw["ppo"])
+    if raw.get("pqn") is not None:
+        raw["pqn"] = PQNConfig(**raw["pqn"])
     raw["runs_dir"] = Path(raw["runs_dir"])
     # Runs saved before 2026-11-14 wrote neither field; they evaluated every checkpoint, argmax.
     raw.setdefault("eval_every", raw["checkpoint_every"])
@@ -229,6 +253,24 @@ ACROBOT = TrainConfig(
     eval_deterministic=True,
 )
 
+# CleanRL's pqn.py defaults at 1ed8062 (TRN-09). Gamma is CleanRL's too; a FireRed run replaces it
+# with the baseline's 0.997.
+PQN_CLEANRL = PQNConfig(
+    learning_rate=0.00025,
+    n_steps=128,
+    n_minibatches=4,
+    n_epochs=4,
+    gamma=0.99,
+    q_lambda=0.65,
+    start_e=1.0,
+    end_e=0.05,
+    exploration_fraction=0.5,
+    max_grad_norm=10.0,
+)
+
+# CleanRL's CartPole run: 4 envs and 500,000 steps. TRN-09's bar is a mean return of 400.
+PQN_CARTPOLE = dataclasses.replace(CARTPOLE, total_timesteps=500_000, n_envs=4, pqn=PQN_CLEANRL)
+
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
     "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
@@ -236,4 +278,5 @@ PRESETS = {
     "super_mario_land": ("Super Mario Land 1-1 on PyBoy, explore reward.", SUPER_MARIO_LAND),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),
+    "pqn_cartpole": ("PQN on CartPole-v1 with CleanRL's values.", PQN_CARTPOLE),
 }
