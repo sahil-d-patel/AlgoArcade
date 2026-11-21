@@ -58,21 +58,26 @@ def test_main_reports_each_arm_and_the_runs_it_dropped(
 ) -> None:
     for seed, arm in enumerate(("hold16", "hold16", "hold8")):
         write_run(tmp_path / f"run{seed}", as_e9(fake_run(f"fake{seed}", seed, FAKE_STEPS), arm))
-    crashed = as_e9(fake_run("fake3", 3, FAKE_STEPS), "hold8")
     status = pa.array(["running", "crashed"])
-    runs = crashed["runs"].set_column(
-        crashed["runs"].schema.get_field_index("status"), "status", status
-    )
-    write_run(tmp_path / "run3", crashed | {"runs": runs})
+    for seed in (3, 4):
+        crashed = as_e9(fake_run(f"fake{seed}", seed, FAKE_STEPS), "hold8")
+        runs = crashed["runs"].set_column(
+            crashed["runs"].schema.get_field_index("status"), "status", status
+        )
+        # fake4 crashed before its first rollout, so it wrote only the runs table.
+        write_run(
+            tmp_path / f"run{seed}", crashed | {"runs": runs} if seed == 3 else {"runs": runs}
+        )
     main(sorted(tmp_path.iterdir()))
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith("fake0: arm hold16, seed 0, finished, schema ok, final level_progress")
     assert f"{FAKE_STEPS:,} steps" in out[0]
     assert out[3] == "fake3: arm hold8, seed 3, crashed, schema ok"
-    assert out[4] == "dropped 1 of 4 runs as not finished: ['fake3']"
-    assert out[5].startswith("hold16: final level_progress IQM")
-    assert out[5].endswith("(n=2)")
-    assert out[6].endswith("(n=1)")
+    assert out[4] == "fake4: arm hold8, seed 4, crashed, schema ok"
+    assert out[5] == "dropped 2 of 5 runs as not finished: ['fake3', 'fake4']"
+    assert out[6].startswith("hold16: final level_progress IQM")
+    assert out[6].endswith("(n=2)")
+    assert out[7].endswith("(n=1)")
     assert "nan" not in "\n".join(out)
 
 

@@ -24,13 +24,15 @@ FINAL_SHARE = 0.1
 
 
 def validated(run_dir: Path) -> dict[str, pa.Table]:
-    """Every table of the run, each file checked against the frozen schema."""
+    """Every table the run wrote, each file checked against the frozen schema. A run that
+    crashed early can have only `runs`."""
     tables = {}
     for table in TABLES:
         files = sorted((run_dir / table).glob("*.parquet"))
         for file in files:
             validate(pq.read_table(file), table)
-        tables[table] = pa.concat_tables(pq.read_table(file) for file in files)
+        if files:
+            tables[table] = pa.concat_tables(pq.read_table(file) for file in files)
     return tables
 
 
