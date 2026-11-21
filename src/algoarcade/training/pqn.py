@@ -33,6 +33,8 @@ What we changed, and why:
 - Truncation bootstraps from max_a Q(info["final_obs"], a); only termination ends the return.
   CleanRL merges the two, and every episode here ends on a step budget.
 - Epsilon is set after each env step from the steps taken so far, as CleanRL's is.
+- Observations are normalised with running statistics when the config sets norm_obs, as
+  BASELINE_V1 does and E1's arm keeps; CleanRL's file does not normalise. pqn_cartpole is off.
 - Training stops at the first whole rollout at or past total_timesteps, as the PPO file does.
 - A checkpoint is the network's state dict, step_<n>.pt, beside the VecNormalize pickle.
   Evaluation plays argmax Q, or epsilon-greedy at end_e when the config samples.
