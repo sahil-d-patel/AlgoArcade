@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import check_runs
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -36,3 +37,20 @@ def test_a_missing_checkpoint_or_a_column_off_schema_fails(
     assert out[-1] == "2 finished runs checked, 2 failed."
     assert any("no-checkpoint: no checkpoint" in line for line in out)
     assert any("off-schema" in line and "map_group" in line for line in out)
+
+
+def test_pqn_and_llm_runs_pass_and_a_folder_without_a_runs_table_is_skipped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pqn = fake(tmp_path, "pqn", checkpoint=False)
+    (pqn / "checkpoints").mkdir()
+    (pqn / "checkpoints" / "step_4096.pt").write_bytes(b"")
+    llm = fake(tmp_path, "llm", checkpoint=False)
+    for path in (llm / "runs").glob("*.parquet"):
+        table = pq.read_table(path)
+        column = table.schema.get_field_index("algorithm")
+        algorithm = pa.array(["llm"] * table.num_rows, table.schema.field(column).type)
+        pq.write_table(table.set_column(column, table.schema.field(column), algorithm), path)
+    (tmp_path / "run_id=crashed" / "checkpoints").mkdir(parents=True)
+    assert check_runs.main(tmp_path) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "2 finished runs checked, 0 failed."

@@ -66,11 +66,8 @@ def boulder_badge(state: FireRedState) -> bool:
 
 # Map ids are (group, number) from data/maps/map_groups.json in pret/pokefirered.
 #
-# A budget is a multiple of the scripted playthrough's decisions: scripts/capture_states.py's
-# frames over 24 frames per decision. Measured on rev 1, the segments' budgets are 7.2 to 104
-# times their stage's decisions; the smallest is seg_03_rival, 3,072 over 425. s0 and s1 take
-# that 7.2, rounded up to a multiple of 1,024: from s1 to brock_goal is 9,841 decisions and
-# 71,680 steps, from s0 12,009 and 87,040. Most of s1's decisions are the grind to level 13.
+# s0's and s1's budgets are 11.2 and 11.3 times the scripted playthrough's decisions to
+# brock_goal (docs/harness-spec.md, Start states and segments).
 MANIFEST = (
     StartState(
         "s0",

@@ -12,25 +12,35 @@ import tyro
 from algoarcade.logs.schema import TABLES, SchemaError, validate
 
 
+def problems(run: Path, algorithm: str) -> list[str]:
+    found = []
+    if not any((run / "steps").glob("*.parquet")):
+        found.append("no per-step logs")
+    # SB3 and owned PPO save .zip, PQN .pt; an LLM run has none.
+    checkpoints = (run / "checkpoints").glob("step_*")
+    if algorithm != "llm" and not any(p.suffix in {".zip", ".pt"} for p in checkpoints):
+        found.append("no checkpoint")
+    for table in TABLES:
+        for path in sorted((run / table).glob("*.parquet")):
+            try:
+                validate(pq.read_table(path), table)
+            except SchemaError as error:
+                found.append(f"{path.relative_to(run)}: {error}")
+    return found
+
+
 def main(runs_dir: Path = Path("data/runs")) -> int:
-    finished = [
-        run
-        for run in sorted(runs_dir.glob("run_id=*"))
-        if "finished" in pq.read_table(run / "runs", columns=["status"])["status"].to_pylist()
-    ]
+    finished = []
+    for run in sorted(runs_dir.glob("run_id=*")):
+        # A non-game run, or an attempt that died before its first row, has no runs table.
+        if not (run / "runs").is_dir():
+            continue
+        rows = pq.read_table(run / "runs", columns=["status", "algorithm"]).to_pylist()
+        if any(row["status"] == "finished" for row in rows):
+            finished.append((run, rows[0]["algorithm"]))
     failed = 0
-    for run in finished:
-        found = []
-        if not any((run / "steps").glob("*.parquet")):
-            found.append("no per-step logs")
-        if not any((run / "checkpoints").glob("*.zip")):
-            found.append("no checkpoint")
-        for table in TABLES:
-            for path in sorted((run / table).glob("*.parquet")):
-                try:
-                    validate(pq.read_table(path), table)
-                except SchemaError as error:
-                    found.append(f"{path.relative_to(run)}: {error}")
+    for run, algorithm in finished:
+        found = problems(run, algorithm)
         failed += bool(found)
         for problem in found:
             print(f"{run.name.removeprefix('run_id=')}: {problem}")
