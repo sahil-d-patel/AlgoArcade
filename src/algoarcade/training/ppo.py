@@ -556,7 +556,7 @@ class Progress:
             logger.record("rollout/continues", sum(self.continues.values()))
 
 
-def learn(  # noqa: C901, PLR0913, PLR0915 - CleanRL's loop, with checkpoints, logs and stop
+def learn(  # noqa: PLR0913, PLR0915 - CleanRL's training loop, with checkpoints, logs and stop
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int, bool], None],
@@ -568,7 +568,8 @@ def learn(  # noqa: C901, PLR0913, PLR0915 - CleanRL's loop, with checkpoints, l
     checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
     runner's does, and once more after the last update. It is evaluated when its scheduled step
     is a multiple of eval_every, and always at the end. Once the file `stop` exists, training
-    ends after the rollout in progress and its update, through the final checkpoint."""
+    ends after the rollout in which it first sees the file, and that rollout's update, with the
+    final checkpoint."""
     ppo = config.ppo
     n = config.n_envs
     torch.manual_seed(config.seed)
@@ -600,11 +601,12 @@ def learn(  # noqa: C901, PLR0913, PLR0915 - CleanRL's loop, with checkpoints, l
     steps = 0
     next_checkpoint = config.checkpoint_every
     progress = Progress(n)
+    stopping = False
 
     def after_step(
         actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: dict[str, Any]
     ) -> None:
-        nonlocal steps, next_checkpoint
+        nonlocal steps, next_checkpoint, stopping
         steps += n
         current = unbatch(infos, n)
         taken = step_infos(infos, current, dones)
@@ -614,17 +616,15 @@ def learn(  # noqa: C901, PLR0913, PLR0915 - CleanRL's loop, with checkpoints, l
         progress.step(rewards, dones, taken)
         if rnd is not None:
             rnd.inputs.append(rnd_input(taken))
-        if next_checkpoint <= steps < config.total_timesteps:
+        stopping = stopping or (stop is not None and stop.exists())
+        if next_checkpoint <= steps < config.total_timesteps and not stopping:
             # The scheduled step, not `steps`, which can overshoot it by up to n_envs - 1.
             due = next_checkpoint % config.eval_every == 0
             next_checkpoint += config.checkpoint_every
             checkpoint(agent, obs_rms, steps, due)
 
     start = time.time()
-    while steps < config.total_timesteps:
-        if stop is not None and stop.exists():
-            checkpoint(agent, obs_rms, steps, True)
-            return
+    while steps < config.total_timesteps and not stopping:
         rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, after_step)
         with torch.no_grad():
             last_value = agent.get_value(torch.as_tensor(obs, device=device))
@@ -638,7 +638,7 @@ def learn(  # noqa: C901, PLR0913, PLR0915 - CleanRL's loop, with checkpoints, l
             agent, optimizer, rollout, advantages, ppo, rng, intrinsic
         ).items():
             logger.record(key, value)
-        if steps >= config.total_timesteps:
+        if steps >= config.total_timesteps or stopping:
             checkpoint(agent, obs_rms, steps, True)
         progress.record(logger)
         if intrinsic is not None:
