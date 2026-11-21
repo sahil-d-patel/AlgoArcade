@@ -2,7 +2,7 @@
 
 Only the game changes: the PPO values, environments and normalization are FireRed's, and the run
 is the FireRed baseline's 15M steps. The arms differ only in how long each decision holds its
-button: hold16 is the proposed Super Mario Land default, hold8 FireRed's, under which every
+button: hold16 is the Super Mario Land default, hold8 FireRed's, under which every
 TRN-05 seed stopped at the pipe at x_tile 103. Eight seeds each, the ticket's minimum.
 """
 
