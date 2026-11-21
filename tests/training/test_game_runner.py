@@ -177,7 +177,7 @@ def test_an_s1_episode_reaches_its_goal_on_the_boulder_badge() -> None:
     after_brock = STATES / "brock_goal.state"
     if not after_brock.is_file():
         pytest.skip(f"{after_brock} is missing")
-    env_fn, _, _ = env_factory("firered", "s1", FIRERED.reward_weights)
+    env_fn, _, _ = env_factory("firered", "s1", FIRERED.reward_weights, "symbolic")
     env = env_fn()
     env.reset(seed=0)
     assert env.step(5)[4]["goal"] is False
