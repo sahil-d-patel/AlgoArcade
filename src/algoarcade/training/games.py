@@ -151,6 +151,7 @@ def firered_env(  # noqa: PLR0913 the factory's inputs, then the env's
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
+    curriculum: bool = False,
     *,
     maps: dict[tuple[int, int], MapGrid],
     obs_mode: ObsMode,
@@ -174,6 +175,7 @@ def firered_env(  # noqa: PLR0913 the factory's inputs, then the env's
         entry.step_budget,
         FIRERED_FEATURES,
         archive=archive,
+        curriculum=curriculum,
         hold=hold,
         obs_mode=obs_mode,
         walkable=walkability(maps),
@@ -186,6 +188,7 @@ def super_mario_land_env(  # noqa: PLR0913 the factory's inputs, then the env's
     start_state: str,
     reward_weights: Mapping[str, float],
     archive: bool = False,
+    curriculum: bool = False,
     *,
     obs_mode: ObsMode,
     hold: int,
@@ -204,6 +207,7 @@ def super_mario_land_env(  # noqa: PLR0913 the factory's inputs, then the env's
         entry.step_budget,
         SML_FEATURES,
         archive=archive,
+        curriculum=curriculum,
         hold=hold,
         obs_mode=obs_mode,
     )
@@ -223,6 +227,7 @@ def super_mario_land_env(  # noqa: PLR0913 the factory's inputs, then the env's
 def fake_env(
     reward_weights: Mapping[str, float],
     archive: bool = False,
+    curriculum: bool = False,
     *,
     obs_mode: ObsMode = "symbolic",
     hold: int = HOLD,
@@ -238,6 +243,7 @@ def fake_env(
         FAKE_STEP_BUDGET,
         fake.FEATURES,
         archive=archive,
+        curriculum=curriculum,
         hold=hold,
         obs_mode=obs_mode,
         walkable=fake.walkable,
@@ -261,7 +267,7 @@ def env_factory(  # noqa: PLR0913 the config fields a game env needs, then rende
     render: bool = False,
 ) -> tuple[Callable[..., gym.Env], str, str]:
     """The worker factory, the backend name and the ROM SHA-1 for a run. The factory's
-    `archive` turns on archive resets for a training env. `hold` None takes `game_hold`.
+    `archive` turns on archive resets for a training env, and `curriculum` curriculum resets. `hold` None takes `game_hold`.
     Training renders only for an obs_mode with pixels; the fake backend always renders.
     FireRed's map data is loaded here, so a missing fetch fails before the workers start."""
     hold = game_hold(env_id) if hold is None else hold

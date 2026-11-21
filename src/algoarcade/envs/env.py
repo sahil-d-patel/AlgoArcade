@@ -72,7 +72,8 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
 
     With `archive`, a step that first reaches a cell in an episode puts a Cell in `info["cell"]`
     unless `add_archived` listed its key, and `set_next_start` makes the next reset load a cell
-    instead of the start state. The key is
+    instead of the start state. With `curriculum`, `set_next_start` works and no cell is
+    reported (AGT-06). The key is
     (*map, x // CELL_TILES, y // CELL_TILES, badge_flags, the episode's best milestone_count);
     a game without a badge byte or milestones keys 0 for them.
 
@@ -94,6 +95,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         start: bool = False,
         noop: bool = False,
         archive: bool = False,
+        curriculum: bool = False,
         hold: int = HOLD,
         obs_mode: ObsMode = "symbolic",
         walkable: Callable[[Any], bool] = lambda _tile: True,
@@ -107,6 +109,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._start_state = start_state
         self._step_budget = step_budget
         self._archive = archive
+        self._curriculum = curriculum
         self._next_start: Cell | None = None
         self._cells: set[tuple[Hashable, ...]] = set()
         self._archived: set[tuple[Hashable, ...]] = set()
@@ -154,13 +157,14 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._cells = set()
         self._steps = 0
         self._last_milestone_count = None
-        info = self._info(self._state) | {"archive_start": cell is not None}
+        info = self._info(self._state) | {"archive_start": cell is not None and self._archive}
         return self._observe(self._state), info
 
-    def set_next_start(self, cell: Cell) -> None:
-        """The next reset loads `cell` with its visited set. Ignored without `archive`, so an
-        evaluation env always starts from the start state."""
-        if self._archive:
+    def set_next_start(self, cell: Cell | None) -> None:
+        """The next reset loads `cell` with its visited set, or the start state for None.
+        Ignored without `archive` or `curriculum`, so an evaluation env always starts from the
+        start state."""
+        if self._archive or self._curriculum:
             self._next_start = cell
 
     def add_archived(self, keys: Iterable[tuple[Hashable, ...]]) -> None:

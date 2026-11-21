@@ -7,7 +7,8 @@ plus structured content, and the PNG when asked for one. L2 adds `navigate_to` a
 `advance_dialogue`. `--trace FILE` writes the start state and then every press with the state
 after it, one JSON line each, for the loop to count and grade; the first line also holds the
 process id and the start state's hash, so the loop can show each attempt had its own process
-and the same start.
+and the same start. `--capture DIR` also saves the emulator every `--capture-every` presses
+(tools.Game) for E8's curriculum.
 """
 
 import argparse
@@ -231,13 +232,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--state", help="load data/states/<STATE>.state before serving")
     parser.add_argument("--level", type=int, choices=(0, 1, 2), default=1)
     parser.add_argument("--trace", type=Path, help="write each press and the state after it here")
+    parser.add_argument(
+        "--capture", type=Path, help="with --trace, save states along the attempt in this folder"
+    )
+    parser.add_argument(
+        "--capture-every", type=int, default=10, help="presses between saves (default 10)"
+    )
     args = parser.parse_args(argv)
     state = start_state(args.state) if args.state else None
+    if args.capture:
+        args.capture.mkdir(parents=True)
 
     def start() -> Game:
         game = GAMES[args.game]()
         if state is not None:
             game.backend.load_state(state)
+        game.capture, game.capture_every = args.capture, args.capture_every
         return game
 
     build(start, args.level, args.trace).run()

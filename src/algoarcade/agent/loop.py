@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -30,11 +31,12 @@ from mcp.client.stdio import get_default_environment
 from mcp_types import CallToolResult
 from pydantic_core import to_jsonable_python
 
+from algoarcade.agent import curriculum
 from algoarcade.agent.parquet import write_attempt, write_run_row
 from algoarcade.agent.tools import DIALOGUE_PRESSES, NAVIGATE_PRESSES
 from algoarcade.envs.env import HOLD, RELEASE
 from algoarcade.games.fake import FakeState
-from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
+from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1, entered_viridian
 from algoarcade.games.firered.reader import FireRedState, PartyPokemon
 from algoarcade.logs.writer import run_dir
 
@@ -117,6 +119,25 @@ SEGMENTS = {
         goal=firered_goal("seg_03_rival"),
         game="firered",
         start_state="seg_03_rival",
+    ),
+    "seg_05_forest": Segment(
+        task=(
+            "You are at the south end of Viridian Forest. Go through the forest and leave it "
+            "through the gate on its north side."
+        ),
+        goal=firered_goal("seg_05_forest"),
+        game="firered",
+        start_state="seg_05_forest",
+    ),
+    # The manifest runs S0 for the furthest milestone; this attempt stops at Viridian City.
+    "s0": Segment(
+        task=(
+            "You are in your bedroom at the start of a new game. Get your first Pokemon from "
+            "Professor Oak, then travel north to Viridian City."
+        ),
+        goal=lambda state: entered_viridian(firered_state(state)),
+        game="firered",
+        start_state="s0",
     ),
 }
 
@@ -411,6 +432,11 @@ class Run(AttemptConfig):
     arm: str = ""
     out: Path = Path("data/llm")
     runs: Path = Path("data/runs")
+    capture_every: int = 0
+    """Presses between save states for E8's curriculum; 0 saves none. If the attempt reaches its
+    goal, the states before it go to <curriculum>/<name>/ with a manifest; otherwise they are
+    deleted. AGT-06 guesses 10."""
+    curriculum: Path = Path("data/states/curriculum")
 
 
 def without_images(value: Any) -> Any:
@@ -434,9 +460,13 @@ def git_commit() -> str:
 
 async def run(settings: Run, create: Create) -> Attempt:
     segment = SEGMENTS[settings.segment]
+    kept = settings.curriculum / settings.name
+    if settings.capture_every and kept.exists():
+        raise FileExistsError(f"{kept} already holds a curriculum")
     folder = settings.out / settings.name
     folder.mkdir(parents=True)
     trace = (folder / "presses.jsonl").resolve()
+    captured = (folder / "states").resolve()
     logs = run_dir(settings.name, settings.runs)
     # A run id already under data/runs, from an RL run or an earlier attempt, is refused.
     logs.mkdir(parents=True)
@@ -472,9 +502,22 @@ async def run(settings: Run, create: Create) -> Attempt:
                 log.flush()
 
             arguments = (*segment.server, "--level", str(settings.level), "--trace", str(trace))
+            if settings.capture_every:
+                every = str(settings.capture_every)
+                arguments += ("--capture", str(captured), "--capture-every", every)
             async with Client(server(arguments), raise_exceptions=True) as client:
                 attempt = await run_attempt(create, client, settings, segment, trace, record)
         presses = [json.loads(line) for line in trace.read_text().splitlines()]
+        if settings.capture_every and attempt.goal_step is not None:
+            curriculum.keep(
+                presses,
+                captured,
+                kept,
+                attempt.goal_step,
+                parse,
+                settings.segment,
+                settings.capture_every,
+            )
         # attempt.json first: a run whose end row says finished always has it.
         projection = project(attempt.steps, settings.prices)
         summary = asdict(settings) | asdict(attempt)
@@ -502,6 +545,8 @@ async def run(settings: Run, create: Create) -> Attempt:
         write_attempt(logs, ids, presses, parse, started, episode)
         status = "finished"
     finally:
+        # The states after the goal, or every state of an attempt that did not reach it.
+        shutil.rmtree(captured, ignore_errors=True)
         actions = len(trace.read_text().splitlines()) - 1 if trace.is_file() else 0
         end = {
             "status": status,

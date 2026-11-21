@@ -49,6 +49,7 @@ from algoarcade.logs.schema import RUNS
 from algoarcade.logs.writer import RollingWriter
 from algoarcade.training.archive import ArchiveResets
 from algoarcade.training.config import PRESETS, TrainConfig, save_config
+from algoarcade.training.curriculum import ROOT, CurriculumResets, load
 from algoarcade.training.games import env_factory, game_hold
 from algoarcade.training.parquet import ParquetLog, RunLog
 
@@ -86,17 +87,20 @@ class CheckpointEval(BaseCallback):
     When the env reports `continues` (Super Mario Land), the total across the training envs so
     far goes to progress.csv and W&B as rollout/continues. With archive resets, each rollout
     logs the share of training resets so far that loaded a cell, the number of cells and their
+    mean save state size in bytes. With curriculum resets, it logs the current state's index
+    (-1 for the fixed start) and the goal rate counted so far from it.
     mean save state size in bytes.
 
     Training ends early, through the final checkpoint, once the file `stop` exists.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - two kinds of reset and the stop file are optional
         self,
         run_dir: Path,
         config: TrainConfig,
         eval_env: VecEnv,
         resets: ArchiveResets | None = None,
+        curriculum: CurriculumResets | None = None,
         stop: Path | None = None,
     ) -> None:
         super().__init__()
@@ -104,6 +108,7 @@ class CheckpointEval(BaseCallback):
         self.config = config
         self.eval_env = eval_env
         self.resets = resets
+        self.curriculum = curriculum
         self.stop = stop
         self.next_at = config.checkpoint_every
         self.start = time.time()
@@ -131,6 +136,9 @@ class CheckpointEval(BaseCallback):
             self.logger.record("rollout/archive_share", self.resets.share)
             self.logger.record("rollout/archive_cells", len(cells))
             self.logger.record("rollout/archive_bytes_per_cell", size / len(cells) if cells else 0)
+        if self.curriculum is not None:
+            self.logger.record("rollout/curriculum_state", self.curriculum.stage)
+            self.logger.record("rollout/curriculum_success", self.curriculum.success)
 
     def _on_training_end(self) -> None:
         self.checkpoint(evaluate_it=True)
@@ -311,6 +319,12 @@ def make_eval_env(
             # wherever the training stack does. Its env is built without archive: it reports no
             # cells and ignores a next start, so evaluation always starts from the start state.
             eval_venv = ArchiveResets(eval_venv, config.archive_p, config.seed)
+        if config.curriculum:
+            # As with archive. It has no states, and its env is built without curriculum and
+            # ignores a next start anyway.
+            eval_venv = CurriculumResets(
+                eval_venv, [], config.curriculum_threshold, config.curriculum_window
+            )
         eval_env = ParquetLog(eval_venv, config, run_dir, start, training=training)
     else:
         eval_env = make_vec_env(config.env_id, n_envs=1, seed=config.seed + EVAL_SEED_OFFSET)
@@ -351,11 +365,15 @@ def stop_workers(*envs: VecEnv) -> None:
             vec.unwrapped.closed = True
 
 
-def train(config: TrainConfig, stop: Path | None = None) -> Path:
+def train(config: TrainConfig, stop: Path | None = None) -> Path:  # noqa: C901 - four refusals, then the run
     if config.second_value_head:
         raise ValueError("second_value_head is for the owned trainer: algoarcade.training.ppo")
+    if config.archive and config.curriculum:
+        raise ValueError("archive and curriculum both choose the next start; turn one off")
     if config.pqn is not None:
         raise ValueError("This config trains PQN: algoarcade.training.pqn")
+    # Read before the workers start, so a missing or changed file fails here.
+    cells = load(ROOT / config.curriculum, config.start_state) if config.curriculum else []
     run_dir, env_fn, backend, rom_sha1, commit = prepare(config, "sb3")
     run_id = run_dir.name.removeprefix("run_id=")
     game = config.env_id in GAMES
@@ -364,16 +382,21 @@ def train(config: TrainConfig, stop: Path | None = None) -> Path:
     start = time.time()
     env: VecEnv
     resets = None
+    curriculum = None
     if game:
         venv = make_vec_env(
             env_fn,
             n_envs=config.n_envs,
             seed=config.seed,
-            env_kwargs={"archive": config.archive},
+            env_kwargs={"archive": config.archive, "curriculum": bool(config.curriculum)},
             **SPAWN,
         )
         if config.archive:
             venv = resets = ArchiveResets(venv, config.archive_p, config.seed)
+        if config.curriculum:
+            venv = curriculum = CurriculumResets(
+                venv, cells, config.curriculum_threshold, config.curriculum_window
+            )
         log = ParquetLog(venv, config, run_dir, start)
         env = log
         eval_env = make_eval_env(config, env_fn, run_dir, start, log.log)
@@ -399,7 +422,7 @@ def train(config: TrainConfig, stop: Path | None = None) -> Path:
     try:
         model.learn(
             total_timesteps=config.total_timesteps,
-            callback=CheckpointEval(run_dir, config, eval_env, resets, stop),
+            callback=CheckpointEval(run_dir, config, eval_env, resets, curriculum, stop),
         )
         status = "finished"
     except EOFError as error:

@@ -91,6 +91,15 @@ class TrainConfig:
     them. Off in the baseline."""
     archive_p: float = 0.5
     """With archive: the chance a training reset loads an archived cell. A starting guess."""
+    curriculum: str = ""
+    """With a game env_id: a folder under data/states/curriculum/ that a successful LLM attempt
+    wrote (AGT-06, E8). Training episodes start from its latest state and move one state earlier
+    each time the goal rate over the last `curriculum_window` episodes from the current state
+    reaches `curriculum_threshold`. Evaluation never uses it. Off in the baseline; not with
+    archive."""
+    curriculum_threshold: float = 0.8
+    curriculum_window: int = 100
+    """AGT-06's guesses: 80% over 100 episodes."""
     experiment_id: str = ""
     """Set by the run queue. Logged in the runs table, and the run's W&B group."""
     arm: str = ""

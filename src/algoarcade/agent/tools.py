@@ -7,6 +7,7 @@ import heapq
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol, TextIO
 
 import numpy as np
@@ -59,16 +60,25 @@ class Game:
     it (null when not ready) and the frames `read` waited since the previous line, which a
     replay must step before this press. The server writes the start state first, with button
     null, its process id as "pid" and the SHA-256 of the emulator's save state as
-    "start_sha256"."""
+    "start_sha256".
+
+    With `capture` as well, the first press with a ready state at least `capture_every` presses
+    after the last save (or the start) saves the emulator to `capture/<press number>.state`, and
+    its trace line names the file as "saved"."""
 
     backend: GameBackend
     reader: StateReader
     field: Field
     trace: TextIO | None = None
+    capture: Path | None = None
+    capture_every: int = 0
+    presses: int = 0
+    saved_at: int = 0
     idle_frames: int = 0
 
     def press(self, button: Button) -> None:
         self.backend.press([button])
+        self.presses += 1
         self.record(button)
 
     def record(self, button: Button | None, **extra: object) -> None:
@@ -84,6 +94,12 @@ class Game:
             "state": state,
             "idle_frames": self.idle_frames,
         } | extra
+        due = self.presses - self.saved_at >= self.capture_every
+        if self.capture is not None and state is not None and due:
+            name = f"{self.presses:05d}.state"
+            (self.capture / name).write_bytes(self.backend.save_state())
+            self.saved_at = self.presses
+            line["saved"] = name
         self.idle_frames = 0
         self.trace.write(json.dumps(line, separators=(",", ":")) + "\n")
         self.trace.flush()
