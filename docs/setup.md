@@ -142,6 +142,21 @@ uv run python -m algoarcade.runqueue run
 - `run` trains the queued runs in submit order, each in its own process, until none is left. A run that exits with an error is retried once, from step 0, then marked failed, and the next run starts. An attempt still running after 1 hour plus `total_timesteps` / 100 seconds (43 hours for 15M steps; `run --min-steps-per-s` changes the 100) is killed with its workers and counts as a crash. A second `run` exits at once while one is working. Ctrl+C stops the queue and puts the current run back without using up an attempt.
 - `status` prints each run's status (queued, running, done or failed), attempts, start and end time, then a count per experiment.
 
+The experiments go in this order (OPS-06, #34), so the arms that share the baseline train first and E6 from S1 trains ahead of E6 from S0. `e1_pqn.py` and `e2_observations.py` arrive with #95 and #96; submit them in their place if they have merged, or after the others if not.
+
+```sh
+uv run python -m algoarcade.runqueue submit experiments/baseline.py
+uv run python -m algoarcade.runqueue submit experiments/e4_archive.py
+uv run python -m algoarcade.runqueue submit experiments/e1_pqn.py
+uv run python -m algoarcade.runqueue submit experiments/e3_rnd.py
+uv run python -m algoarcade.runqueue submit experiments/e2_observations.py
+uv run python -m algoarcade.runqueue submit experiments/e5_penalties.py
+uv run python -m algoarcade.runqueue submit experiments/e6_brock_s1.py
+uv run python -m algoarcade.runqueue submit experiments/e6_brock_s0.py
+```
+
+On S1 a 15M-step run takes about 39 hours on the Mac, most of it evaluation (technical-plan.md, Compute budget), close to the 43-hour limit, so `run` takes `--min-steps-per-s 50` on the box.
+
 Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
 
 The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash. On Windows a trainer dies with its `run`, however `run` ends. On macOS and Linux, Ctrl+C, SIGTERM, a closed terminal (SIGHUP) or an error in `run` stops the trainer: SIGINT to its process group, then SIGKILL after 10 seconds. A `run` killed with SIGKILL leaves it training.
@@ -158,7 +173,7 @@ setx ALGOARCADE_WEBHOOK_URL "<webhook URL>"
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute (Get-Command uv).Source `
-  -Argument "run python -m algoarcade.runqueue run" -WorkingDirectory (Get-Location).Path
+  -Argument "run python -m algoarcade.runqueue run --min-steps-per-s 50" -WorkingDirectory (Get-Location).Path
 $trigger = New-ScheduledTaskTrigger -Daily -At 1am
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
   -MultipleInstances IgnoreNew -StartWhenAvailable -Priority 4
