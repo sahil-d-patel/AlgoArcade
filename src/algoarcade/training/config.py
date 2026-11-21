@@ -10,7 +10,7 @@ from pathlib import Path
 
 import tyro
 
-from algoarcade.envs.env import ObsMode
+from algoarcade.envs.env import HOLD, RELEASE, ObsMode
 from algoarcade.games.super_mario_land import rewards as sml_rewards
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 
@@ -106,6 +106,9 @@ class TrainConfig:
     """With a game env_id: AlgoArcadeEnv's observation (docs/harness-spec.md, AlgoArcadeEnv).
     The SB3 policy gives the frames of pixels and both to its NatureCNN; the owned trainer has
     no CNN and refuses them."""
+    hold: int | None = None
+    """With a game env_id: frames each 24-frame decision holds its button. None takes the game's
+    default, 16 on Super Mario Land and 8 elsewhere; the runner records the value it used."""
     pqn: PQNConfig | None = None
     """Train PQN (algoarcade.training.pqn) with these values instead of PPO. The ppo block is then
     unused."""
@@ -120,6 +123,10 @@ class TrainConfig:
             raise ValueError("int_coef (RND) needs second_value_head for the intrinsic value")
         if self.int_coef and self.env_id not in RND_GAMES:
             raise ValueError(f"int_coef (RND) needs an env_id in {RND_GAMES}, not {self.env_id!r}")
+        if self.hold is not None and not 0 < self.hold < HOLD + RELEASE:
+            raise ValueError(
+                f"hold {self.hold}: use 1 to {HOLD + RELEASE - 1} frames of the decision"
+            )
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
@@ -136,6 +143,10 @@ def load_config(path: Path) -> TrainConfig:
     # Runs saved before 2026-11-14 wrote neither field; they evaluated every checkpoint, argmax.
     raw.setdefault("eval_every", raw["checkpoint_every"])
     raw.setdefault("eval_deterministic", True)
+    # Runs saved before ENV-11 held every game's buttons 8 frames, TRN-05's Super Mario Land
+    # runs included.
+    if raw["env_id"] in ("fake", "firered", "super_mario_land"):
+        raw.setdefault("hold", 8)
     return TrainConfig(**raw)
 
 

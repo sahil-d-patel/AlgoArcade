@@ -99,6 +99,15 @@ def test_one_step_is_24_frames_with_the_button_held_for_8() -> None:
     assert backend.frames == [(Button.RIGHT,)] * 8 + [()] * 16
 
 
+def test_a_longer_hold_keeps_the_step_at_24_frames() -> None:
+    backend = RecordingBackend()
+    env = make_env(backend, hold=16)
+    env.reset(seed=0)
+    backend.frames.clear()
+    env.step(4)
+    assert backend.frames == [(Button.A,)] * 16 + [()] * 8
+
+
 def test_noop_action_holds_nothing() -> None:
     backend = RecordingBackend()
     env = make_env(backend, noop=True)

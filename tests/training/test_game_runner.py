@@ -2,6 +2,7 @@
 
 import csv
 import dataclasses
+import json
 import time
 from functools import partial
 from pathlib import Path
@@ -25,7 +26,7 @@ from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games.firered.manifest import STATES
 from algoarcade.logs.schema import TABLES, validate
 from algoarcade.training import runner
-from algoarcade.training.config import PRESETS
+from algoarcade.training.config import PRESETS, load_config
 from algoarcade.training.games import FAKE_STEP_BUDGET, FIRERED_ROM, env_factory, fake_env
 from algoarcade.training.parquet import ParquetLog
 from algoarcade.training.runner import train
@@ -54,6 +55,15 @@ def run_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def test_every_table_validates(run_dir: Path) -> None:
     for name in TABLES:
         validate(pq.read_table(run_dir / name), name)
+
+
+def test_the_runs_table_and_config_json_record_the_hold(run_dir: Path, tmp_path: Path) -> None:
+    for row in pq.read_table(run_dir / "runs").to_pylist():
+        assert json.loads(row["hyperparameters"])["hold"] == 8
+    assert load_config(run_dir / "config.json").hold == 8
+    held = train(dataclasses.replace(FAKE, runs_dir=tmp_path, total_timesteps=128, hold=12))
+    for row in pq.read_table(held / "runs").to_pylist():
+        assert json.loads(row["hyperparameters"])["hold"] == 12
 
 
 def test_the_start_row_is_readable_before_the_run_ends(run_dir: Path) -> None:
@@ -356,7 +366,9 @@ def crashing_env(weights: dict[str, float], archive: bool = False) -> gym.Env:
 def test_a_dead_worker_raises_and_marks_the_run_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def factory(_env_id: str, _start: str, weights: dict[str, float], _obs_mode: str) -> tuple:
+    def factory(
+        _env_id: str, _start: str, weights: dict[str, float], _obs_mode: str, _hold: int | None
+    ) -> tuple:
         return partial(crashing_env, dict(weights)), "fake", ""
 
     monkeypatch.setattr(runner, "env_factory", factory)
