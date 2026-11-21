@@ -25,7 +25,7 @@ from algoarcade.training.runner import EVAL_SEED_OFFSET, eval_rng
 def main(run: Path, step: int, episodes: int = 20, sampled: bool = False) -> None:
     config = dataclasses.replace(load_config(run / "config.json"), eval_deterministic=not sampled)
     env_fn, _, _ = env_factory(
-        config.env_id, config.start_state, config.reward_weights, config.obs_mode
+        config.env_id, config.start_state, config.reward_weights, config.obs_mode, config.hold
     )
     checkpoint = run / "checkpoints" / f"step_{step}"
     env = VecNormalize.load(str(checkpoint.with_suffix(".pkl")), DummyVecEnv([env_fn]))

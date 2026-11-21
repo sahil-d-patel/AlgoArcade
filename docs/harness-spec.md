@@ -246,7 +246,7 @@ AlgoArcadeEnv is the Gymnasium environment, in `src/algoarcade/envs/env.py`. It 
 
 | Setting | Value |
 |---|---|
-| Decision length | 24 frames: hold 8, release 16 |
+| Decision length | 24 frames: hold 8, release 16. The `hold` config field changes the split. Super Mario Land's default is hold 16, release 8, because a jump rises while A is held; approved by Sahil on Nov 20 (decisions.md, 2026-11-20). |
 | Actions | `Discrete(6)`: 0 up, 1 down, 2 left, 3 right, 4 A, 5 B. `start=True` appends Start, then `noop=True` appends a no-op that holds nothing for 24 frames. |
 | Episode end | The step budget only. `truncated` is True on the budget's last step; `terminated` is always False. |
 | Reset | Loads the start state, or the cell handed over by `set_next_start` (Archive resets, below), then steps 0 to 7 no-op frames drawn from the env's seeded `np_random`. The range is a guess; its effect is measured below. Reset pays no reward. |
