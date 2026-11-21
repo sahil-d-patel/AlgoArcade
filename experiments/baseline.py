@@ -2,8 +2,8 @@
 bonus, archive off, from S1. docs/technical-plan.md, Experiments.
 
 Every E1 to E5 file uses this BASE and these seeds, so each compares against these five runs.
-algoarcade.viz.comparison finds them by the experiment id "baseline"; E3's table counts them as
-its count arm.
+algoarcade.viz.comparison finds them by the experiment id "baseline". They are E3's count arm
+too.
 """
 
 import dataclasses

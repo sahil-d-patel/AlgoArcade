@@ -12,21 +12,6 @@ import tyro
 from algoarcade.logs.schema import TABLES, SchemaError, validate
 
 
-def problems(run: Path) -> list[str]:
-    found = []
-    if not any((run / "steps").glob("*.parquet")):
-        found.append("no per-step logs")
-    if not any((run / "checkpoints").glob("*.zip")):
-        found.append("no checkpoint")
-    for table in TABLES:
-        for path in sorted((run / table).glob("*.parquet")):
-            try:
-                validate(pq.read_table(path), table)
-            except SchemaError as error:
-                found.append(f"{path.relative_to(run)}: {error}")
-    return found
-
-
 def main(runs_dir: Path = Path("data/runs")) -> int:
     finished = [
         run
@@ -35,7 +20,17 @@ def main(runs_dir: Path = Path("data/runs")) -> int:
     ]
     failed = 0
     for run in finished:
-        found = problems(run)
+        found = []
+        if not any((run / "steps").glob("*.parquet")):
+            found.append("no per-step logs")
+        if not any((run / "checkpoints").glob("*.zip")):
+            found.append("no checkpoint")
+        for table in TABLES:
+            for path in sorted((run / table).glob("*.parquet")):
+                try:
+                    validate(pq.read_table(path), table)
+                except SchemaError as error:
+                    found.append(f"{path.relative_to(run)}: {error}")
         failed += bool(found)
         for problem in found:
             print(f"{run.name.removeprefix('run_id=')}: {problem}")

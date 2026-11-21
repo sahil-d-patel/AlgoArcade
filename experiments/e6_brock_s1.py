@@ -3,8 +3,9 @@
 The baseline with the archive on, because no E1 to E4 result was in when this was queued; the
 writeup says so. Success is goal_reached in the evaluation episodes: the badge flag
 FLAG_BADGE01_GET (0x820), with the archive off, as every evaluation runs. 100M steps is the
-technical plan's budget for a Brock run from S1, inside its 50M to 150M guess. eval_every keeps BASELINE_V1's ten evaluations a run. Submit this file
-before e6_brock_s0.py, so the S1 runs train first.
+technical plan's budget for a Brock run from S1, inside its 50M to 150M guess. eval_every keeps
+BASELINE_V1's ten evaluations a run. Submit this file before e6_brock_s0.py, so the S1 runs train
+first.
 """
 
 import dataclasses
