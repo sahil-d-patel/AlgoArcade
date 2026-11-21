@@ -12,8 +12,8 @@ has reached the seg_05 goal yet, so make one before submitting, with the loop's 
     uv run python -m algoarcade.agent.loop --name e8-seg05 --segment seg_05_forest --level 2 \
         --max-actions 2000 --max-dollars <cap> --capture-every 10
 
-The base is BASELINE_V1, as in the other experiments: 15M steps, 20 sampled evaluation episodes
-every 1.5M steps from the fixed state. An episode is 8,192 steps whatever its start, so moving
+The base is BASELINE_V1, as in the other experiments: 15M steps, 5 sampled evaluation episodes
+at 7.5M steps and at the end, from the fixed state. An episode is 8,192 steps whatever its start, so moving
 back one state takes at least 7 rounds of 16 episodes, 917,504 steps: a 15M-step run moves back
 at most 16 times.
 """
