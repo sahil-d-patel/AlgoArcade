@@ -11,9 +11,10 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 import torch
-from stable_baselines3.common.env_util import make_vec_env
 
 pytest.importorskip("stable_baselines3")
+
+from stable_baselines3.common.env_util import make_vec_env
 
 from algoarcade.logs.schema import TABLES, validate
 from algoarcade.training import ppo, pqn, runner
