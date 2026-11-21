@@ -259,12 +259,17 @@ For TRN-05:
 - A `StateNotReady` that survives the retries kills a SubprocVecEnv worker, and the main process sees only `EOFError`. Log the worker's traceback so a reader bug is visible. Measured on rev 1: FireRed's party checksum failed for single frames while the game rewrote an entry, never on two frames in a row: 3 times in 26,186 per-frame reads replaying `scripts/capture_validation_states.py` from the new game to the Pokédex, and 4 times in 5,630 from `validate_starter` through the rival battle to Pallet Town. 18,000 random env steps, 6,000 each from `s1`, `seg_02_pallet` and `seg_04_route1`, read not ready 0 times.
 - The observation is a `Dict`, so SB3 needs `MultiInputPolicy`, not `MlpPolicy`.
 
-The observation is a `Dict` of two float32 boxes:
+The observation is a `Dict`. `obs_mode` (`symbolic`, the default, `pixels` or `both`; TrainConfig's `obs_mode` for a run) picks its keys:
 
-| Key | Shape | Contents |
-|---|---|---|
-| `vector` | (number of features,) in [0, 1] | One value per entry in the game's `FEATURES` table (`games/fake.py`, `games/firered/features.py`), clipped to [0, 1]. FireRed has 7: map_group, map_num, x, y, party_count, party_level_sum, party_hp_frac. |
-| `visited` | (1, 9, 15) in {0, 1} | Tiles visited this episode, in a crop of 9 rows by 15 columns centred on the player. The location's last two elements are x and y; the rest name the map. The crop size is a guess from FireRed's 15 by 10 tile screen. |
+| Key | Modes | Shape and type | Contents |
+|---|---|---|---|
+| `vector` | all | (number of features,) float32 in [0, 1] | One value per entry in the game's `FEATURES` table (`games/fake.py`, `games/firered/features.py`), clipped to [0, 1]. FireRed has 7: map_group, map_num, x, y, party_count, party_level_sum, party_hp_frac. |
+| `grid` | symbolic, both | (2, 9, 15) float32 in {0, 1} | A crop of 9 rows by 15 columns centred on the player. Channel 0 (`VISITED`): tiles visited this episode. Channel 1 (`WALKABLE`): tiles the env's `walkable(location)` passes. The location's last two elements are x and y; the rest name the map. The crop size is a guess from FireRed's 15 by 10 tile screen. |
+| `pixels` | pixels, both | (3, 72, 80) uint8 | The last three decisions' screens, oldest first, each 72 rows by 80 columns of greyscale. A reset fills all three with the reset screen. |
+
+Walkability. FireRed's comes from ENV-10's map data (FireRed map data, above): `maps.walkability` reads the map's `walkable` grid, and a tile off the map reads from the map `place` puts there, so Pallet Town's north exit reads walkable into Route 1. Off a map that `place` leaves out, such as an interior, a tile reads not walkable. The FireRed factory loads the map data in the parent process, so training needs `scripts/fetch_maps.py` run first. Super Mario Land has no map data, so every tile reads walkable. The fake game reads its room layout.
+
+Pixels. The frame is converted to greyscale with the ITU-R BT.601 weights (0.299 R + 0.587 G + 0.114 B) and then area-averaged: each output pixel is the mean of the screen pixels it covers, with a split pixel weighted by the share covered (`area_weights` in `envs/env.py`), rounded to uint8. The GBA's 240 by 160 frame takes 3 columns and 2.22 rows per output pixel; the Game Boy's 160 by 144 takes exactly 2 by 2. A mode with pixels needs a backend that renders, and the training factory turns rendering on for it. The policy gets the frames unnormalised: the runner leaves image keys out of VecNormalize, and SB3's `MultiInputPolicy` divides them by 255 and gives them to `NatureCNN` (256 features); the other keys are flattened beside it. On FireRed (7 features, 6 actions) the symbolic policy has 44,359 parameters and the pixels policy 610,279, 567,712 of them in the CNN. The owned trainer has no CNN and refuses `pixels` and `both`.
 
 `info` on every step:
 
@@ -276,12 +281,6 @@ The observation is a `Dict` of two float32 boxes:
 | `cell` | Only with `archive=True`, on the first step of an episode that reaches a cell whose key the archive does not hold yet: a `Cell` with its key, the zlib-compressed save state after that step, the episode's visited set, each progress term's best and the episode's best `milestone_count`. |
 
 `reset` returns `location`, `milestone_count` and `archive_start`, True when the reset loaded an archived cell.
-
-Observation modes:
-
-- `symbolic`: the only mode so far, so the env takes no mode argument yet. The walkability channel arrives in ENV-12, as a second channel of the crop.
-- `pixels`: the screen at 72 by 80 greyscale, three frames stacked, plus the same state vector (ENV-12).
-- `both` (ENV-12).
 
 The environment must pass Gymnasium's environment checker on all three backends. `uv run python scripts/env_trace.py <fake|mgba|pyboy> --state <file>` prints a hash of a 500-step trace; two processes with the same seed must print the same hash.
 
@@ -311,7 +310,7 @@ Every FireRed state has text speed fast and battle animations off. The reader as
 
 Super Mario Land's manifest is `games/super_mario_land/manifest.py`, and `scripts/capture_sml_states.py` regenerates `level_1_1` from power-on; two captures gave the same bytes. One life's timer lasts about 675 decisions, so 2,048 covers three. The demo runs 1-1 to its end in about 80.
 
-Evaluation always starts from the fixed state with the archive off, even when training used archive resets.
+Evaluation always starts from the fixed state with the archive off, even when training used archive resets. `BASELINE_V1`, and every experiment built on it, measures success with sampled actions (`eval_deterministic` False), because from a segment's start state the policy's argmax replays one episode: in TRN-08's 1M-step runs, all 20 evaluation episodes at each of 30 checkpoints were identical. The other presets keep the argmax (decisions.md, 2026-11-14).
 
 ### Archive resets
 
@@ -320,7 +319,7 @@ Training can start episodes from places the run already reached (ENV-09). `--arc
 - A cell's key is `(map_group, map_num, x // 4, y // 4, badge_flags, milestone_count)`, where `milestone_count` is the episode's best as in `info`. Super Mario Land and the fake game key 0 for the badge byte, and Super Mario Land 0 for milestones. The 4-tile cell is a guess.
 - The env built with `archive=True` reports a cell the first time an episode reaches it, in step info (AlgoArcadeEnv, above), unless the archive already holds its key: `ArchiveResets` sends every new key to all workers with `env_method("add_archived", keys)`. Workers that find the same cell on the same step each send it once; the archive keeps the first.
 - `ArchiveResets` (`training/archive.py`) wraps the SB3 vector env in the main process. It keeps one archive; a cell keeps the first state that reached it, its visited set and a selection count, and is never replaced. A vector env resets inside the worker, so each worker's next start is chosen ahead of time: as soon as the archive has a cell, and after each reset. With probability `archive_p` (default 0.5, a guess) it draws a cell with weight `1 / sqrt(1 + selections)` and sends it with `env_method("set_next_start", cell)`; otherwise the worker loads the fixed start state. The `Archive` class does not depend on SB3, for the TRN-07 trainer.
-- Rewards: reset pays nothing. Explore starts from the cell's visited set. Each progress term starts from its best when the cell was reached, carried in the cell, not from the loaded count. The two differ when a count fell after its best: `forest_exited` and `gym_entered` stop holding when the player walks off their maps, and depositing a Pokémon lowers the level sum. Climbing back to the best after a reload pays nothing, and neither does a reset read that comes in low. A term with no best yet when the cell was reached starts as on any reset. The env's `milestone_count` latch starts from the cell's best too, so the reset reports it instead of 0. `test_exploit_archive_farming` resets 100 times into a cell reached after every count fell by one, restores the counts and walks the archived path; it pays 0.
+- Rewards: reset pays nothing. Explore starts from the cell's visited set. Each progress term starts from its best when the cell was reached, carried in the cell, not from the loaded count. The two differ when a count fell after its best: `forest_exited` and `gym_entered` stop holding when the player walks off their maps, and depositing a Pokémon lowers the level sum. Climbing back to the best after a reload pays nothing, and neither does a reset read that comes in low. A term with no best yet when the cell was reached starts as on any reset. An archive start's first step pays nothing on any progress term, so a rise confirmed one step after the cell was saved is not paid again on each reset into it. The env's `milestone_count` latch starts from the cell's best too, so the reset reports it instead of 0. `test_exploit_archive_farming` resets 100 times into a cell reached after every count fell by one, restores the counts and walks the archived path; it pays 0.
 - The eval env is built with `archive=False`: it reports no cells and ignores `set_next_start`. The runner still wraps it in `ArchiveResets`: `sync_envs_normalization` copies the statistics from the outermost VecNormalize and then walks the rest of both stacks, raising unless the eval stack has a wrapper at every depth the training stack does.
 - Every rollout logs `rollout/archive_share` (archive starts over all training resets so far), `rollout/archive_cells` and `rollout/archive_bytes_per_cell` (compressed) to `progress.csv`. Each episode logs `archive_start`.
 - An episode that starts from a cell logs only what it did itself. `unique_tiles` and `reward_explore` count the tiles new to this episode, not the cell's visited set, so they run lower than for an episode that walked the same way from the fixed start. `milestone_count` is the episode's best, which starts at the cell's best. Filter on `archive_start` before comparing episodes.
@@ -424,7 +423,7 @@ Two rows per run, because a Parquet file cannot be updated in place. The start r
 
 ### Checkpoints
 
-Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. Checkpoints and per-step logs are never deleted before the showcase.
+Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. A checkpoint is evaluated when its step is a multiple of `eval_every`, and the final checkpoint always is; `BASELINE_V1` evaluates every 1.5M steps (decisions.md, 2026-11-14). Checkpoints and per-step logs are never deleted before the showcase.
 
 ## Conformance tests
 

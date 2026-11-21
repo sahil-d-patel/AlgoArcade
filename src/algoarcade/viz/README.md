@@ -8,7 +8,7 @@ Renderers and dashboard sources: the schematic Kanto map, the exploration heatma
 uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<n>.zip --seed 0 --out data/videos/<name>.mp4
 ```
 
-`--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
+`--grid 4` plays seeds `seed` to `seed + 3` side by side. It prints each episode's return and final location; the same checkpoint and seed give the same episode and the same file. `--eval-episode k` replays the k-th evaluation episode the runner logged at that checkpoint, sampled actions included, so a logged success can be clipped. Clips stay in `data/videos/`. The weekly review goes in `docs/video-review.md`.
 
 `registry.py` joins each run's config to its results, one row per run, and prints its row count beside the number of `run_id=` folders, then any folder with no runs row:
 
@@ -21,6 +21,23 @@ uv run python -m algoarcade.viz.registry
 ```
 uv run python -m algoarcade.viz.render_all
 ```
+
+`comparison.py` prints one table each for E1, E2 and E4 against the shared baseline arm: per arm the seed count, IQM, 95% bootstrap interval, probability of improvement over the baseline and every seed's final score. Only finished runs count; the table says how many were left out.
+
+```
+uv run python -m algoarcade.viz.comparison --root data/runs
+```
+
+A run's score is the mean `milestone_count` over a checkpoint's evaluation episodes, E1's metric. Arms are runs whose `experiment_id` is the experiment, by `arm`. The baseline is every run whose `experiment_id` is `comparison.BASELINE`, `"baseline"` until OPS-06 names it. `figures(experiment, arms)` draws the IQM curve against steps and against wall-clock hours on the runs' `machine`, the performance profile and the probability of improvement. `iqm_curve` draws any curves given as `(x, scores)` with scores shaped seeds by x. `dashboard/comparison.qmd` shows the tables and figures. Fake arms for it:
+
+```
+uv run python -m algoarcade.logs.fake --run-id baseline-ppo-seed0 --experiment-id baseline --arm ppo --seed 0
+uv run python -m algoarcade.logs.fake --run-id E1-pqn-seed10 --experiment-id E1 --arm pqn --seed 10
+```
+
+With more than one arm under `data/runs/`, the heatmap page stops the render unless `ALGOARCADE_RUNS` names a folder holding one arm's runs.
+
+`dashboard/` is the Quarto site, rendered with `uv run poe dashboard`. `site.py` gives its pages a DuckDB view of the logs and runs before each render. `dashboard/README.md` says how to add a panel.
 
 Contract: `docs/technical-plan.md`, Visualization.
 
@@ -47,3 +64,14 @@ uv run python -m algoarcade.viz.timeline --runs data/runs/run_id=<seed 0> data/r
 One row per seed. Schema v1 logs only `milestone_count`, so each point is the first sampled step at or beyond a stage, under `step_log_every` times `num_envs` steps after the true step.
 
 `dashboard/heatmap.qmd` shows both, reading `data/runs/` or the folder in `ALGOARCADE_RUNS`.
+
+## E3, E5 and the reward decomposition
+
+```sh
+uv run python -m algoarcade.viz.e3_e5
+uv run python -m algoarcade.viz.decomposition --run <run_id>
+```
+
+`e3_e5` prints the E3 and E5 tables from finished runs: IQM, 95% interval and seed count per arm, each seed's score, and the probability of improvement from `training.stats`. A run's score is the mean `milestone_count` of its last checkpoint's evaluation episodes, because the arms pay different rewards. A table under five seeds says exploratory. E3's count arm is the shared baseline, so set `COUNT` to its experiment id and arm once OPS-06 runs it.
+
+`decomposition` stacks each component's weighted share of the return per training episode, per 500,000-step window. Its command prints one run's largest gap between the stacked shares and the mean episode return. `dashboard/hacks.qmd` draws it for the baseline and both E5 arms, plays the clips under `data/videos/hacks/` and includes `docs/hack-catalogue.md`.

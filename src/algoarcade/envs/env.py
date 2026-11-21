@@ -3,11 +3,12 @@
 import zlib
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from numpy.typing import NDArray
 
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.games.base import GameState, StateNotReady, StateReader
@@ -33,6 +34,14 @@ MAX_NOOP_FRAMES = 7
 NOT_READY_FRAMES = 8
 # Rows and columns of tiles around the player. A guess: FireRed shows 15 by 10 tiles.
 CROP = (9, 15)
+VISITED = 0
+WALKABLE = 1
+ObsMode = Literal["symbolic", "pixels", "both"]
+# Rows and columns of a greyscale frame, and frames stacked: technical-plan.md, Observations.
+PIXELS = (72, 80)
+FRAMES = 3
+# ITU-R BT.601 luma, which PIL's "L" mode and OpenCV's RGB2GRAY also use.
+LUMA = np.array([0.299, 0.587, 0.114], dtype=np.float32)
 # Tiles per side of an archive cell. A starting guess from ENV-09.
 CELL_TILES = 4
 # zlib level 1 shrinks an mGBA save state from 528,448 bytes to about 50,000 in about 4 ms.
@@ -67,6 +76,10 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     (*map, x // CELL_TILES, y // CELL_TILES, badge_flags, the episode's best milestone_count);
     a game without a badge byte or milestones keys 0 for them.
 
+    `obs_mode` picks the observation (docs/harness-spec.md, AlgoArcadeEnv). `walkable(location)`
+    fills the grid's walkable channel; without it every tile reads walkable. A mode with pixels
+    needs a backend that renders.
+
     Every decision lasts HOLD + RELEASE frames; `hold` of them hold the button."""
 
     def __init__(  # noqa: PLR0913 the inputs harness-spec lists for the env
@@ -82,7 +95,11 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         noop: bool = False,
         archive: bool = False,
         hold: int = HOLD,
+        obs_mode: ObsMode = "symbolic",
+        walkable: Callable[[Any], bool] = lambda _tile: True,
     ) -> None:
+        if obs_mode not in get_args(ObsMode):
+            raise ValueError(f"obs_mode {obs_mode!r}: use one of {get_args(ObsMode)}")
         self.backend = backend
         self._hold = hold
         self._reader = reader
@@ -96,12 +113,21 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self._features = tuple(features.values())
         self._actions = ACTIONS + ((Button.START,),) * start + ((),) * noop
         self.action_space = spaces.Discrete(len(self._actions))
-        self.observation_space = spaces.Dict(
-            {
-                "vector": spaces.Box(0.0, 1.0, (len(self._features),), np.float32),
-                "visited": spaces.Box(0.0, 1.0, (1, *CROP), np.float32),
-            }
-        )
+        self._walkable = walkable
+        self._grid = obs_mode != "pixels"
+        self._pixels = obs_mode != "symbolic"
+        observation: dict[str, spaces.Space[Any]] = {
+            "vector": spaces.Box(0.0, 1.0, (len(self._features),), np.float32)
+        }
+        if self._grid:
+            observation["grid"] = spaces.Box(0.0, 1.0, (2, *CROP), np.float32)
+        if self._pixels:
+            observation["pixels"] = spaces.Box(0, 255, (FRAMES, *PIXELS), np.uint8)
+            height, width, _ = backend.screen().shape
+            self._rows = area_weights(height, PIXELS[0])
+            self._cols = area_weights(width, PIXELS[1]).T
+            self._frames = np.zeros((FRAMES, *PIXELS), np.uint8)
+        self.observation_space = spaces.Dict(observation)
         self._visited: set[tuple[Any, ...]] = set()
         self._steps = 0
         self._milestone_count = 0
@@ -115,6 +141,8 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         self.backend.load_state(self._start_state if cell is None else zlib.decompress(cell.state))
         self.backend.step(int(self.np_random.integers(MAX_NOOP_FRAMES + 1)))
         self._state = self._read()
+        if self._pixels:
+            self._frames[:] = self._frame()
         if cell is None:
             self._rewards.reset(self._state)
             self._visited = {self._state.location}
@@ -145,6 +173,9 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         self.backend.press(self._actions[int(action)], self._hold, HOLD + RELEASE - self._hold)
         prev, self._state = self._state, self._read()
+        if self._pixels:
+            self._frames[:-1] = self._frames[1:]
+            self._frames[-1] = self._frame()
         reward, components = self._rewards.step(prev, self._state)
         self._visited.add(self._state.location)
         self._steps += 1
@@ -181,17 +212,27 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
         badges = getattr(state, "badge_flags", 0)
         return (*place, x // CELL_TILES, y // CELL_TILES, badges, self._milestone_count)
 
+    def _frame(self) -> NDArray[np.uint8]:
+        grey = self.backend.screen().astype(np.float32) @ LUMA
+        return np.rint(self._rows @ grey @ self._cols).astype(np.uint8)
+
     def _observe(self, state: GameState) -> dict[str, Any]:
         vector = np.array([feature(state) for feature in self._features], dtype=np.float32)
-        location: tuple[Any, ...] = state.location
-        *place, x, y = location
-        rows, cols = CROP
-        visited = np.zeros((1, rows, cols), dtype=np.float32)
-        for row in range(rows):
-            for col in range(cols):
-                tile = (*place, x + col - cols // 2, y + row - rows // 2)
-                visited[0, row, col] = tile in self._visited
-        return {"vector": np.clip(vector, 0.0, 1.0), "visited": visited}
+        obs: dict[str, NDArray[Any]] = {"vector": np.clip(vector, 0.0, 1.0)}
+        if self._grid:
+            location: tuple[Any, ...] = state.location
+            *place, x, y = location
+            rows, cols = CROP
+            grid = np.zeros((2, rows, cols), dtype=np.float32)
+            for row in range(rows):
+                for col in range(cols):
+                    tile = (*place, x + col - cols // 2, y + row - rows // 2)
+                    grid[VISITED, row, col] = tile in self._visited
+                    grid[WALKABLE, row, col] = self._walkable(tile)
+            obs["grid"] = grid
+        if self._pixels:
+            obs["pixels"] = self._frames.copy()
+        return obs
 
     def _info(self, state: GameState) -> dict[str, Any]:
         info: dict[str, Any] = {"location": state.location}
@@ -206,3 +247,14 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
                 self._milestone_count = max(self._milestone_count, min(last, milestone_count))
             info["milestone_count"] = self._milestone_count
         return info
+
+
+def area_weights(size: int, out: int) -> NDArray[np.float32]:
+    """An (out, size) matrix that resamples a line of `size` pixels to `out`, each output pixel
+    the mean of the input it covers, split pixels weighted by the share covered. The GBA's 240 x
+    160 frame goes to 80 x 72: 3 pixels across and 2.22 down per output pixel."""
+    edges = np.linspace(0, size, out + 1)
+    starts = np.arange(size)
+    overlap = np.minimum(edges[1:, None], starts + 1) - np.maximum(edges[:-1, None], starts)
+    weights = np.clip(overlap, 0, None)
+    return (weights / weights.sum(axis=1, keepdims=True)).astype(np.float32)

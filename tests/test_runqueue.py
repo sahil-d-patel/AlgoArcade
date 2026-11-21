@@ -35,6 +35,7 @@ BASE = dataclasses.replace(
     total_timesteps=64,
     n_envs=1,
     checkpoint_every=64,
+    eval_every=64,
     eval_episodes=1,
     reward_weights={{"events": 1.0, "explore": 0.1}},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=64, batch_size=32),
@@ -156,6 +157,25 @@ def test_crash_does_not_stop_queue(
     queue.main(["status"], queue_dir)
     out = capsys.readouterr().out
     assert "crash: 0 queued, 0 running, 2 done, 1 failed" in out
+
+
+def test_a_config_with_the_second_head_trains_on_the_owned_trainer(tmp_path: Path) -> None:
+    arms = '{"plain": {}, "rnd": {"int_coef": 0.5, "second_value_head": True}}'
+    queue_dir = tmp_path / "queue"
+    queue.main(["submit", str(write_experiment(tmp_path, "E3", arms, [0]))], queue_dir)
+
+    queue.main(["run"], queue_dir)
+
+    assert [r["status"] for r in queue.load(queue_dir)] == ["done", "done"]
+    rows = [
+        row
+        for path in (tmp_path / "runs").glob("*/runs/*.parquet")
+        for row in pq.read_table(path, columns=["arm", "trainer", "status"]).to_pylist()
+    ]
+    assert sorted((r["arm"], r["trainer"]) for r in rows if r["status"] == "finished") == [
+        ("plain", "sb3"),
+        ("rnd", "owned"),
+    ]
 
 
 def queued(tmp_path: Path, status: str, attempts: int) -> Path:
@@ -387,3 +407,22 @@ def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, name: str) -
     with pytest.raises(ProcessLookupError):
         os.kill(trainer_pid, 0)
     assert statuses(queue_dir) == [("running", 1)]
+
+
+def test_a_queued_pixels_arm_trains_and_logs_pixels(tmp_path: Path) -> None:
+    queue_dir = tmp_path / "queue"
+    arms = '{"symbolic": {}, "pixels": {"obs_mode": "pixels"}}'
+    queue.main(["submit", str(write_experiment(tmp_path, "E2", arms, [0]))], queue_dir)
+
+    queue.main(["run"], queue_dir)
+
+    assert [r["status"] for r in queue.load(queue_dir)] == ["done", "done"]
+    rows = [
+        row
+        for path in (tmp_path / "runs").glob("*/runs/*.parquet")
+        for row in pq.read_table(path, columns=["arm", "obs_mode", "status"]).to_pylist()
+    ]
+    assert sorted((r["arm"], r["obs_mode"]) for r in rows if r["status"] == "finished") == [
+        ("pixels", "pixels"),
+        ("symbolic", "symbolic"),
+    ]

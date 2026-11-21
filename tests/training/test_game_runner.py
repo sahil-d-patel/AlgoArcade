@@ -11,11 +11,14 @@ import gymnasium as gym
 import numpy as np
 import pyarrow.parquet as pq
 import pytest
+import torch
 
 pytest.importorskip("stable_baselines3")
 
+from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.torch_layers import CombinedExtractor, NatureCNN
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from algoarcade.backends import fake
@@ -36,6 +39,7 @@ FAKE = dataclasses.replace(
     total_timesteps=512,
     n_envs=2,
     checkpoint_every=256,
+    eval_every=256,
     eval_episodes=1,
     reward_weights={"events": 1.0, "explore": 0.1},
     ppo=dataclasses.replace(FIRERED.ppo, n_steps=FAKE_STEP_BUDGET, batch_size=32),
@@ -144,7 +148,7 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
         "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
     )
     config = dataclasses.replace(FIRERED, start_state="seg_02_pallet", n_envs=1)
-    env_fn, _, _ = env_factory("firered", config.start_state, config.reward_weights)
+    env_fn, _, _ = env_factory("firered", config.start_state, config.reward_weights, "symbolic")
     # 64-step episodes keep the test short; the manifest's budget is 4,096.
     venv = DummyVecEnv([lambda: gym.wrappers.TimeLimit(env_fn(), 64)])
     log = ParquetLog(venv, config, tmp_path / "run_id=t", time.time())
@@ -172,6 +176,64 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("deterministic", [True, False])
+def test_a_sampled_evaluation_plays_different_episodes(tmp_path: Path, deterministic: bool) -> None:
+    # One rollout, then one evaluation of four episodes. The untrained policy is near uniform,
+    # so its argmax replays one episode and its samples do not.
+    config = dataclasses.replace(
+        FAKE,
+        runs_dir=tmp_path,
+        total_timesteps=FAKE.n_envs * FAKE_STEP_BUDGET,
+        eval_episodes=4,
+        eval_deterministic=deterministic,
+    )
+    episodes = pq.read_table(train(config) / "episodes").to_pylist()
+    evals = {(e["episode_return"], e["unique_tiles"]) for e in episodes if e["is_eval"]}
+    assert (len(evals) == 1) is deterministic
+
+
+def test_every_checkpoint_is_saved_and_every_eval_every_steps_evaluated(tmp_path: Path) -> None:
+    # Four rollouts of 128 steps: checkpoints at 128, 256, 384 and the final 512. Evaluations at
+    # 256, the one multiple of eval_every, and at the final checkpoint, which always evaluates.
+    config = dataclasses.replace(FAKE, runs_dir=tmp_path, checkpoint_every=128, eval_every=256)
+    run_dir = train(config)
+    assert sorted(p.name for p in (run_dir / "checkpoints").glob("*.zip")) == [
+        "step_128.zip",
+        "step_256.zip",
+        "step_384.zip",
+        "step_512.zip",
+    ]
+    with (run_dir / "eval.csv").open() as f:
+        assert [int(row["step"]) for row in csv.DictReader(f)] == [256, 512]
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [256, 512]
+
+
+def test_sampled_evaluation_leaves_training_unchanged(tmp_path: Path) -> None:
+    # Evaluating twice as often must not move training: the same training episodes and weights.
+    runs = []
+    for eval_every in (128, 256):
+        config = dataclasses.replace(
+            FAKE,
+            runs_dir=tmp_path / str(eval_every),
+            checkpoint_every=128,
+            eval_every=eval_every,
+            eval_episodes=4,
+            eval_deterministic=False,
+        )
+        run_dir = train(config)
+        episodes = [
+            (e["env_idx"], e["episode_id"], e["episode_return"], e["unique_tiles"])
+            for e in pq.read_table(run_dir / "episodes").to_pylist()
+            if not e["is_eval"]
+        ]
+        weights = PPO.load(run_dir / "checkpoints" / "step_512.zip", device="cpu").policy
+        runs.append((episodes, weights.state_dict()))
+    (first, first_weights), (second, second_weights) = runs
+    assert first == second
+    assert all(torch.equal(first_weights[k], second_weights[k]) for k in first_weights)
+
+
 @pytest.mark.rom
 def test_a_firered_archive_reset_loads_the_cell_and_pays_nothing_for_it() -> None:
     if not FIRERED_ROM.is_file():
@@ -179,7 +241,7 @@ def test_a_firered_archive_reset_loads_the_cell_and_pays_nothing_for_it() -> Non
     pytest.importorskip(
         "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
     )
-    env_fn, _, _ = env_factory("firered", "seg_02_pallet", FIRERED.reward_weights)
+    env_fn, _, _ = env_factory("firered", "seg_02_pallet", FIRERED.reward_weights, "symbolic")
     env = env_fn(archive=True)
     _, info = env.reset(seed=0)
     assert info["location"] == (3, 0, 16, 14)
@@ -229,6 +291,38 @@ def test_checkpoint_loads_with_its_statistics_and_plays_an_episode(run_dir: Path
     assert lengths == [FAKE_STEP_BUDGET]
 
 
+def test_a_symbolic_run_logs_its_obs_mode(run_dir: Path) -> None:
+    runs = pq.read_table(run_dir / "runs").to_pylist()
+    assert [r["obs_mode"] for r in runs] == ["symbolic", "symbolic"]
+
+
+def test_a_pixels_run_logs_its_obs_mode_and_gives_the_frames_to_a_cnn(tmp_path: Path) -> None:
+    config = dataclasses.replace(
+        FAKE,
+        obs_mode="pixels",
+        total_timesteps=128,
+        checkpoint_every=128,
+        eval_every=128,
+        runs_dir=tmp_path,
+    )
+    run_dir = train(config)
+    runs = pq.read_table(run_dir / "runs").to_pylist()
+    assert [r["obs_mode"] for r in runs] == ["pixels", "pixels"]
+    model = PPO.load(run_dir / "checkpoints" / "step_128.zip")
+    extractor = model.policy.features_extractor
+    assert isinstance(extractor, CombinedExtractor)
+    assert isinstance(extractor.extractors["pixels"], NatureCNN)
+    # VecNormalize would turn the frames into a float box, which the policy flattens.
+    env = VecNormalize.load(
+        str(run_dir / "checkpoints" / "step_128.pkl"),
+        DummyVecEnv([partial(fake_env, FAKE.reward_weights, obs_mode="pixels")]),
+    )
+    assert isinstance(env.obs_rms, dict)
+    assert set(env.obs_rms) == {"vector"}
+    assert isinstance(env.observation_space, spaces.Dict)
+    assert env.observation_space["pixels"].dtype == np.uint8
+
+
 class CrashOnSecondWorker(gym.Wrapper):
     def reset(self, *, seed=None, options=None):
         if seed is not None:
@@ -250,7 +344,9 @@ def crashing_env(weights: dict[str, float], archive: bool = False) -> gym.Env:
 def test_a_dead_worker_raises_and_marks_the_run_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def factory(_env_id: str, _start: str, weights: dict[str, float], _hold: int | None) -> tuple:
+    def factory(
+        _env_id: str, _start: str, weights: dict[str, float], _obs_mode: str, _hold: int | None
+    ) -> tuple:
         return partial(crashing_env, dict(weights)), "fake", ""
 
     monkeypatch.setattr(runner, "env_factory", factory)

@@ -94,7 +94,7 @@ def test_the_preset_plays_through_a_game_over_without_paying_for_it() -> None:
     if not (manifest.STATES / f"{CONFIG.start_state}.state").is_file():
         pytest.skip("no level_1_1.state; run scripts/capture_sml_states.py")
     env_fn, backend, rom_sha1 = env_factory(
-        CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights
+        CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights, CONFIG.obs_mode
     )
     assert (backend, rom_sha1) == ("pyboy", manifest.ROM_SHA1)
     env = env_fn()
@@ -131,7 +131,9 @@ def test_the_env_passes_the_pipe_at_x_tile_103_only_with_the_longer_hold(
     needs_rom()
     if not (manifest.STATES / f"{CONFIG.start_state}.state").is_file():
         pytest.skip("no level_1_1.state; run scripts/capture_sml_states.py")
-    env_fn, _, _ = env_factory(CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights, hold)
+    env_fn, _, _ = env_factory(
+        CONFIG.env_id, CONFIG.start_state, CONFIG.reward_weights, CONFIG.obs_mode, hold
+    )
     env = env_fn()
     env.reset(seed=0)
     unwrapped = env.unwrapped
@@ -172,6 +174,7 @@ def test_a_run_logs_its_continues_to_progress_csv(tmp_path: Path) -> None:
         total_timesteps=2048,
         n_envs=1,
         checkpoint_every=2048,
+        eval_every=2048,
         eval_episodes=1,
         runs_dir=tmp_path,
         ppo=dataclasses.replace(CONFIG.ppo, n_steps=2048, batch_size=256),
