@@ -13,6 +13,9 @@ import tyro
 from algoarcade.games.super_mario_land import rewards as sml_rewards
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 
+# The games whose step info carries every field of RND's input (algoarcade.training.ppo).
+RND_GAMES = ("firered", "fake")
+
 
 @dataclass(frozen=True)
 class PPOConfig:
@@ -73,7 +76,12 @@ class TrainConfig:
     arm: str = ""
     """Set by the run queue. Logged in the runs table."""
     second_value_head: bool = False
-    """Owned trainer only: a second value output for TRN-10's intrinsic return."""
+    """Owned trainer only: a second value output, which RND trains on the intrinsic return."""
+    int_coef: float = 0.0
+    """Owned trainer only: RND's intrinsic advantage weight, against 1 for the extrinsic one
+    (TRN-10). 0 trains plain PPO. Needs second_value_head and an env_id in RND_GAMES."""
+    int_gamma: float = 0.99
+    """With int_coef: the intrinsic return's discount. ppo.gamma stays the extrinsic one."""
 
     def __post_init__(self) -> None:
         if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:
@@ -81,6 +89,10 @@ class TrainConfig:
                 f"eval_every {self.eval_every} is not a positive multiple of checkpoint_every "
                 f"{self.checkpoint_every}"
             )
+        if self.int_coef and not self.second_value_head:
+            raise ValueError("int_coef (RND) needs second_value_head for the intrinsic value")
+        if self.int_coef and self.env_id not in RND_GAMES:
+            raise ValueError(f"int_coef (RND) needs an env_id in {RND_GAMES}, not {self.env_id!r}")
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
