@@ -40,10 +40,10 @@ ROMS = Path(__file__).resolve().parents[3] / "data" / "roms"
 FIRERED_ROM = ROMS / "firered.gba"
 SML_ROM = ROMS / "super_mario_land.gb"
 FAKE_STEP_BUDGET = 64
-# Logged at the episode's end. A save block read on the frame the block moves can dip or read
-# high (docs/harness-spec.md, FireRed memory map), so each is the value of the latest two
-# consecutive reads that agreed.
-COUNTS = ("badge_count", "party_level_sum", "story_flags")
+# Logged at the episode's end, and the badge byte for RND's input. A save block read on the frame
+# the block moves can dip or read high (docs/harness-spec.md, FireRed memory map), so each is the
+# value of the latest two consecutive reads that agreed.
+COUNTS = ("badge_count", "party_level_sum", "story_flags", "badge_flags")
 
 
 class LastRead:

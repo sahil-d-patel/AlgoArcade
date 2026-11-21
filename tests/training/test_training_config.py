@@ -1,6 +1,7 @@
 import dataclasses
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import tyro
@@ -87,6 +88,8 @@ def test_baseline_v1_pins_every_field() -> None:
         "experiment_id": "",
         "arm": "",
         "second_value_head": False,
+        "int_coef": 0.0,
+        "int_gamma": 0.99,
         "obs_mode": "symbolic",
     }
 
@@ -102,6 +105,21 @@ def test_other_presets_evaluate_deterministically_at_every_checkpoint(name: str)
 def test_eval_every_must_be_a_positive_multiple_of_checkpoint_every(eval_every: int) -> None:
     with pytest.raises(ValueError, match="eval_every"):
         dataclasses.replace(BASELINE_V1, eval_every=eval_every)
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"second_value_head": False}, "second_value_head"),
+        ({"env_id": "super_mario_land"}, "env_id"),
+    ],
+)
+def test_rnd_needs_the_second_head_and_a_game_with_its_input(
+    changes: dict[str, Any], message: str
+) -> None:
+    rnd = dataclasses.replace(BASELINE_V1, int_coef=0.5, second_value_head=True)
+    with pytest.raises(ValueError, match=message):
+        dataclasses.replace(rnd, **changes)
 
 
 def test_a_config_saved_before_eval_every_loads_as_it_ran(tmp_path: Path) -> None:

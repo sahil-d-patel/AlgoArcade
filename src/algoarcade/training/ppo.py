@@ -37,8 +37,29 @@ What we changed, and why:
 - Observations are normalised with VecNormalize's arithmetic. Checkpoints are SB3 PPO zips with a
   VecNormalize pickle beside them, evaluation runs through the runner's evaluate(), and the
   Parquet rows through RunLog, so a run directory looks the same from either trainer.
-- An optional second value head (config.second_value_head). Nothing trains it until TRN-10 gives
-  it an intrinsic return.
+- An optional second value head (config.second_value_head), which RND trains on the intrinsic
+  return.
+
+RND (TRN-10) follows CleanRL's ppo_rnd_envpool.py at the same commit, under the same license:
+https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo_rnd_envpool.py
+It runs only when config.int_coef is not 0; at 0 the trainer is TRN-07's. What we changed:
+
+- The input is a slice of RAM from each step's info (rnd_fields), not the screen, so the
+  networks are MLPs 64 wide in place of the Atari convolutions.
+- A column that has never varied whitens to 0: the input statistics start from no samples and
+  the divisor carries VecNormalize's epsilon. CleanRL divides by the bare standard deviation.
+- The forward filter discounts each env's novelty over time, as OpenAI's RND does (rff_int over
+  buf_rews_int.T in its ppo_agent.py). CleanRL's buffer is steps by envs, so its .T runs the
+  filter across envs instead.
+- A rollout's inputs join the statistics before its novelty is measured, and the predictor
+  trains on those same whitened inputs, of the states the actions reached. CleanRL measures with
+  the previous statistics and trains on the observations the policy acted from.
+- The predictor trains on every sample. CleanRL's update proportion of 0.25 is for 128 envs.
+- The extrinsic advantage keeps weight 1 (CleanRL's ext_coef is 2), so int_coef is the ratio.
+  Both value losses drop CleanRL's factor of 0.5, as the extrinsic one does above.
+- The random-policy warmup plays one rollout (CleanRL plays 50) and comes before the seeded
+  reset that starts training. CleanRL trains on from where the warmup left the envs, from a
+  stale observation.
 
     uv run python -m algoarcade.training.ppo cartpole --seed 0
     uv run python -m algoarcade.training.ppo firered --start-state seg_02_pallet --seed 0
@@ -47,9 +68,9 @@ What we changed, and why:
 import time
 import warnings
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -65,6 +86,7 @@ from torch import nn
 from torch.distributions.categorical import Categorical
 from torch.nn import functional as F
 
+from algoarcade.games.firered.milestones import MILESTONES
 from algoarcade.training import runner
 from algoarcade.training.config import PRESETS, PPOConfig, TrainConfig
 from algoarcade.training.parquet import RunLog
@@ -74,6 +96,11 @@ ADAM_EPS = 1e-5
 # VecNormalize's defaults.
 CLIP_OBS = 10.0
 NORM_EPSILON = 1e-8
+# RND's input clip is CleanRL's. The width is a guess.
+RND_CLIP = 5.0
+RND_WIDTH = 64
+# NUM_BADGES, include/constants/flags.h in pret/pokefirered.
+BADGES = 8
 # SB3 averages episode returns over its last 100 episodes for rollout/ep_rew_mean.
 EPISODE_WINDOW = 100
 # Our parameter names to SB3's ActorCriticPolicy's. SB3 has one value head: our first.
@@ -137,7 +164,8 @@ def sb3_state_dict(agent: Agent) -> dict[str, torch.Tensor]:
 @dataclass
 class Rollout:
     """n_steps x n_envs. `obs` is what the policy saw. `final_values` is V(final_obs) where the
-    step budget cut an episode, and 0 everywhere else."""
+    step budget cut an episode, and 0 everywhere else. `int_values` is the second head's value,
+    or 0 without it."""
 
     obs: torch.Tensor
     actions: torch.Tensor
@@ -146,6 +174,7 @@ class Rollout:
     values: torch.Tensor
     dones: torch.Tensor
     final_values: torch.Tensor
+    int_values: torch.Tensor
 
 
 def make_envs(make: Callable[[], gym.Env], n_envs: int) -> gym.vector.AsyncVectorEnv:
@@ -200,6 +229,7 @@ def collect(  # noqa: PLR0913 - CleanRL's rollout loop, with its state passed in
         values=torch.zeros(shape, device=device),
         dones=torch.zeros(shape, dtype=torch.bool, device=device),
         final_values=torch.zeros(shape, device=device),
+        int_values=torch.zeros(shape, device=device),
     )
     for t in range(n_steps):
         x = torch.as_tensor(obs, device=device)
@@ -214,6 +244,8 @@ def collect(  # noqa: PLR0913 - CleanRL's rollout loop, with its state passed in
         rollout.logprobs[t] = logprob
         rollout.rewards[t] = torch.as_tensor(reward, device=device)
         rollout.values[t] = value[:, 0]
+        if value.shape[1] > 1:
+            rollout.int_values[t] = value[:, 1]
         rollout.dones[t] = torch.as_tensor(dones, device=device)
         # Under same-step autoreset `obs` is already the reset observation for these envs; the
         # observation the step budget cut at is in final_obs. A step both terminated and
@@ -251,6 +283,159 @@ def gae(
     return advantages
 
 
+def intrinsic_gae(
+    rollout: Rollout,
+    rewards: torch.Tensor,
+    last_value: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+) -> torch.Tensor:
+    """GAE on the intrinsic return, which ignores episode ends: novelty found after a reset still
+    counts toward the steps before it, and the value after a done is the second head's value of
+    the reset observation."""
+    stream = replace(
+        rollout, rewards=rewards, values=rollout.int_values, dones=torch.zeros_like(rollout.dones)
+    )
+    return gae(stream, last_value, gamma, gae_lambda)
+
+
+def rnd_fields(info: Mapping[str, Any]) -> dict[str, list[int]]:
+    """RND's input from a step's info, by field: the tile, a bit per badge, a bit per milestone
+    reached this episode and the party level sum. The badge byte and the level sum are the values
+    two consecutive reads agreed on, and milestone_count is the env's episode best, so a torn read
+    while a save block moves is not novel. Never a counter, play time or RNG: the target network
+    is frozen, so an input that never repeats stays novel forever."""
+    map_group, map_num, x, y = (0,) * (4 - len(info["location"])) + tuple(info["location"])
+    return {
+        "map_group": [map_group],
+        "map_num": [map_num],
+        "x": [x],
+        "y": [y],
+        "badge_bits": [info["badge_flags"] >> bit & 1 for bit in range(BADGES)],
+        "milestone_bits": [int(info["milestone_count"] > i) for i in range(len(MILESTONES))],
+        "party_level_sum": [info["party_level_sum"]],
+    }
+
+
+def rnd_input(infos: Sequence[Mapping[str, Any]]) -> np.ndarray:
+    """One row per env: rnd_fields' columns in order."""
+    return np.array(
+        [[v for column in rnd_fields(info).values() for v in column] for info in infos],
+        dtype=np.float32,
+    )
+
+
+def whiten(x: np.ndarray, rms: RunningMeanStd) -> np.ndarray:
+    """RND's input standardised column by column, clipped to +-RND_CLIP."""
+    standard = (x - rms.mean) / np.sqrt(rms.var + NORM_EPSILON)
+    return np.clip(standard, -RND_CLIP, RND_CLIP).astype(np.float32)
+
+
+class RND(nn.Module):
+    """Random network distillation: an input's novelty is the error of a predictor trained to
+    match a frozen, randomly initialised target on it. Also holds the input statistics, started
+    from `warm`, the intrinsic return's forward filter, both carried across rollouts, and the
+    current rollout's inputs."""
+
+    def __init__(self, warm: np.ndarray, gamma: float) -> None:
+        super().__init__()
+        n_inputs = warm.shape[1]
+        self.target = nn.Sequential(
+            layer_init(nn.Linear(n_inputs, RND_WIDTH)),
+            nn.LeakyReLU(),
+            layer_init(nn.Linear(RND_WIDTH, RND_WIDTH)),
+            nn.LeakyReLU(),
+            layer_init(nn.Linear(RND_WIDTH, RND_WIDTH)),
+        )
+        # As CleanRL's: the target's layers and two more, so it can fit the target.
+        self.predictor = nn.Sequential(
+            layer_init(nn.Linear(n_inputs, RND_WIDTH)),
+            nn.LeakyReLU(),
+            layer_init(nn.Linear(RND_WIDTH, RND_WIDTH)),
+            nn.LeakyReLU(),
+            layer_init(nn.Linear(RND_WIDTH, RND_WIDTH)),
+            nn.ReLU(),
+            layer_init(nn.Linear(RND_WIDTH, RND_WIDTH)),
+            nn.ReLU(),
+            layer_init(nn.Linear(RND_WIDTH, RND_WIDTH)),
+        )
+        self.target.requires_grad_(False)
+        # No prior sample, so a column that has never varied has variance 0 and whitens to 0.
+        self.input_rms = RunningMeanStd(epsilon=0.0, shape=(n_inputs,))
+        self.input_rms.update(warm)
+        self.return_rms = RunningMeanStd()
+        self.gamma = gamma
+        self.returns: np.ndarray | None = None
+        self.inputs: list[np.ndarray] = []
+
+    def novelty(self, x: torch.Tensor) -> torch.Tensor:
+        """The squared error per input, averaged over the target's outputs."""
+        return (self.predictor(x) - self.target(x)).pow(2).mean(-1)
+
+    def scale(self, novelty: np.ndarray) -> np.ndarray:
+        """A rollout's novelty, n_steps x n_envs, divided by the running std of the intrinsic
+        return: each env's novelty discounted by gamma over time, never reset by a done."""
+        returns = np.empty_like(novelty)
+        for t, row in enumerate(novelty):
+            self.returns = row if self.returns is None else self.returns * self.gamma + row
+            returns[t] = self.returns
+        self.return_rms.update(returns.ravel())
+        return novelty / np.sqrt(self.return_rms.var)
+
+
+@dataclass
+class Intrinsic:
+    """RND's part of an update, n_steps x n_envs: the intrinsic advantages and their weight, the
+    whitened inputs the predictor trains on, and the scaled rewards the policy is paid."""
+
+    rnd: RND
+    coef: float
+    advantages: torch.Tensor
+    inputs: torch.Tensor
+    rewards: torch.Tensor
+
+
+def intrinsic_terms(
+    rnd: RND, rollout: Rollout, last_value: torch.Tensor, coef: float, gae_lambda: float
+) -> Intrinsic:
+    """Takes the rollout's inputs from rnd.inputs. They join the statistics before they are
+    whitened, so the predictor trains on what the reward measured."""
+    inputs = np.stack(rnd.inputs)
+    rnd.inputs.clear()
+    rnd.input_rms.update(inputs.reshape(-1, inputs.shape[-1]))
+    x = torch.as_tensor(whiten(inputs, rnd.input_rms), device=last_value.device)
+    with torch.no_grad():
+        novelty = rnd.novelty(x).cpu().numpy()
+    rewards = torch.as_tensor(rnd.scale(novelty), dtype=torch.float32, device=last_value.device)
+    advantages = intrinsic_gae(rollout, rewards, last_value, rnd.gamma, gae_lambda)
+    return Intrinsic(rnd, coef, advantages, x, rewards)
+
+
+def step_infos(
+    infos: dict[str, Any], current: list[dict[str, Any]], dones: np.ndarray
+) -> list[dict[str, Any]]:
+    """Each env's info for the step it took. For an env that finished, `infos` holds its reset
+    info, unbatched as `current`, and final_info its last step's."""
+    final = unbatch(infos["final_info"], len(current)) if "final_info" in infos else current
+    return [final[i] if done else current[i] for i, done in enumerate(dones)]
+
+
+def warm_up(
+    envs: gym.vector.VectorEnv, seed: int, n_steps: int, rng: np.random.Generator
+) -> np.ndarray:
+    """RND's input on n_steps random-policy steps per env from a seeded reset, to start its
+    statistics as CleanRL does. Training resets the envs after this."""
+    envs.reset(seed=seed)
+    n = envs.num_envs
+    action_space = envs.single_action_space
+    assert isinstance(action_space, spaces.Discrete)
+    inputs = []
+    for _ in range(n_steps):
+        _, _, terminated, truncated, infos = envs.step(rng.integers(int(action_space.n), size=n))
+        inputs.append(rnd_input(step_infos(infos, unbatch(infos, n), terminated | truncated)))
+    return np.concatenate(inputs)
+
+
 def update(  # noqa: PLR0913 - CleanRL's update loop, with its state passed in
     agent: Agent,
     optimizer: torch.optim.Optimizer,
@@ -258,14 +443,18 @@ def update(  # noqa: PLR0913 - CleanRL's update loop, with its state passed in
     advantages: torch.Tensor,
     ppo: PPOConfig,
     rng: np.random.Generator,
+    intrinsic: Intrinsic | None = None,
 ) -> dict[str, float]:
     """ppo.n_epochs passes over the rollout in shuffled minibatches, as SB3's PPO.train does.
-    Returns the scalars SB3 logs, under its names."""
+    Returns the scalars SB3 logs, under its names. With RND the policy follows the advantages
+    plus intrinsic.coef times the intrinsic ones, the second head learns the intrinsic return and
+    the predictor learns the target on the rollout's inputs, all in one loss."""
     returns = (advantages + rollout.values).flatten()
     b_obs = rollout.obs.flatten(0, 1)
     b_actions = rollout.actions.flatten()
     b_logprobs = rollout.logprobs.flatten()
     b_advantages = advantages.flatten()
+    parameters = list(agent.parameters())
     logs: dict[str, list[float]] = {
         "policy_gradient_loss": [],
         "value_loss": [],
@@ -273,6 +462,10 @@ def update(  # noqa: PLR0913 - CleanRL's update loop, with its state passed in
         "approx_kl": [],
         "clip_fraction": [],
     }
+    if intrinsic is not None:
+        b_advantages = b_advantages + intrinsic.coef * intrinsic.advantages.flatten()
+        parameters += intrinsic.rnd.predictor.parameters()
+        logs |= {"intrinsic_value_loss": [], "rnd_loss": []}
     for _ in range(ppo.n_epochs):
         order = torch.as_tensor(rng.permutation(len(b_obs)), device=b_obs.device)
         for start in range(0, len(b_obs), ppo.batch_size):
@@ -292,10 +485,17 @@ def update(  # noqa: PLR0913 - CleanRL's update loop, with its state passed in
             v_loss = F.mse_loss(value[:, 0], returns[mb])
             entropy_loss = -entropy.mean()
             loss = pg_loss + ppo.ent_coef * entropy_loss + ppo.vf_coef * v_loss
+            if intrinsic is not None:
+                int_returns = (intrinsic.advantages + rollout.int_values).flatten()[mb]
+                int_v_loss = F.mse_loss(value[:, 1], int_returns)
+                rnd_loss = intrinsic.rnd.novelty(intrinsic.inputs.flatten(0, 1)[mb]).mean()
+                loss = loss + ppo.vf_coef * int_v_loss + rnd_loss
+                logs["intrinsic_value_loss"].append(int_v_loss.item())
+                logs["rnd_loss"].append(rnd_loss.item())
 
             optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(agent.parameters(), ppo.max_grad_norm)
+            nn.utils.clip_grad_norm_(parameters, ppo.max_grad_norm)
             optimizer.step()
 
             with torch.no_grad():
@@ -356,7 +556,7 @@ class Progress:
             logger.record("rollout/continues", sum(self.continues.values()))
 
 
-def learn(
+def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logging
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int, bool], None],
@@ -378,6 +578,8 @@ def learn(
         if config.norm_obs
         else None
     )
+    # One rollout of random-policy steps, a guess; CleanRL plays 50 at 128 envs.
+    warm = warm_up(envs, config.seed, ppo.n_steps, rng) if config.int_coef else None
     raw, infos = envs.reset(seed=config.seed)
     obs = observe(raw, space, obs_rms, update=True)
     if log is not None:
@@ -385,7 +587,13 @@ def learn(
     action_space = envs.single_action_space
     assert isinstance(action_space, spaces.Discrete)
     agent = Agent(obs.shape[1], int(action_space.n), config.second_value_head).to(device)
-    optimizer = torch.optim.Adam(agent.parameters(), lr=ppo.learning_rate, eps=ADAM_EPS)
+    # After the agent, so the agent starts from the weights a plain run with this seed has.
+    rnd = None if warm is None else RND(warm, config.int_gamma).to(device)
+    optimizer = torch.optim.Adam(
+        [*agent.parameters(), *(() if rnd is None else rnd.predictor.parameters())],
+        lr=ppo.learning_rate,
+        eps=ADAM_EPS,
+    )
 
     steps = 0
     next_checkpoint = config.checkpoint_every
@@ -397,13 +605,13 @@ def learn(
         nonlocal steps, next_checkpoint
         steps += n
         current = unbatch(infos, n)
-        # For an env that finished, `infos` holds its reset info and final_info its last step's.
-        final = unbatch(infos["final_info"], n) if "final_info" in infos else current
-        step_infos = [final[i] if done else current[i] for i, done in enumerate(dones)]
+        taken = step_infos(infos, current, dones)
         if log is not None:
-            log.step(actions, rewards, dones, step_infos)
+            log.step(actions, rewards, dones, taken)
             log.begin(np.flatnonzero(dones), current)
-        progress.step(rewards, dones, step_infos)
+        progress.step(rewards, dones, taken)
+        if rnd is not None:
+            rnd.inputs.append(rnd_input(taken))
         if next_checkpoint <= steps < config.total_timesteps:
             # The scheduled step, not `steps`, which can overshoot it by up to n_envs - 1.
             due = next_checkpoint % config.eval_every == 0
@@ -414,13 +622,25 @@ def learn(
     while steps < config.total_timesteps:
         rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, after_step)
         with torch.no_grad():
-            last_value = agent.get_value(torch.as_tensor(obs, device=device))[:, 0]
-        advantages = gae(rollout, last_value, ppo.gamma, ppo.gae_lambda)
-        for key, value in update(agent, optimizer, rollout, advantages, ppo, rng).items():
+            last_value = agent.get_value(torch.as_tensor(obs, device=device))
+        advantages = gae(rollout, last_value[:, 0], ppo.gamma, ppo.gae_lambda)
+        intrinsic = (
+            None
+            if rnd is None
+            else intrinsic_terms(rnd, rollout, last_value[:, 1], config.int_coef, ppo.gae_lambda)
+        )
+        for key, value in update(
+            agent, optimizer, rollout, advantages, ppo, rng, intrinsic
+        ).items():
             logger.record(key, value)
         if steps >= config.total_timesteps:
             checkpoint(agent, obs_rms, steps, True)
         progress.record(logger)
+        if intrinsic is not None:
+            logger.record("rollout/intrinsic_reward_mean", intrinsic.rewards.mean().item())
+            logger.record(
+                "rollout/intrinsic_return_std", float(np.sqrt(intrinsic.rnd.return_rms.var))
+            )
         logger.record("time/fps", int(steps / (time.time() - start)))
         logger.record("time/total_timesteps", steps)
         logger.dump(steps)

@@ -19,6 +19,7 @@ def test_start_state() -> None:
         frame=0,
         story_flags=0,
         party_level_sum=5,
+        badge_flags=0,
         badge_count=0,
         milestone_count=0,
         party_count=1,
