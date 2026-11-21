@@ -468,15 +468,17 @@ def test_a_reload_does_not_repay_counts_that_dropped_before_the_cell() -> None:
 
 
 class TornReader(FakeReader):
-    """Read number `torn_at` comes back high by `delta`; the RAM, and so the save state, stay real."""
+    """Read number `torn_at` reports `badge_count` badges; the RAM, and so the save state, stay real."""
 
-    def __init__(self, torn_at: int, delta: dict[str, int]) -> None:
-        self.reads, self.torn_at, self.delta = 0, torn_at, delta
+    def __init__(self, torn_at: int, badge_count: int) -> None:
+        self.reads, self.torn_at, self.badge_count = 0, torn_at, badge_count
 
     def read(self, backend: GameBackend) -> FakeState:
         self.reads += 1
         state = super().read(backend)
-        return dataclasses.replace(state, **self.delta) if self.reads == self.torn_at else state
+        if self.reads != self.torn_at:
+            return state
+        return dataclasses.replace(state, badge_count=self.badge_count)
 
 
 def test_one_torn_read_on_the_step_that_reaches_a_cell_is_not_its_best() -> None:
@@ -484,7 +486,7 @@ def test_one_torn_read_on_the_step_that_reaches_a_cell_is_not_its_best() -> None
     # Read 1 is the reset, reads 2 to 4 are three steps right; step 3 reaches the cell at x 4.
     env = AlgoArcadeEnv(
         backend,
-        TornReader(torn_at=4, delta={"badge_count": 1}),
+        TornReader(torn_at=4, badge_count=1),
         RewardRegistry(COMPONENTS, WEIGHTS),
         backend.save_state(),
         50,
