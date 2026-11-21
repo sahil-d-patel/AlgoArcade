@@ -84,6 +84,6 @@ uv run python -m algoarcade.viz.e3_e5
 uv run python -m algoarcade.viz.decomposition --run <run_id>
 ```
 
-`e3_e5` prints the E3 and E5 tables from finished runs: IQM, 95% interval and seed count per arm, each seed's score, and the probability of improvement from `training.stats`. A run's score is the mean `milestone_count` of its last checkpoint's evaluation episodes, because the arms pay different rewards. A table under five seeds says exploratory. E3's count arm is the shared baseline, so set `COUNT` to its experiment id and arm once OPS-06 runs it.
+`e3_e5` prints the E3 and E5 tables from finished runs: IQM, 95% interval and seed count per arm, each seed's score, and the probability of improvement from `training.stats`. A run's score is the mean `milestone_count` of its last checkpoint's evaluation episodes, because the arms pay different rewards. A table under five seeds says exploratory. E3's count arm is the shared baseline arm, `COUNT`, which `experiments/baseline.py` queues as `baseline`, arm `v1`.
 
 `decomposition` stacks each component's weighted share of the return per training episode, per 500,000-step window. Its command prints one run's largest gap between the stacked shares and the mean episode return. `dashboard/hacks.qmd` draws it for the baseline and both E5 arms, plays the clips under `data/videos/hacks/` and includes `docs/hack-catalogue.md`.

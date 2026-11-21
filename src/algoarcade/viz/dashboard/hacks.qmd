@@ -2,7 +2,7 @@
 title: Reward decomposition
 ---
 
-What each reward component paid per training episode, weight times its logged total, averaged over every episode of an arm's seeds in each 500,000-step window. Penalties stack below zero, and the black mark is the mean episode return the bars sum to. The baseline is E3's count arm. RND is not shown: its reward is not in the Parquet logs. E5 has three seeds per arm, so its panels are exploratory.
+What each reward component paid per training episode, weight times its logged total, averaged over every episode of an arm's seeds in each 500,000-step window. Penalties stack below zero, and the black mark is the mean episode return the bars sum to. The baseline is the shared baseline arm (`experiments/baseline.py`), which is E3's count arm. RND is not shown: its reward is not in the Parquet logs. E5 has three seeds per arm, so its panels are exploratory.
 
 ```{python}
 #| output: asis

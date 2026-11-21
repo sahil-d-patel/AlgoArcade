@@ -11,8 +11,6 @@ only if it runs this BASE on these seeds, so this file queues the other two:
 
 int_coef 0.5 is the RND paper's 1:2 intrinsic-to-extrinsic ratio. It and RND's input
 (algoarcade.training.ppo.rnd_fields) are guesses, written here before any run.
-
-S1 has no step budget yet, so these runs stop at startup. Submit them once OPS-06 sets one.
 """
 
 import dataclasses
