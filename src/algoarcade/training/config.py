@@ -10,7 +10,7 @@ from pathlib import Path
 
 import tyro
 
-from algoarcade.envs.env import ObsMode
+from algoarcade.envs.env import HOLD, RELEASE, ObsMode
 from algoarcade.games.super_mario_land import rewards as sml_rewards
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 
@@ -101,6 +101,10 @@ class TrainConfig:
             raise ValueError("int_coef (RND) needs second_value_head for the intrinsic value")
         if self.int_coef and self.env_id not in RND_GAMES:
             raise ValueError(f"int_coef (RND) needs an env_id in {RND_GAMES}, not {self.env_id!r}")
+        if self.hold is not None and not 0 < self.hold < HOLD + RELEASE:
+            raise ValueError(
+                f"hold {self.hold}: use 1 to {HOLD + RELEASE - 1} frames of the decision"
+            )
 
 
 def save_config(config: TrainConfig, path: Path) -> None:

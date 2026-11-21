@@ -151,3 +151,9 @@ def test_a_config_saved_before_env11_loads_with_the_hold_it_ran(
     del raw["hold"]
     path.write_text(json.dumps(raw))
     assert load_config(path).hold == hold
+
+
+@pytest.mark.parametrize("hold", [0, -1, 24, 30])
+def test_a_hold_must_leave_both_press_and_release_a_frame(hold: int) -> None:
+    with pytest.raises(ValueError, match="hold"):
+        dataclasses.replace(BASELINE_V1, hold=hold)
