@@ -85,3 +85,19 @@ def test_every_e1_to_e5_file_runs_on_s1_from_the_same_base() -> None:
     assert {
         config.start_state for name in s1 for config in load_experiment(EXPERIMENTS / name)
     } == {"s1"}
+
+
+def test_trn08_keeps_the_evaluation_its_runs_were_queued_with() -> None:
+    configs = load_experiment(EXPERIMENTS / "trn08_baseline.py")
+    assert len(configs) == 15
+    for c in configs:
+        assert c == dataclasses.replace(
+            BASELINE_V1,
+            track=True,
+            eval_every=1_500_000,
+            eval_episodes=20,
+            start_state=c.start_state,
+            experiment_id="TRN-08",
+            arm=c.arm,
+            seed=c.seed,
+        )

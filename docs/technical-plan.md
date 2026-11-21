@@ -279,26 +279,26 @@ E1 to E4 share one baseline arm, so they need 30 runs, not 45.
 
 The rates come from the Mac benchmark in `docs/benchmarks.md` (OPS-02, PR #52, commit 66f2eab, run 2026-11-03 from `s1.state`): 1,005 agent steps/s with 16 environments at 24 frames per decision, and 2,753 frames/s in one process, which is 114.7 decisions/s. Training uses the first. Evaluation uses the second, because it plays one environment. TRN-08's evaluations on the same Mac ran at 114 to 115 decisions/s, and its training at a median 596 steps/s before the first evaluation (15 runs, other jobs running), so the training hours below are a lower bound. The box has not been benchmarked. Every day count here is redone from its numbers.
 
-Evaluation costs more than training on S1. `BASELINE_V1` plays 20 sampled episodes at each of 10 evaluations, and an episode that misses the badge lasts the whole 71,680-decision budget (87,040 from S0). That is 34.7 hours a run against 4.1 hours of training.
+Evaluation plays one environment, and an episode that misses the badge lasts the whole 71,680-decision budget (87,040 from S0). `BASELINE_V1` plays 5 sampled episodes at 7.5M steps and at the end, 1.74 hours a run against 4.15 hours of training. Until November 20 it played 20 episodes at each of 10 evaluations, 34.7 of a run's 38.9 hours (decisions.md, 2026-11-20). E6 evaluates every 10M steps, ten times a run.
 
 The table is in queue order on one machine. The finish dates assume the queue starts November 21, a guess. PQN, pixels and RND are not benchmarked and use the PPO rate.
 
-| Block | Runs | Steps each | Hours a run (train + evaluate) | Box-days, redo from the box benchmark | Finishes |
+| Block | Runs | Steps each | Hours a run, train + evaluate (Mac benchmark) | Box-days (Mac benchmark, redo from the box benchmark) | Finishes |
 |---|---|---|---|---|---|
-| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 4.1 + 34.7 = 38.9 | 8.1 | Nov 29 |
-| E4 archive on | 5 | 15M | 38.9 | 8.1 | Dec 7 |
-| E1 PQN | 5 | 15M | 38.9 | 8.1 | Dec 15 |
-| E3 none and RND | 10 | 15M | 38.9 | 16.2 | Dec 31 |
-| E2 pixels | 5 | 15M | 38.9 | 8.1 | Jan 8 |
-| E5 both arms | 6 | 15M | 38.9 | 9.7 | Jan 18 |
-| E6 from S1 | 3 | 100M | 27.6 + 34.7 = 62.4 | 7.8 | Jan 26 |
-| E6 from S0 | 2 | 100M | 27.6 + 42.2 = 69.8 | 5.8 | Jan 31 |
+| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 4.15 + 1.74 = 5.88 | 1.2 | Nov 22 |
+| E4 archive on | 5 | 15M | 5.88 | 1.2 | Nov 23 |
+| E1 PQN | 5 | 15M | 5.88 | 1.2 | Nov 24 |
+| E3 none and RND | 10 | 15M | 5.88 | 2.5 | Nov 27 |
+| E2 pixels | 5 | 15M | 5.88 | 1.2 | Nov 28 |
+| E5 both arms | 6 | 15M | 5.88 | 1.5 | Nov 29 |
+| E6 from S1 | 3 | 100M | 27.64 + 8.68 = 36.32 | 4.5 | Dec 4 |
+| E6 from S0 | 2 | 100M | 27.64 + 10.54 = 38.18 | 3.2 | Dec 7 |
 
-That is 72 box-days, 12 of them training. Results freeze November 22, so no arm finishes. A run takes 38.9 of the 42.7 hours the queue allows a 15M-step run before it kills it, so the box starts `run` with `--min-steps-per-s 50` (84 hours).
+That is 16.5 box-days, 12 of them training; E1 to E5 take 8.8. Results freeze November 22, so only the baseline arm can finish by then, and only if the queue starts early on November 21. A 15M-step run takes 5.9 of the 42.7 hours the queue allows it before it kills it.
 
 If an arm cannot finish by November 22, cut in this order. The first two change every E1 to E5 arm at once, before any of their runs starts, so the arms stay comparable.
 
-1. Evaluation: 5 episodes at 7.5M steps and at the end. A run drops to 5.9 hours and the 36 runs of E1 to E5 to 8.8 box-days. This changes `BASELINE_V1`, which TRN-08 fixed, so it is the Lead PM's decision.
+1. Evaluation: 5 episodes at 7.5M steps and at the end. Taken on November 20 (decisions.md).
 2. Steps: ablation runs drop from 15M to 10M before any arm loses seeds.
 3. Machines: E2, E5 and E6 from S0 move to the Mac, as planned before the benchmark.
 4. Seeds: an arm reports the seeds it finished, labeled exploratory under five.
