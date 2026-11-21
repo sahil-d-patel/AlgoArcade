@@ -222,6 +222,8 @@ def saver(config: TrainConfig, eval_env: VecEnv) -> ppo.Save:
 def train(config: TrainConfig) -> Path:
     if config.pqn is None:
         raise ValueError("A PQN run needs config.pqn: try the pqn_cartpole preset")
+    if config.second_value_head:
+        raise ValueError("PQN has no second value head; RND trains on algoarcade.training.ppo")
     return ppo.run(config, "pqn", "pqn", learn, saver)
 
 
