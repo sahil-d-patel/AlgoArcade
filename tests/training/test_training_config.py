@@ -54,7 +54,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "total_timesteps": 15_000_000,
         "n_envs": 16,
         "checkpoint_every": 500_000,
-        "eval_every": 1_500_000,
+        "eval_every": 7_500_000,
         "ppo": {
             "learning_rate": 0.0003,
             "n_steps": 2048,
@@ -71,7 +71,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "norm_reward": False,
         "eval_deterministic": False,
         "seed": 0,
-        "eval_episodes": 20,
+        "eval_episodes": 5,
         "runs_dir": Path("data/runs"),
         "track": False,
         "start_state": tyro.MISSING,
@@ -94,6 +94,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "int_coef": 0.0,
         "int_gamma": 0.99,
         "obs_mode": "symbolic",
+        "pqn": None,
     }
 
 

@@ -31,12 +31,12 @@ import torch
 import tyro
 from gymnasium import spaces
 from stable_baselines3 import PPO
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import CSVOutputFormat, KVWriter, Logger
 from stable_baselines3.common.preprocessing import is_image_space
+from stable_baselines3.common.type_aliases import PolicyPredictor
 from stable_baselines3.common.vec_env import (
     SubprocVecEnv,
     VecEnv,
@@ -89,15 +89,19 @@ class CheckpointEval(BaseCallback):
     logs the share of training resets so far that loaded a cell, the number of cells and their
     mean save state size in bytes. With curriculum resets, it logs the current state's index
     (-1 for the fixed start) and the goal rate counted so far from it.
+    mean save state size in bytes.
+
+    Training ends early, through the final checkpoint, once the file `stop` exists.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - two kinds of reset and the stop file are optional
         self,
         run_dir: Path,
         config: TrainConfig,
         eval_env: VecEnv,
         resets: ArchiveResets | None = None,
         curriculum: CurriculumResets | None = None,
+        stop: Path | None = None,
     ) -> None:
         super().__init__()
         self.run_dir = run_dir
@@ -105,6 +109,7 @@ class CheckpointEval(BaseCallback):
         self.eval_env = eval_env
         self.resets = resets
         self.curriculum = curriculum
+        self.stop = stop
         self.next_at = config.checkpoint_every
         self.start = time.time()
         self.continues: dict[int, int] = {}
@@ -113,6 +118,8 @@ class CheckpointEval(BaseCallback):
         for i, info in enumerate(self.locals["infos"]):
             if "continues" in info:
                 self.continues[i] = info["continues"]
+        if self.stop is not None and self.stop.exists():
+            return False
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
             # The scheduled step, not num_timesteps, which can overshoot it by up to n_envs - 1.
             due = self.next_at % self.config.eval_every == 0
@@ -163,7 +170,7 @@ def eval_rng(config: TrainConfig) -> Iterator[None]:
 
 
 def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to write it
-    model: BaseAlgorithm,
+    model: PolicyPredictor,
     eval_env: VecEnv,
     config: TrainConfig,
     run_dir: Path,
@@ -171,7 +178,7 @@ def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to wr
     start: float,
 ) -> float:
     """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
-    and return the mean return. Both trainers evaluate through this function. The env and,
+    and return the mean return. Every trainer evaluates through this function. The env and,
     inside eval_rng, the sampled actions start from the eval seed, so an evaluation never moves
     training and each episode replays from its checkpoint (algoarcade.viz.render --eval-episode)."""
     eval_env.seed(config.seed + EVAL_SEED_OFFSET)
@@ -349,11 +356,13 @@ def stop_workers(*envs: VecEnv) -> None:
             vec.unwrapped.closed = True
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig, stop: Path | None = None) -> Path:  # noqa: C901 - four refusals, then the run
     if config.second_value_head:
         raise ValueError("second_value_head is for the owned trainer: algoarcade.training.ppo")
     if config.archive and config.curriculum:
         raise ValueError("archive and curriculum both choose the next start; turn one off")
+    if config.pqn is not None:
+        raise ValueError("This config trains PQN: algoarcade.training.pqn")
     # Read before the workers start, so a missing or changed file fails here.
     cells = load(ROOT / config.curriculum, config.start_state) if config.curriculum else []
     run_dir, env_fn, backend, rom_sha1, commit = prepare(config, "sb3")
@@ -404,7 +413,7 @@ def train(config: TrainConfig) -> Path:
     try:
         model.learn(
             total_timesteps=config.total_timesteps,
-            callback=CheckpointEval(run_dir, config, eval_env, resets, curriculum),
+            callback=CheckpointEval(run_dir, config, eval_env, resets, curriculum, stop),
         )
         status = "finished"
     except EOFError as error:

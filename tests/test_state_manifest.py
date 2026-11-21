@@ -10,6 +10,7 @@ from algoarcade.games.firered.manifest import (
     ROM_SHA1,
     STATES,
     StartState,
+    boulder_badge,
     check,
     won_rival_battle,
 )
@@ -18,8 +19,8 @@ from algoarcade.rom import identify
 
 # docs/harness-spec.md, Start states and segments. None is "set per run".
 BUDGETS = {
-    "s0": None,
-    "s1": None,
+    "s0": 87_040,
+    "s1": 71_680,
     "seg_01_house": 2048,
     "seg_02_pallet": 4096,
     "seg_03_rival": 3072,
@@ -37,6 +38,11 @@ def test_state_manifest_has_nine_entries() -> None:
         assert len(entry.sha256) == 64
         int(entry.sha256, 16)
         assert callable(entry.goal)
+
+
+def test_state_manifest_s0_s1_and_the_gym_states_end_at_the_boulder_badge() -> None:
+    badge = {entry.name for entry in MANIFEST if entry.goal is boulder_badge}
+    assert badge == {"s0", "s1", "gym_door", "brock"}
 
 
 def test_state_manifest_check_reports_missing_and_mismatched(tmp_path: Path) -> None:
@@ -138,9 +144,7 @@ def test_state_manifest_badge_goal_true_after_brock(backend) -> None:
     load(backend, "brock_goal")
     state = Player(backend).reader.read(backend)
     assert state.badge_flags == 0x01
-    entries = {entry.name: entry for entry in MANIFEST}
-    assert entries["brock"].goal(state)
-    assert entries["gym_door"].goal(state)
+    assert boulder_badge(state)
 
 
 @pytest.mark.rom

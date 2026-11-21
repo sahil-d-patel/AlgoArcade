@@ -22,5 +22,5 @@ def test_e8_queues_three_seeds_per_arm_differing_only_in_the_curriculum() -> Non
         )
         assert c.ppo.gamma == 0.997
         assert not c.archive
-        assert (c.total_timesteps, c.eval_every, c.eval_episodes) == (15_000_000, 1_500_000, 20)
+        assert (c.total_timesteps, c.eval_every, c.eval_episodes) == (15_000_000, 7_500_000, 5)
         assert not c.eval_deterministic

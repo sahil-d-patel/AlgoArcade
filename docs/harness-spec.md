@@ -290,8 +290,8 @@ Episodes start from save states listed in a manifest in the game's package. Each
 
 | Name | Start | Goal | Step budget |
 |---|---|---|---|
-| S0 | Player's bedroom, new game | Furthest milestone | Set per run |
-| S1 | After Oak's Parcel, Squirtle | Furthest milestone | Set per run |
+| S0 | Player's bedroom, new game | Badge flag set | 87,040 |
+| S1 | After Oak's Parcel, Squirtle | Badge flag set | 71,680 |
 | seg_01_house | Player's bedroom | Leave the house | 2,048 |
 | seg_02_pallet | Pallet Town | Enter Route 1 | 4,096 |
 | seg_03_rival | Oak's Lab | Win the rival battle | 3,072 |
@@ -299,6 +299,8 @@ Episodes start from save states listed in a manifest in the game's package. Each
 | seg_05_forest | Viridian Forest entrance | Exit the north side | 8,192 |
 | gym_door, brock | Pewter Gym door; the Brock battle | Badge flag set | Set per run |
 | level_1_1 (Super Mario Land) | First frame of play in 1-1, three lives | Leave 1-1 | 2,048 |
+
+The badge flag is `FLAG_BADGE01_GET` (0x820), the last milestone. E1 to E5 score S1 runs on `milestone_count`; E6 scores `goal_reached`, whether an evaluation episode got the badge. Each step budget is a multiple of the scripted playthrough's decisions (`scripts/capture_states.py`, 24 frames to a decision, counted at `MgbaBackend._advance` and checked against the game's play-time counter). The segments' budgets are 12.5 to 104 times their stage's decisions. The script takes 6,324 decisions from S1 to the badge, most of them grinding Squirtle to level 13, and 7,759 from S0. S1's 71,680 is 11.3 times that and S0's 87,040 is 11.2 times. An episode never ends on the badge: every episode plays its whole budget, and the badge is scored as `goal_reached`.
 
 State files are not in git. They live in `data/states/` on each machine. Sahil (PM) regenerates them with `scripts/capture_states.py` and hands the files to members directly. The manifest hash proves everyone has the same file.
 
@@ -435,7 +437,7 @@ Two rows per run, because a Parquet file cannot be updated in place. The start r
 
 ### Checkpoints
 
-Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. A checkpoint is evaluated when its step is a multiple of `eval_every`, and the final checkpoint always is; `BASELINE_V1` evaluates every 1.5M steps (decisions.md, 2026-11-14). Checkpoints and per-step logs are never deleted before the showcase.
+Every run saves a model checkpoint every 500,000 steps, with normalization statistics, named by run id and step. A checkpoint is evaluated when its step is a multiple of `eval_every`, and the final checkpoint always is; `BASELINE_V1` evaluates 5 episodes at 7.5M steps and at the end (decisions.md, 2026-11-20). Checkpoints and per-step logs are never deleted before the showcase.
 
 ## Conformance tests
 

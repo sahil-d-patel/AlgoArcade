@@ -22,6 +22,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from algoarcade.backends import fake
 from algoarcade.envs.env import AlgoArcadeEnv
+from algoarcade.games.firered.manifest import STATES
 from algoarcade.logs.schema import TABLES, validate
 from algoarcade.training import runner
 from algoarcade.training.config import PRESETS
@@ -164,6 +165,27 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
         for e in episodes.to_pylist()
         for name in config.reward_weights
     )
+
+
+@pytest.mark.rom
+def test_an_s1_episode_reaches_its_goal_on_the_boulder_badge() -> None:
+    if not FIRERED_ROM.is_file():
+        pytest.skip("Needs the local FireRed ROM")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    after_brock = STATES / "brock_goal.state"
+    if not after_brock.is_file():
+        pytest.skip(f"{after_brock} is missing")
+    env_fn, _, _ = env_factory("firered", "s1", FIRERED.reward_weights, "symbolic")
+    env = env_fn()
+    env.reset(seed=0)
+    assert env.step(5)[4]["goal"] is False
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    unwrapped.backend.load_state(after_brock.read_bytes())
+    assert env.step(5)[4]["goal"] is True
+    env.close()
 
 
 @pytest.mark.parametrize("deterministic", [True, False])
@@ -347,3 +369,18 @@ def test_a_dead_worker_raises_and_marks_the_run_crashed(
         "running",
         "crashed",
     ]
+
+
+def test_a_stop_file_ends_the_run_with_a_checkpoint_at_the_step_reached(tmp_path: Path) -> None:
+    # `runqueue stop` at the results cutoff. The run must keep its step count and a checkpoint.
+    stop = tmp_path / "stop"
+    stop.touch()
+
+    run_dir = train(dataclasses.replace(FAKE, runs_dir=tmp_path / "runs"), stop=stop)
+
+    end = pq.read_table(run_dir / "runs").to_pylist()[-1]
+    assert end["status"] == "finished"
+    assert 0 < end["env_steps"] < FAKE.total_timesteps
+    assert (run_dir / "checkpoints" / f"step_{end['env_steps']}.zip").exists()
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [end["env_steps"]]
