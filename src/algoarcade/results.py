@@ -28,6 +28,7 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
+from algoarcade.games.firered.milestones import MILESTONES
 from algoarcade.logs.writer import run_dir
 from algoarcade.training import stats
 
@@ -87,7 +88,7 @@ def manifest(root: Path) -> dict[str, Any]:
         for path in sorted(root.glob("*/queue.json"))
         for entry in json.loads(path.read_text())
     }
-    runs, left_out = [], []
+    runs, left_out, queued = [], [], set()
     attempts: dict[str, list[dict[str, Any]]] = {}
     for run in sorted(root.glob("run_id=*")):
         run_id = run.name.removeprefix("run_id=")
@@ -97,13 +98,16 @@ def manifest(root: Path) -> dict[str, Any]:
         row = current_row(run)
         launched = LAUNCHED.fullmatch(run_id)
         name = launched[1] if launched else run_id
+        # runqueue.queue.run_name. An owned-trainer run id adds -owned before the seed.
+        queued_as = f"{row['experiment_id']}-{row['arm']}-seed{row['seed']}"
+        queued.add(queued_as)
         entry = {
             "run_id": run_id,
             "experiment_id": row["experiment_id"],
             "arm": row["arm"],
             "seed": row["seed"],
             "status": row["status"],
-            "queue_status": queue.get(name),
+            "queue_status": queue.get(queued_as),
             "steps": logged_steps(run, row),
             "git_commit": row["git_commit"],
             "checkpoint": last_checkpoint(run),
@@ -118,7 +122,7 @@ def manifest(root: Path) -> dict[str, Any]:
     left_out += [
         {"name": name, "reason": f"queue status {status}; no run directory"}
         for name, status in sorted(queue.items())
-        if name not in attempts
+        if name not in queued
     ]
     return {"runs": runs, "left_out": left_out}
 
@@ -162,7 +166,7 @@ def run_result(root: Path, entry: dict[str, Any]) -> tuple[dict[str, Any], tuple
         scored = episodes
     else:
         scored = [e for e in evaluations if e["checkpoint_step"] == checkpoint]
-    logged = (column_max(run, table, "milestone_count") for table in ("steps", "episodes"))
+    furthest = max(column_max(run, table, "milestone_count") for table in ("steps", "episodes"))
     budget = json.loads(row["hyperparameters"]).get("total_timesteps")
     result = {
         "run_id": entry["run_id"],
@@ -172,8 +176,10 @@ def run_result(root: Path, entry: dict[str, Any]) -> tuple[dict[str, Any], tuple
         "queue_status": entry["queue_status"],
         "steps": entry["steps"],
         "checkpoint_step": checkpoint,
-        "furthest_milestone": max(logged),
-        "badge": any(e["badge_count"] > 0 for e in episodes),
+        "furthest_milestone": furthest,
+        # boulder_badge is the last milestone, so the steps table shows a badge won in an
+        # episode the cutoff left open, which has no episodes row.
+        "badge": furthest == len(MILESTONES) or any(e["badge_count"] > 0 for e in episodes),
         **{metric: mean(scored, column) for metric, column in METRICS.items()},
     }
     return result, (row["env_id"], row["start_state"], budget)

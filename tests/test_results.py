@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 
@@ -77,6 +78,8 @@ def frozen(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
             write_run(root, f"E1-pqn-seed{seed}-20261120-020000", "E1", "pqn", seed)
         for seed in range(3):
             write_run(root, f"E5-positive-seed{seed}-20261120-030000", "E5", "positive", seed)
+        # The queue names it E3-rnd-seed0; the owned trainer's run id adds -owned.
+        write_run(root, "E3-rnd-owned-seed0-20261120-010000", "E3", "rnd", 0)
         brock = {"total_timesteps": 100_000_000}
         # A first attempt that crashed and was retried, and a run cut off with no end row.
         write_run(root, "E6-s1-seed0-20261119-010000", "E6", "s1", 0, **brock, end_row=False)
@@ -89,6 +92,7 @@ def frozen(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     (root / "queue" / "queue.json").write_text(
         json.dumps(
             [
+                {"name": "E3-rnd-seed0", "status": "stopped"},
                 {"name": "E6-s1-seed0", "status": "stopped"},
                 {"name": "E6-s0-seed0", "status": "stopped"},
                 {"name": "E6-s0-seed1", "status": "stopped"},
@@ -184,8 +188,11 @@ def test_comparisons_cover_arms_of_one_task_across_experiments(frozen: tuple[Pat
 
     assert set(pairs) == {
         ("E1/ppo", "E1/pqn"),
+        ("E1/ppo", "E3/rnd"),
         ("E1/ppo", "E5/positive"),
+        ("E1/pqn", "E3/rnd"),
         ("E1/pqn", "E5/positive"),
+        ("E3/rnd", "E5/positive"),
     }
     assert pairs["E1/ppo", "E1/pqn"]["same_seeds"]
     assert not pairs["E1/ppo", "E1/pqn"]["exploratory"]
@@ -213,7 +220,7 @@ def test_the_manifest_names_every_queued_run_and_marks_retries(frozen: tuple[Pat
     manifest = json.loads((out / "manifest.json").read_text())
     entries = {e["run_id"]: e for e in manifest["runs"]}
 
-    assert len(entries) == 17
+    assert len(entries) == 18
     retried = entries["E6-s1-seed0-20261119-010000"]
     assert retried["superseded_by"] == "E6-s1-seed0-20261120-010000"
     assert retried["status"] == "running"
@@ -223,6 +230,36 @@ def test_the_manifest_names_every_queued_run_and_marks_retries(frozen: tuple[Pat
     assert all(len(digest) == 64 for e in entries.values() for digest in e["files"].values())
     assert manifest["left_out"] == [
         {"name": "E6-s0-seed1", "reason": "queue status stopped; no run directory"}
+    ]
+    assert entries["E3-rnd-owned-seed0-20261120-010000"]["queue_status"] == "stopped"
+
+
+def test_a_badge_won_in_an_episode_left_open_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Seed 4 wins the badge and seed 0 does not. Seed 4 loses its badge episodes and gains a
+    # step on milestone 9, as when the cutoff ends the run inside the episode that won it.
+    monkeypatch.setattr(fake, "WINDOW_STEPS", ENV_STEPS // 2)
+    monkeypatch.setattr(fake, "EPISODE_STEPS", ENV_STEPS // 8)
+    for seed in (0, 4):
+        write_run(tmp_path, f"E6-s1-seed{seed}-20261120-010000", "E6", "s1", seed, end_row=False)
+    run = run_dir("E6-s1-seed4-20261120-010000", tmp_path)
+    dropped = 0
+    for path in (run / "episodes").glob("*.parquet"):
+        table = pq.read_table(path)
+        kept = table.filter(pc.equal(table["badge_count"], 0))
+        dropped += len(table) - len(kept)
+        pq.write_table(kept, path)
+    steps = pq.read_table(run / "steps")
+    last = steps.slice(len(steps) - 1).to_pylist()[0] | {"milestone_count": 9}
+    pq.write_table(pa.Table.from_pylist([last], steps.schema), run / "steps" / "late.parquet")
+
+    rows = [results.run_result(tmp_path, e)[0] for e in results.manifest(tmp_path)["runs"]]
+
+    assert dropped > 0
+    assert [(r["seed"], r["furthest_milestone"], r["badge"]) for r in rows] == [
+        (0, 8, False),
+        (4, 9, True),
     ]
 
 
