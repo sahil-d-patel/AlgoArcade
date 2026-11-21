@@ -148,13 +148,16 @@ def update(  # noqa: PLR0913 - CleanRL's update loop, with its state passed in
     return {"train/td_loss": float(np.mean(losses)), "train/q_values": float(np.mean(q_values))}
 
 
-def learn(
+def learn(  # noqa: PLR0913 - ppo.Learn's signature
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: ppo.Checkpoint,
     log: RunLog | None,
     logger: Any,
+    stop: Path | None = None,
 ) -> None:
+    """Train until config.total_timesteps, rounded up to a whole rollout, or until the rollout in
+    which the file `stop` first exists, and that rollout's update, as ppo.learn does."""
     pqn = config.pqn
     assert pqn is not None
     torch.manual_seed(config.seed)
@@ -165,7 +168,9 @@ def learn(
     assert isinstance(action_space, spaces.Discrete)
     q_network = QNetwork(obs.shape[1], int(action_space.n)).to(device)
     optimizer = torch.optim.RAdam(q_network.parameters(), lr=pqn.learning_rate)
-    steps = ppo.Steps(config, log, lambda step, due: checkpoint(q_network, obs_rms, step, due))
+    steps = ppo.Steps(
+        config, log, lambda step, due: checkpoint(q_network, obs_rms, step, due), stop
+    )
 
     def after_step(*args: Any) -> None:
         # Afterwards: a checkpoint inside steps() evaluates with the evaluation epsilon.
@@ -221,12 +226,12 @@ def saver(config: TrainConfig, eval_env: VecEnv) -> ppo.Save:
     return save
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig, stop: Path | None = None) -> Path:
     if config.pqn is None:
         raise ValueError("A PQN run needs config.pqn: try the pqn_cartpole preset")
     if config.second_value_head:
         raise ValueError("PQN has no second value head; RND trains on algoarcade.training.ppo")
-    return ppo.run(config, "pqn", "pqn", learn, saver)
+    return ppo.run(config, "pqn", "pqn", learn, saver, stop)
 
 
 def main() -> None:

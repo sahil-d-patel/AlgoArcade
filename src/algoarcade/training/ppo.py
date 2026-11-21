@@ -137,7 +137,9 @@ class Policy(Protocol):
 ObsRms = dict[str, RunningMeanStd] | None
 # The network, its observation statistics, the step, and whether to evaluate it.
 Checkpoint = Callable[[nn.Module, ObsRms, int, bool], None]
-Learn = Callable[[TrainConfig, gym.vector.VectorEnv, Checkpoint, RunLog | None, Any], None]
+Learn = Callable[
+    [TrainConfig, gym.vector.VectorEnv, Checkpoint, RunLog | None, Any, Path | None], None
+]
 # Writes the network to path's checkpoint file(s) and returns what evaluate() plays.
 Save = Callable[[nn.Module, Path, int], PolicyPredictor]
 
@@ -598,12 +600,21 @@ def begin(
 class Steps:
     """collect()'s after_step: counts env steps, logs each step to the Parquet tables and the
     progress scalars, and calls `save(steps, evaluate_it)` every checkpoint_every steps before the
-    last, evaluating where the scheduled step is a multiple of eval_every."""
+    last, evaluating where the scheduled step is a multiple of eval_every. Once the file `stop`
+    exists, the run is done at the end of the current rollout, with no checkpoint before then."""
 
-    def __init__(self, config: TrainConfig, log: RunLog | None, save: Callable[[int, bool], None]):
+    def __init__(
+        self,
+        config: TrainConfig,
+        log: RunLog | None,
+        save: Callable[[int, bool], None],
+        stop: Path | None = None,
+    ):
         self.config = config
         self.log = log
         self.save = save
+        self.stop = stop
+        self.stopping = False
         self.n = 0
         self.next_checkpoint = config.checkpoint_every
         self.progress = Progress(config.n_envs)
@@ -620,7 +631,8 @@ class Steps:
             self.log.step(actions, rewards, dones, taken)
             self.log.begin(np.flatnonzero(dones), current)
         self.progress.step(rewards, dones, taken)
-        if self.next_checkpoint <= self.n < self.config.total_timesteps:
+        self.stopping = self.stopping or (self.stop is not None and self.stop.exists())
+        if self.next_checkpoint <= self.n < self.config.total_timesteps and not self.stopping:
             # The scheduled step, not n, which can overshoot it by up to n_envs - 1.
             due = self.next_checkpoint % self.config.eval_every == 0
             self.next_checkpoint += self.config.checkpoint_every
@@ -629,11 +641,11 @@ class Steps:
 
     @property
     def done(self) -> bool:
-        return self.n >= self.config.total_timesteps
+        return self.n >= self.config.total_timesteps or self.stopping
 
     def dump(self, logger: Any) -> None:
-        """End an update: the final checkpoint, always evaluated, if the budget is spent, then
-        progress.csv's row."""
+        """End an update: the final checkpoint, always evaluated, if the budget is spent or the
+        stop file seen, then progress.csv's row."""
         if self.done:
             self.save(self.n, True)
         self.progress.record(logger)
@@ -642,17 +654,20 @@ class Steps:
         logger.dump(self.n)
 
 
-def learn(
+def learn(  # noqa: PLR0913 - CleanRL's training loop, with checkpoints, logs and stop
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: Checkpoint,
     log: RunLog | None,
     logger: Any,
+    stop: Path | None = None,
 ) -> None:
     """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A
     checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
     runner's does, and once more after the last update. It is evaluated when its scheduled step
-    is a multiple of eval_every, and always at the end."""
+    is a multiple of eval_every, and always at the end. Once the file `stop` exists, training
+    ends after the rollout in which it first sees the file, and that rollout's update, with the
+    final checkpoint."""
     ppo = config.ppo
     torch.manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
@@ -670,7 +685,7 @@ def learn(
         lr=ppo.learning_rate,
         eps=ADAM_EPS,
     )
-    steps = Steps(config, log, lambda step, due: checkpoint(agent, obs_rms, step, due))
+    steps = Steps(config, log, lambda step, due: checkpoint(agent, obs_rms, step, due), stop)
 
     def after_step(
         actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: dict[str, Any]
@@ -720,12 +735,13 @@ def sb3_saver(config: TrainConfig, eval_env: VecEnv) -> Save:
     return save
 
 
-def run(  # noqa: C901 - three refusals, then the run
+def run(  # noqa: C901, PLR0913 - three refusals, then the run
     config: TrainConfig,
     tag: str,
     algorithm: str,
     learn: Learn,
     saver: Callable[[TrainConfig, VecEnv], Save],
+    stop: Path | None = None,
 ) -> Path:
     """Train with `learn` into a run directory laid out as the SB3 runner's: config, Parquet
     tables, progress.csv, eval.csv and checkpoints. `saver` writes each checkpoint, and the
@@ -767,7 +783,7 @@ def run(  # noqa: C901 - three refusals, then the run
         )
     status = "crashed"
     try:
-        learn(config, envs, checkpoint, log, logger)
+        learn(config, envs, checkpoint, log, logger, stop)
         status = "finished"
     except EOFError as error:
         # A worker that died without a Python exception leaves close() waiting on it forever.
@@ -787,10 +803,10 @@ def run(  # noqa: C901 - three refusals, then the run
     return run_dir
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig, stop: Path | None = None) -> Path:
     if config.pqn is not None:
         raise ValueError("This config trains PQN: algoarcade.training.pqn")
-    return run(config, "owned", "ppo", learn, sb3_saver)
+    return run(config, "owned", "ppo", learn, sb3_saver, stop)
 
 
 def main() -> None:

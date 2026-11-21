@@ -431,6 +431,39 @@ def test_a_pqn_arm_trains_pqn(tmp_path: Path) -> None:
     }
 
 
+def test_stop_during_a_run_ends_it_and_every_queued_run_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, webhook: list[dict[str, str]]
+) -> None:
+    # The trainer stands in for a PM typing `stop` at the cutoff while the first run trains.
+    queue_dir = tmp_path / "queue"
+    experiment = write_experiment(tmp_path, "E0", '{"a": {}, "b": {}}', [0])
+    queue.main(["submit", str(experiment)], queue_dir)
+    train_with(
+        monkeypatch,
+        "from pathlib import Path; from algoarcade.runqueue import queue; "
+        f"queue.main(['stop'], Path({str(queue_dir)!r}))",
+    )
+
+    queue.main(["run"], queue_dir)
+
+    assert statuses(queue_dir) == [("stopped", 1), ("stopped", 0)]
+    assert webhook == []
+    assert (queue_dir / queue.STOP).exists()
+
+    queue.main(["run"], queue_dir)
+
+    assert not (queue_dir / queue.STOP).exists()
+
+
+def test_stop_with_no_run_working_stops_a_run_left_running(tmp_path: Path) -> None:
+    # A reboot or Stop-ScheduledTask killed `run` and its trainer before the cutoff.
+    queue_dir = queued(tmp_path, "running", 1)
+
+    queue.main(["stop"], queue_dir)
+
+    assert statuses(queue_dir) == [("stopped", 1)]
+
+
 def test_a_queued_pixels_arm_trains_and_logs_pixels(tmp_path: Path) -> None:
     queue_dir = tmp_path / "queue"
     arms = '{"symbolic": {}, "pixels": {"obs_mode": "pixels"}}'

@@ -8,13 +8,17 @@ trains on the owned PPO trainer; every other config on the SB3 runner (docs/deci
 import sys
 from pathlib import Path
 
+from algoarcade.runqueue.queue import STOP
 from algoarcade.training import ppo, pqn, runner
 from algoarcade.training.config import load_config
 
 # SubprocVecEnv and AsyncVectorEnv with spawn re-import this module in every worker.
 if __name__ == "__main__":
-    config = load_config(Path(sys.argv[1]))
+    path = Path(sys.argv[1])
+    config = load_config(path)
     if config.pqn is not None:
-        print(pqn.train(config))
+        trainer = pqn.train
     else:
-        print((ppo.train if config.second_value_head else runner.train)(config))
+        trainer = ppo.train if config.second_value_head else runner.train
+    # The config is <queue>/configs/<run>.json.
+    print(trainer(config, stop=path.parent.parent / STOP))

@@ -138,11 +138,13 @@ uv run python -m algoarcade.runqueue submit experiments/e5.py --dry-run   # prin
 uv run python -m algoarcade.runqueue submit experiments/e5.py
 uv run python -m algoarcade.runqueue status
 uv run python -m algoarcade.runqueue run
+uv run python -m algoarcade.runqueue stop
 ```
 
 - `submit` queues one run per arm and seed, named `<experiment>-<arm>-seed<n>`: seed 0 of every arm, then seed 1, so a queue cut short leaves the arms with the same seeds. It refuses a name already in the queue. The config is fixed at submit. The code is whatever the clone has checked out when the run starts, and the run records that commit.
 - `run` trains the queued runs in submit order, each in its own process, until none is left. A run that exits with an error is retried once, from step 0, then marked failed, and the next run starts. An attempt still running after 1 hour plus `total_timesteps` / 100 seconds (43 hours for 15M steps; `run --min-steps-per-s` changes the 100) is killed with its workers and counts as a crash. A second `run` exits at once while one is working. Ctrl+C stops the queue and puts the current run back without using up an attempt.
-- `status` prints each run's status (queued, running, done or failed), attempts, start and end time, then a count per experiment.
+- `status` prints each run's status (queued, running, done, failed or stopped), attempts, start and end time, then a count per experiment.
+- `stop` ends the queue at a cutoff, from any terminal while `run` works. Every queued run becomes stopped. The run in progress stops: the trainer saves a checkpoint, evaluates it, writes its end row (status `finished`, with the steps it reached) and exits, and `run` marks it stopped and exits. The Stable-Baselines3 runner stops at its next step; the owned trainer (`algoarcade.training.ppo`, which the queue starts for RND arms) ends after the rollout in which it first sees the file, and that rollout's update. The next `run` clears the stop request. Run with no `run` working, `stop` also marks stopped a run left running by a reboot or a killed `run`.
 
 Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
 
@@ -168,6 +170,19 @@ Register-ScheduledTask -TaskName "AlgoArcade run queue" -Action $action -Trigger
 ```
 
 A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. `-Priority 4` is normal priority; the default, 7, is below normal and would lower the steps per second the runs measure. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. Not run on the box yet.
+
+### Freezing results
+
+The results freeze (OPS-07) fixes the runs every published number comes from. Parquet is git-ignored, so `docs/results-v1/manifest.json` holds each run's SHA-256 per Parquet file, and the tag `results-v1` marks the commit holding it and `headline.json`.
+
+```sh
+uv run python -m algoarcade.runqueue stop        # at the cutoff, on each machine
+uv run python -m algoarcade.results manifest     # every run under data/runs, and queued runs with no directory
+uv run python -m algoarcade.results check        # recompute every checksum: 0 mismatches or exit 1
+uv run poe results                               # check, then write docs/results-v1/headline.json
+```
+
+`manifest` reads every `run_id=*` folder and every `*/queue.json` one level under `--runs` (default `data/runs`), so the Mac's queue folder can sit beside the box's under another name. A run's steps are the most it logged, so a run killed without its end row keeps the count of its last closed file. A run finds its queue entry by experiment, arm and seed, so an owned-trainer run, whose id adds `-owned`, still does. A later attempt of the same queued run supersedes the earlier one, which stays in the manifest but not in the numbers. `headline.json` scores each run on the evaluation episodes of its last checkpoint, groups runs by experiment, arm and start state (IQM, 95% bootstrap interval, n, `exploratory` under five), lists every run with its steps, furthest milestone and badge (milestone 9 counts, so a badge won in an episode the cutoff left open does), and gives the probability of improvement for every pair of groups on the same env, start state and step budget. The same Parquet gives the same bytes.
 
 ## Gamma
 
