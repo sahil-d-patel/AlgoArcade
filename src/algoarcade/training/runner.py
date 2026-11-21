@@ -87,6 +87,8 @@ class CheckpointEval(BaseCallback):
     far goes to progress.csv and W&B as rollout/continues. With archive resets, each rollout
     logs the share of training resets so far that loaded a cell, the number of cells and their
     mean save state size in bytes.
+
+    Training ends early, through the final checkpoint, once the file `stop` exists.
     """
 
     def __init__(
@@ -95,12 +97,14 @@ class CheckpointEval(BaseCallback):
         config: TrainConfig,
         eval_env: VecEnv,
         resets: ArchiveResets | None = None,
+        stop: Path | None = None,
     ) -> None:
         super().__init__()
         self.run_dir = run_dir
         self.config = config
         self.eval_env = eval_env
         self.resets = resets
+        self.stop = stop
         self.next_at = config.checkpoint_every
         self.start = time.time()
         self.continues: dict[int, int] = {}
@@ -109,6 +113,8 @@ class CheckpointEval(BaseCallback):
         for i, info in enumerate(self.locals["infos"]):
             if "continues" in info:
                 self.continues[i] = info["continues"]
+        if self.stop is not None and self.stop.exists():
+            return False
         if self.next_at <= self.num_timesteps < self.config.total_timesteps:
             # The scheduled step, not num_timesteps, which can overshoot it by up to n_envs - 1.
             due = self.next_at % self.config.eval_every == 0
@@ -336,7 +342,7 @@ def stop_workers(*envs: VecEnv) -> None:
             vec.unwrapped.closed = True
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig, stop: Path | None = None) -> Path:
     if config.second_value_head:
         raise ValueError("second_value_head is for the owned trainer: algoarcade.training.ppo")
     run_dir, env_fn, backend, rom_sha1, commit = prepare(config, "sb3")
@@ -382,7 +388,7 @@ def train(config: TrainConfig) -> Path:
     try:
         model.learn(
             total_timesteps=config.total_timesteps,
-            callback=CheckpointEval(run_dir, config, eval_env, resets),
+            callback=CheckpointEval(run_dir, config, eval_env, resets, stop),
         )
         status = "finished"
     except EOFError as error:
