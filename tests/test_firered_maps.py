@@ -17,6 +17,7 @@ from algoarcade.games.firered.maps import (
     MapGrid,
     load_maps,
     place,
+    walkability,
 )
 from algoarcade.games.firered.reader import FireRedReader
 from algoarcade.rom import identify
@@ -71,6 +72,30 @@ def test_blocks_decode_collision_and_behaviour() -> None:
     assert tiles.water.tolist() == [[False, False, False, True, False]]
     assert tiles.ledge.tolist() == [[False, False, False, False, True]]
     assert tiles.walkable.tolist() == [[False, False, True, False, False]]
+
+
+def test_a_tile_off_the_map_reads_from_the_connected_map() -> None:
+    town = grid(4, 3, Connection("up", 1, ROUTE1))
+    town.blocks[0, 0] = 0x0400
+    route = grid(3, 2)
+    route.blocks[1, 2] = 0x0400
+    walkable = walkability({PALLET_TOWN: town, ROUTE1: route, PEWTER_CITY_GYM: grid(2, 2)})
+    assert not walkable((*PALLET_TOWN, 0, 0))
+    assert walkable((*PALLET_TOWN, 1, 0))
+    # The route sits one tile right of the town and two rows above it.
+    assert walkable((*PALLET_TOWN, 1, -1))
+    assert not walkable((*PALLET_TOWN, 3, -1))
+    assert not walkable((*PALLET_TOWN, 0, -1))
+    assert not walkable((*PALLET_TOWN, -1, 0))
+    assert not walkable((*PEWTER_CITY_GYM, 2, 0))
+
+
+def test_pallet_towns_north_exit_reads_walkable_into_route_1(
+    maps: dict[tuple[int, int], MapGrid],
+) -> None:
+    walkable = walkability(maps)
+    assert not walkable((*PALLET_TOWN, 0, 0))
+    assert [walkable((*PALLET_TOWN, x, -1)) for x in range(11, 15)] == [False, True, True, False]
 
 
 @pytest.fixture(scope="module")
