@@ -3,13 +3,15 @@
     uv run python -m algoarcade.runqueue submit <experiment.py> [--dry-run]
     uv run python -m algoarcade.runqueue run
     uv run python -m algoarcade.runqueue status
+    uv run python -m algoarcade.runqueue stop
 
 An experiment file sets EXPERIMENT (its id), BASE (a TrainConfig), ARMS (arm name to a dict of
 TrainConfig fields to replace) and SEEDS. It queues one run per arm and seed, seed by seed, so a
 queue cut short leaves every arm with the same seeds.
 
 The state lives in data/runs/queue/: queue.json (every run, in submit order), configs/<run>.json
-(the resolved config, fixed at submit) and logs/<run>-<attempt>.log (the subprocess's output).
+(the resolved config, fixed at submit), logs/<run>-<attempt>.log (the subprocess's output) and
+stop, which `stop` writes and the next `run` deletes.
 """
 
 import argparse
@@ -101,7 +103,9 @@ MESSAGE_CHARS = 1_900
 TAIL_LINES = 30
 # Run names become file names, on Windows too.
 NAME = re.compile(r"[A-Za-z0-9_.-]+")
-STATUSES = ("queued", "running", "done", "failed")
+STATUSES = ("queued", "running", "done", "failed", "stopped")
+# The trainer polls for this file and ends its run cleanly when it appears; see stop_queue.
+STOP = "stop"
 
 
 def load_experiment(path: Path) -> list[TrainConfig]:
@@ -230,6 +234,7 @@ def run(queue_dir: Path, min_steps_per_s: float = MIN_STEPS_PER_S) -> None:
             # `finally` killing the trainer, which has its own session.
             for number in (signal.SIGTERM, signal.SIGHUP):
                 signal.signal(number, stop)
+        (queue_dir / STOP).unlink(missing_ok=True)
         with edit(queue_dir) as runs:
             # The run lock was free, so the `run` that started these has exited. On Windows its
             # trainer died with it (see start). On macOS and Linux a trainer outlives a `run`
@@ -285,6 +290,8 @@ def attempt(queue_dir: Path, min_steps_per_s: float) -> bool:
     with edit(queue_dir) as runs:
         entry = find(runs, name)
         settle(entry, ok=code == 0)
+        if (queue_dir / STOP).exists() and entry["status"] != "failed":
+            entry["status"] = "stopped"
     ending = "timed out" if code is None else f"exit code {code}"
     print(f"{now()} {name}: {entry['status']} ({ending})")
     report(entry, queue_dir)
@@ -416,6 +423,22 @@ def status(queue_dir: Path) -> None:
         print(f"{experiment}: " + ", ".join(f"{counts[s]} {s}" for s in STATUSES))
 
 
+def stop_queue(queue_dir: Path) -> None:
+    """Mark every queued run stopped and ask the run in progress to stop. Its trainer saves a
+    checkpoint, evaluates it and writes its end row at the step it reached, then `run` marks it
+    stopped and exits with nothing left to train."""
+    with locked(queue_dir / "run.lock", wait=False) as idle, edit(queue_dir) as runs:
+        (queue_dir / STOP).touch()
+        # With no `run` working, a run still marked running lost its trainer to a reboot or a
+        # killed `run`.
+        ending = ("queued", "running") if idle else ("queued",)
+        stopped = [r for r in runs if r["status"] in ending]
+        for entry in stopped:
+            entry |= {"status": "stopped", "ended": now()}
+    running = "" if idle else " The run in progress stops at its next step."
+    print(f"{len(stopped)} runs stopped.{running}")
+
+
 def find(runs: list[dict[str, Any]], name: str) -> dict[str, Any]:
     return next(r for r in runs if r["name"] == name)
 
@@ -444,10 +467,13 @@ def main(argv: list[str], queue_dir: Path = QUEUE_DIR) -> None:
         help="Kill an attempt still running after 1 h + total_timesteps / this.",
     )
     commands.add_parser("status", help="Print every run and its status.")
+    commands.add_parser("stop", help="Stop the run in progress and every queued run.")
     args = parser.parse_args(argv)
     if args.command == "submit":
         submit(args.experiment, queue_dir, dry_run=args.dry_run)
     elif args.command == "run":
         run(queue_dir, args.min_steps_per_s)
+    elif args.command == "stop":
+        stop_queue(queue_dir)
     else:
         status(queue_dir)
