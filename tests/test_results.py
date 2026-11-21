@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 
@@ -247,7 +246,9 @@ def test_a_badge_won_in_an_episode_left_open_counts(
     dropped = 0
     for path in (run / "episodes").glob("*.parquet"):
         table = pq.read_table(path)
-        kept = table.filter(pc.equal(table["badge_count"], 0))
+        kept = pa.Table.from_pylist(
+            [row for row in table.to_pylist() if row["badge_count"] == 0], table.schema
+        )
         dropped += len(table) - len(kept)
         pq.write_table(kept, path)
     steps = pq.read_table(run / "steps")
