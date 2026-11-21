@@ -74,9 +74,10 @@ class _Snapshot:
 
 
 class _Walker:
-    def __init__(self, rng: np.random.Generator) -> None:
+    def __init__(self, rng: np.random.Generator, weights: dict[str, float]) -> None:
         self.episode_id = -1
-        self.rewards = RewardRegistry(COMPONENTS, WEIGHTS)
+        self.weights = weights
+        self.rewards = RewardRegistry(COMPONENTS, weights)
         self.reset(rng)
 
     @property
@@ -105,7 +106,7 @@ class _Walker:
         self.furthest = 0
         self.goal_step: int | None = None
         self.visited = {self.location}
-        self.totals = dict.fromkeys(WEIGHTS, 0.0)
+        self.totals = dict.fromkeys(self.weights, 0.0)
         self.episode_return = 0.0
         self.rewards.reset(self.snapshot())
 
@@ -140,7 +141,7 @@ class _Walker:
         self.story_flags += self.milestone_count - prev.milestone_count
         self.visited.add(self.location)
         reward, info = self.rewards.step(prev, self.snapshot())
-        raw = {c: info[f"reward/{c}"] for c in WEIGHTS}
+        raw = {c: info[f"reward/{c}"] for c in self.weights}
         for c, value in raw.items():
             self.totals[c] += value
         self.episode_return += reward
@@ -176,20 +177,21 @@ def _end_episode(episodes: dict[str, list], w: _Walker, rng: np.random.Generator
     w.reset(rng)
 
 
-def fake_run(  # noqa: PLR0913 the run's identity, its length and its log rate
+def fake_run(  # noqa: PLR0913 the runs row's arm fields and what the arm pays
     run_id: str,
     seed: int,
     env_steps: int,
     step_log_every: int = STEP_LOG_EVERY,
     experiment_id: str = "fake",
     arm: str = "fake",
+    weights: dict[str, float] = WEIGHTS,
 ) -> dict[str, pa.Table]:
     """One synthetic run of `env_steps` training decisions across NUM_ENVS walkers, as the four
     tables. At every checkpoint, EVAL_EPISODES evaluation episodes run on a separate walker; they
-    write per-episode rows only."""
+    write per-episode rows only. `weights` changes what the walk is paid, not where it goes."""
     rng = np.random.default_rng(seed)
-    walkers = [_Walker(rng) for _ in range(NUM_ENVS)]
-    evaluator = _Walker(rng)
+    walkers = [_Walker(rng, weights) for _ in range(NUM_ENVS)]
+    evaluator = _Walker(rng, weights)
     steps: dict[str, list] = {name: [] for name in STEPS.names}
     episodes: dict[str, list] = {name: [] for name in EPISODES.names}
     visits: Counter[tuple[int, int, int, int, int]] = Counter()
@@ -230,7 +232,6 @@ def fake_run(  # noqa: PLR0913 the run's identity, its length and its log rate
                 if evaluator.episode_step == EPISODE_STEPS:
                     evaluation = {"env_idx": 0, "is_eval": True, "checkpoint_step": total}
                     _end_episode(episodes, evaluator, rng, **keys, **evaluation)
-    weights = json.dumps(WEIGHTS, sort_keys=True)
     start = {
         "run_id": run_id,
         "status": "running",
@@ -246,9 +247,11 @@ def fake_run(  # noqa: PLR0913 the run's identity, its length and its log rate
         "obs_mode": "symbolic",
         "frames_per_decision": 24,
         "num_envs": NUM_ENVS,
-        "reward_config_hash": hashlib.sha1(weights.encode()).hexdigest(),
+        "reward_config_hash": hashlib.sha1(
+            json.dumps(weights, sort_keys=True).encode()
+        ).hexdigest(),
         "git_commit": "none",
-        "hyperparameters": json.dumps({"gamma": 0.997, "reward_weights": WEIGHTS}),
+        "hyperparameters": json.dumps({"gamma": 0.997, "reward_weights": weights}),
         "step_log_every": step_log_every,
         "machine": "fake",
         "env_steps": 0,
@@ -283,9 +286,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--root", type=Path, default=Path("data/runs"))
     parser.add_argument("--experiment-id", default="fake")
     parser.add_argument("--arm", default="fake")
+    parser.add_argument(
+        "--weights", type=json.loads, default=WEIGHTS, help="JSON, e.g. '{\"explore\": 0.02}'"
+    )
     args = parser.parse_args(argv)
     run = fake_run(
-        args.run_id, args.seed, args.env_steps, args.step_log_every, args.experiment_id, args.arm
+        args.run_id,
+        args.seed,
+        args.env_steps,
+        args.step_log_every,
+        args.experiment_id,
+        args.arm,
+        args.weights,
     )
     for table, batch in run.items():
         # One file per runs row: a real run writes its start row at launch, its end row at exit.

@@ -64,3 +64,14 @@ uv run python -m algoarcade.viz.timeline --runs data/runs/run_id=<seed 0> data/r
 One row per seed. Schema v1 logs only `milestone_count`, so each point is the first sampled step at or beyond a stage, under `step_log_every` times `num_envs` steps after the true step.
 
 `dashboard/heatmap.qmd` shows both, reading `data/runs/` or the folder in `ALGOARCADE_RUNS`.
+
+## E3, E5 and the reward decomposition
+
+```sh
+uv run python -m algoarcade.viz.e3_e5
+uv run python -m algoarcade.viz.decomposition --run <run_id>
+```
+
+`e3_e5` prints the E3 and E5 tables from finished runs: IQM, 95% interval and seed count per arm, each seed's score, and the probability of improvement from `training.stats`. A run's score is the mean `milestone_count` of its last checkpoint's evaluation episodes, because the arms pay different rewards. A table under five seeds says exploratory. E3's count arm is the shared baseline, so set `COUNT` to its experiment id and arm once OPS-06 runs it.
+
+`decomposition` stacks each component's weighted share of the return per training episode, per 500,000-step window. Its command prints one run's largest gap between the stacked shares and the mean episode return. `dashboard/hacks.qmd` draws it for the baseline and both E5 arms, plays the clips under `data/videos/hacks/` and includes `docs/hack-catalogue.md`.
