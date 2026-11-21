@@ -232,3 +232,33 @@ def test_fake_run_passes_the_schema(tmp_path: Path) -> None:
         "step_512.pkl",
         "step_512.pt",
     ]
+
+
+@pytest.mark.parametrize("rollouts", [1, 2])
+def test_a_stop_file_ends_the_run_after_its_rollout_with_one_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rollouts: int
+) -> None:
+    # As test_ppo's: `runqueue stop` arrives during rollout 1 or 2. Rollout 2 ends on the periodic
+    # checkpoint's step, which the stop must not evaluate twice.
+    stop = tmp_path / "stop"
+    collect = ppo.collect
+    calls = 0
+
+    def collect_then_stop(*args: Any, **kwargs: Any) -> tuple:
+        nonlocal calls
+        calls += 1
+        if calls == rollouts:
+            stop.touch()
+        return collect(*args, **kwargs)
+
+    monkeypatch.setattr(ppo, "collect", collect_then_stop)
+
+    run_dir = pqn.train(dataclasses.replace(FAKE, runs_dir=tmp_path / "runs"), stop=stop)
+
+    assert FAKE.pqn is not None
+    end_step = rollouts * FAKE.n_envs * FAKE.pqn.n_steps
+    end = pq.read_table(run_dir / "runs").to_pylist()[-1]
+    assert (end["status"], end["env_steps"]) == ("finished", end_step)
+    assert (run_dir / "checkpoints" / f"step_{end_step}.pt").exists()
+    episodes = pq.read_table(run_dir / "episodes").to_pylist()
+    assert [e["checkpoint_step"] for e in episodes if e["is_eval"]] == [end_step]
