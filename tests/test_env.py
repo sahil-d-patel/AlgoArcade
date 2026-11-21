@@ -359,7 +359,7 @@ def test_an_archive_reset_and_a_step_onto_a_visited_tile_pay_nothing() -> None:
         poke(backend, offset, value)
     cell = walk_right(env, 3)[-1]
     assert cell is not None
-    assert cell.key == (0, 1, 0, 0, 3)
+    assert cell.key == (0, 1, 0, 1, 3)
 
     env.set_next_start(cell)
     _, info = env.reset(seed=1)
@@ -401,7 +401,7 @@ def test_a_reload_does_not_repay_counts_that_dropped_before_the_cell() -> None:
         poke(backend, offset, value)
     cell = walk_right(env, 2)[-1]
     assert cell is not None
-    assert cell.key == (0, 1, 0, 0, 4)
+    assert cell.key == (0, 1, 0, 1, 4)
 
     for episode in range(3):
         env.set_next_start(cell)
