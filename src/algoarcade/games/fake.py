@@ -19,6 +19,7 @@ class FakeState:
     frame: int
     story_flags: int
     party_level_sum: int
+    badge_flags: int
     badge_count: int
     milestone_count: int
     party_count: int
@@ -35,6 +36,7 @@ class FakeReader:
     def read(self, backend: GameBackend) -> FakeState:
         flags = read_u8(backend, fake.RAM_BASE + fake.FLAGS)
         text = read_u8(backend, fake.RAM_BASE + fake.TEXT)
+        badges = read_u8(backend, fake.RAM_BASE + fake.BADGES)
         return FakeState(
             room=read_u8(backend, fake.RAM_BASE + fake.ROOM),
             x=read_u8(backend, fake.RAM_BASE + fake.PLAYER_X),
@@ -43,7 +45,8 @@ class FakeReader:
             frame=read_u32(backend, fake.RAM_BASE + fake.FRAME),
             story_flags=flags.bit_count(),
             party_level_sum=read_u8(backend, fake.RAM_BASE + fake.LEVEL_SUM),
-            badge_count=read_u8(backend, fake.RAM_BASE + fake.BADGES).bit_count(),
+            badge_flags=badges,
+            badge_count=badges.bit_count(),
             milestone_count=read_u8(backend, fake.RAM_BASE + fake.MILESTONES),
             # The fake has a level sum but no party; it stands for one Pokemon.
             party_count=1,
