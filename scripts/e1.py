@@ -6,6 +6,10 @@
 which arm a run is. A run's score is the mean milestone_count over the evaluation episodes of its
 last checkpoint. The table is the OPS-05 one: IQM, 95% bootstrap interval and n per arm, then the
 probability that a PQN run beats a PPO run. The figure has every seed's curve and each arm's IQM.
+
+algoarcade.viz.comparison prints the same table for E1 beside E2 and E4. This script adds the
+verdict line, the per-seed curves and a refusal when the arms ran different seeds, and it
+tells the arms apart by `algorithm`, so it does not need the baseline's experiment id.
 """
 
 from pathlib import Path
