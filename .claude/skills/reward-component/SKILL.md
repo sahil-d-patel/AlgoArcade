@@ -46,4 +46,14 @@ Prefer terms that pay for a new maximum (a new flag, a first visit this episode,
 
 When you tune a weight, change one weight, state the ratio you are aiming for (badge above everything, events above level), and watch the per-component chart and five minutes of video before trusting the return curve.
 
+## RND
+
+RND is not a component. It lives in the owned trainer, `src/algoarcade/training/ppo.py` (TRN-10), and pays novelty as a second reward with its own value head, so the registry, the `reward_<name>` columns and the frozen schema never see it. It runs only when `int_coef` is not 0.
+
+Its input is `rnd_fields`. Never add a counter, play time or RNG to it: the target network is frozen, so an input that never repeats stays novel forever.
+
+progress.csv logs the scaled intrinsic reward as `rollout/intrinsic_reward_mean`, the intrinsic return's standard deviation as `rollout/intrinsic_return_std`, the predictor's error as `train/rnd_loss`, and `train/intrinsic_value_loss`. A `train/rnd_loss` that never falls usually means an input that never repeats.
+
+The exploit: the agent gains by making new `rnd_fields` values without progressing. Grinding makes a new `party_level_sum` at every level, with no `LEVEL_CAP`. Fainting warps the party to a Pokémon Center, a new tile early on, and `blackout` is off in E3 (`experiments/e3_rnd.py`). Both fade once the predictor has seen the input often. The tests are in `tests/training/test_ppo.py`.
+
 The contract is in `docs/harness-spec.md` under "Reward registry", and the reasoning in `docs/technical-plan.md` under "Reward design".

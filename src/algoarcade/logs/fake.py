@@ -176,8 +176,13 @@ def _end_episode(episodes: dict[str, list], w: _Walker, rng: np.random.Generator
     w.reset(rng)
 
 
-def fake_run(
-    run_id: str, seed: int, env_steps: int, step_log_every: int = STEP_LOG_EVERY
+def fake_run(  # noqa: PLR0913 the run's identity, its length and its log rate
+    run_id: str,
+    seed: int,
+    env_steps: int,
+    step_log_every: int = STEP_LOG_EVERY,
+    experiment_id: str = "fake",
+    arm: str = "fake",
 ) -> dict[str, pa.Table]:
     """One synthetic run of `env_steps` training decisions across NUM_ENVS walkers, as the four
     tables. At every checkpoint, EVAL_EPISODES evaluation episodes run on a separate walker; they
@@ -229,8 +234,8 @@ def fake_run(
     start = {
         "run_id": run_id,
         "status": "running",
-        "experiment_id": "fake",
-        "arm": "fake",
+        "experiment_id": experiment_id,
+        "arm": arm,
         "algorithm": "random",
         "trainer": "fake",
         "seed": seed,
@@ -276,8 +281,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--env-steps", type=int, default=2_000_000)
     parser.add_argument("--step-log-every", type=int, default=STEP_LOG_EVERY)
     parser.add_argument("--root", type=Path, default=Path("data/runs"))
+    parser.add_argument("--experiment-id", default="fake")
+    parser.add_argument("--arm", default="fake")
     args = parser.parse_args(argv)
-    run = fake_run(args.run_id, args.seed, args.env_steps, args.step_log_every)
+    run = fake_run(
+        args.run_id, args.seed, args.env_steps, args.step_log_every, args.experiment_id, args.arm
+    )
     for table, batch in run.items():
         # One file per runs row: a real run writes its start row at launch, its end row at exit.
         rows_per_file = 1 if table == "runs" else ROWS_PER_FILE
