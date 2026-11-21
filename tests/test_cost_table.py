@@ -102,7 +102,7 @@ def llm(root: Path, run_id: str, model: str, goal_step: int | None, dollars: flo
 
 @pytest.fixture
 def table(tmp_path: Path) -> dict[str, dict[str, Any]]:
-    # Seed 0 first succeeds at 1M steps, its evaluation ending at 3,800 s; seed 1 at 500k, ending
+    # Seed 0 first succeeds at 1M steps, its evaluation ending at 3,700 s; seed 1 at 500k, ending
     # at 2,100 s. The rnd arm never succeeds.
     rl(tmp_path, "ppo0", "ppo", [(500_000, None, 1_800.0), (1_000_000, 300, 3_700.0)])
     rl(tmp_path, "ppo1", "ppo", [(500_000, 200, 2_000.0), (500_000, 400, 2_100.0)])
