@@ -8,7 +8,7 @@ paths: src/algoarcade/training/**, src/algoarcade/runqueue/**, experiments/**
 
 A result we cannot reproduce or compare is not a result. These rules exist so that every number in the writeup traces to runs that differ in exactly one way.
 
-Change one factor from the baseline. The baseline is `BASELINE_V1` in `src/algoarcade/training/config.py` (preset `baseline_v1`): the `firered` preset trained for 15M steps, with a checkpoint every 500,000 steps and 20 sampled evaluation episodes every 1.5M steps and at the end. An experiment imports it by name, `from algoarcade.training.config import BASELINE_V1`, and changes one field. If you need to change two things, that is two experiments. A test pins every field, so changing the baseline fails CI until the test changes too; say why in the pull request.
+Change one factor from the baseline. The baseline is `BASELINE_V1` in `src/algoarcade/training/config.py` (preset `baseline_v1`): the `firered` preset trained for 15M steps, with a checkpoint every 500,000 steps and 5 sampled evaluation episodes at 7.5M steps and at the end (docs/decisions.md, 2026-11-20). `experiments/trn08_baseline.py` keeps TRN-08's 20 episodes every 1.5M steps through an override. An experiment imports it by name, `from algoarcade.training.config import BASELINE_V1`, and changes one field. If you need to change two things, that is two experiments. A test pins every field, so changing the baseline fails CI until the test changes too; say why in the pull request.
 
 Set gamma explicitly. The library default of 0.99 gives a horizon of about 100 steps, and our episodes are thousands of steps long. An agent at the default does not crash. It does not learn. We start at 0.997.
 
@@ -100,6 +100,16 @@ done
 
 `--archive` starts training episodes from cells the run already reached (ENV-09; docs/harness-spec.md, Archive resets); `--archive-p` is the chance per reset, default 0.5. It is off in the baseline, and evaluation never uses it. progress.csv gains `rollout/archive_share`, `rollout/archive_cells` and `rollout/archive_bytes_per_cell` (zlib-compressed), and the episodes table fills `archive_start`.
 
+## The owned trainers
+
+`src/algoarcade/training/ppo.py` (TRN-07) is PPO derived from CleanRL's ppo.py, with SB3's update. Its run ids carry `-owned-` before the seed, and its runs table logs `trainer` as `owned`. Its checkpoints are SB3 zips with the VecNormalize pickle beside them, so `PPO.load` and `VecNormalize.load` read them as above. `--second-value-head` with a nonzero `--int-coef` trains RND (reward-component skill, RND). It refuses `norm_reward`, `archive` and any `obs_mode` other than `symbolic`; those runs train on the SB3 runner.
+
+`src/algoarcade/training/pqn.py` (TRN-09) is PQN derived from CleanRL's pqn.py, on the owned PPO file's rollout, logging and evaluation. Its run ids carry `-pqn-`, its runs table logs `trainer` `owned` and `algorithm` `pqn`, and its checkpoints are `step_<n>.pt` beside the VecNormalize pickle. It refuses `second_value_head` and the three settings PPO refuses. CartPole check: `uv run python -m algoarcade.training.pqn pqn_cartpole --seed 0`.
+
+The queue trains a config with a `pqn` block on PQN, one with `second_value_head` on the owned PPO, and every other on the SB3 runner (`src/algoarcade/runqueue/train.py`). SB3 stays the default (docs/decisions.md, 2026-11-14). `runqueue stop` ends the SB3 runner at its next step, and the owned trainers after the rollout in which they first see the stop file and that rollout's update. Each saves one final checkpoint and evaluates it.
+
+Compare arms on the same trainer, or say the trainer is a second factor. E1 and E3 say so: their PQN and RND arms train on the owned trainers and the baseline on SB3.
+
 ## The run queue
 
 On the box, runs go through `algoarcade.runqueue`. An experiment file under `experiments/` sets `EXPERIMENT`, `BASE` (a `TrainConfig`), `ARMS` (arm name to the fields it replaces) and `SEEDS`; commit it, then:
@@ -110,6 +120,8 @@ uv run python -m algoarcade.runqueue submit experiments/<file>.py
 uv run python -m algoarcade.runqueue status
 ```
 
-The nightly task runs `uv run python -m algoarcade.runqueue run`. A crash is retried once from step 0, then marked failed and posted to the channel. A run whose config sets `second_value_head`, which RND's `int_coef` needs, trains on the owned trainer (`algoarcade.training.ppo`); every other run on the SB3 runner. Set `track=True` in `BASE` for W&B, where the experiment id is the group. The file format, queue directory, webhook variable and nightly task are in docs/setup.md, Training box.
+The nightly task runs `uv run python -m algoarcade.runqueue run`. A crash is retried once from step 0, then marked failed and posted to the channel. The config picks the trainer (The owned trainers, above). Set `track=True` in `BASE` for W&B, where the experiment id is the group. The file format, queue directory, webhook variable and nightly task are in docs/setup.md, Training box.
+
+The shared baseline arm of E1 to E4 is `experiments/baseline.py`: experiment id `baseline`, arm `v1`. Each E1 to E4 file uses its `BASE` and seeds and queues only its other arms. E5 uses the same `BASE` on seeds 0 to 2 and queues both its arms. Submit the files in the order in docs/setup.md, Training box, so E6 from S1 trains before E6 from S0. `uv run python scripts/check_runs.py` checks every finished game run's per-step logs, checkpoint and Parquet schema.
 
 The experiment table and the compute budget are in `docs/technical-plan.md` under "Experiments". TRN-03 owns this skill.
