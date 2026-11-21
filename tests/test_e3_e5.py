@@ -66,3 +66,10 @@ def test_an_arm_with_no_finished_runs_is_listed_and_not_compared() -> None:
     text = e3_e5.table("E3", {"none": five, "rnd": []}, [("rnd", "none")])
     assert "| rnd | 0 | | | |" in text
     assert "| rnd over none | no finished runs in rnd |" in text
+
+
+def test_arms_on_different_seeds_are_flagged() -> None:
+    a = [(seed, 1.0) for seed in range(5)]
+    b = [(seed, 2.0) for seed in range(5, 10)]
+    text = e3_e5.table("E3", {"none": a, "count": b}, [("count", "none")])
+    assert "exploratory: seed sets differ |" in text

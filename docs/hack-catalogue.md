@@ -1,8 +1,8 @@
 # Hack catalogue
 
-Every way we know for an agent to earn reward without making progress: what it does, the term that pays, the fix and its test, and whether a run has shown it. As of Nov 20 no E3 or E5 run exists and no clip is under `data/videos/hacks/`, so every clip cell says "no clip yet". Sources: `tests/test_exploits.py`, `docs/harness-spec.md` (Reward registry), `docs/video-review.md` and `docs/decisions.md`.
+Every way we know for an agent to earn reward without making progress: what it does, the term that pays, the fix and its test, and whether a run has shown it. As of Nov 20 no E3 or E5 run exists and only oscillation has a clip. Sources: `tests/test_exploits.py`, `docs/harness-spec.md` (Reward registry), `docs/video-review.md` and `docs/decisions.md`.
 
-An entry is **observed** when a run shows it, with the run id and a clip, or **not observed**, with the test that bounds it. To add a clip, render the checkpoint into `data/videos/hacks/<exploit>.mp4`, named by the first column, and put the path in the row; the dashboard's Hacks page plays every clip in that folder:
+An entry is **observed** when a run shows it, with the run id and a clip, or **not observed**, with the test that bounds it. To add a clip, render the checkpoint into `data/videos/hacks/<exploit>.mp4`, named by the first column, and put the path in the row; the dashboard's Reward decomposition page plays every clip in that folder:
 
 ```
 uv run python -m algoarcade.viz.render --checkpoint <run dir>/checkpoints/step_<n>.zip --seed 0 --out data/videos/hacks/<exploit>.mp4
@@ -14,7 +14,7 @@ Each has a policy in `tests/test_exploits.py` that tries it and must stay under 
 
 | Exploit | What the agent does | Pays | Fix | Status | Run | Clip |
 |---|---|---|---|---|---|---|
-| oscillation | Steps back and forth between two tiles | explore | The visited set is permanent for the episode and keyed on the full location, so the pair pays two first visits. `test_exploit_two_tile_oscillation` | Observed, and the fix held: on Super Mario Land seed 0 walked between x_tile 31 and 32 on 431 steps, and steps 677 to 2,048 paid 0.06 in all (video review, week of Nov 8) | `super_mario_land-level_1_1-seed0-20261104-210903`, `step_2031616` | no clip yet |
+| oscillation | Steps back and forth between two tiles | explore | The visited set is permanent for the episode and keyed on the full location, so the pair pays two first visits. `test_exploit_two_tile_oscillation` | Observed, and the fix held: on Super Mario Land seed 0 walked between x_tile 31 and 32 on 431 steps, and steps 677 to 2,048 paid 0.06 in all (video review, week of Nov 8). From the per-step trace; no person has watched the clip yet (docs/video-review.md) | `super_mario_land-level_1_1-seed0-20261104-210903`, `step_2031616` | `data/videos/hacks/oscillation.mp4` (steps 678 to 1,637, 0:45 to 1:49) |
 | menu spam | Opens a text box and mashes buttons that do nothing | Nothing by default: no term pays a screen change. `anti_spam` charges it when on | Start is not in the action set, and novelty keys on coordinates, never the screen. `test_exploit_menu_spam` (bound 0) | Not observed: no text box opened in the six FireRed review episodes | | no clip yet |
 | faint loop | Loses a battle so the whiteout restores full HP | heal | heal never pays a rise from a fainted party, a party size change or one bad read, and is off by default. `test_exploit_faint_loop` (heal pays 0) | Not observed | | no clip yet |
 | reset farming | Collects a reward paid at the start of an episode, or after a continue | Any term that read the start state as a gain | Every term returns 0 on the reset step, and a progress best is set only by two agreeing reads. `test_exploit_instant_reset` (100 starts pay 0), `test_zero_on_reset_and_on_a_no_op_step`. A Super Mario Land continue pays nothing: `test_the_preset_plays_through_a_game_over_without_paying_for_it` | Not observed: the one judgeable continue in the Nov 8 review was followed by 20 steps that paid 0.02, one new tile | | no clip yet |
@@ -39,5 +39,5 @@ No test bounds these. E5's plus-penalties arm turns heal and the four penalties 
 | battle dodging | Flees or avoids every battle so the party never whites out, as in RL-emerald | blackout (-5.0) | Nothing stops it; it is why blackout is off |
 | standing still | Stops moving, or walks loops longer than 30 steps | anti_loop (-0.01) | Standing still is free |
 | NPC avoidance | Never talks to an NPC or reads a sign | anti_spam (-0.02) | Talking risks the charge |
-| level grinding for novelty | Grinds levels: each level is a new `party_level_sum`, with no cap | RND (#86, not merged) | Decays once the predictor has seen the value; RND is outside the registry and schema-v1 |
-| faint warping for novelty | Faints to be warped to a Pokémon Center, a new tile early in training; blackout is off in E3 | RND (#86, not merged) | Same |
+| level grinding for novelty | Grinds levels: each level is a new `party_level_sum`, with no cap | RND (#86) | Decays once the predictor has seen the value; RND is outside the registry and schema-v1 |
+| faint warping for novelty | Faints to be warped to a Pokémon Center, a new tile early in training; blackout is off in E3 | RND (#86) | Same |

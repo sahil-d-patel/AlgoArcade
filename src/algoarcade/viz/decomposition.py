@@ -147,6 +147,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     con = connect(args.root)
     starts, _, _ = decompose(con, [args.run])
+    if not starts:
+        parser.error(f"no training episodes for run {args.run}")
     gap = largest_gap(con, args.run)
     print(f"{args.run}: {len(starts)} windows, largest |components - return| {gap:.3g}")  # noqa: T201
 

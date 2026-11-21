@@ -80,6 +80,8 @@ def table(title: str, arms: dict[str, Scores], comparisons: list[tuple[str, str]
             result = stats.describe_improvement(
                 [score for _, score in arms[x]], [score for _, score in arms[y]]
             )
+            if sorted(seed for seed, _ in arms[x]) != sorted(seed for seed, _ in arms[y]):
+                result += ", exploratory: seed sets differ"
         lines.append(f"| {x} over {y} | {result} |")
     return "\n".join(lines) + "\n"
 
