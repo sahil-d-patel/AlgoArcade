@@ -1,0 +1,29 @@
+---
+title: Agents
+---
+
+RL checkpoints and an LLM attempt playing the same start state side by side, one frame per button press. Frame 0 is the start state, the same screen in every cell. A cell that reached its goal or ran out of presses holds its last frame. Each clip comes from `python -m algoarcade.viz.video_grid` and is copied from `data/videos/grid/`.
+
+```{python}
+#| output: asis
+from algoarcade.viz.site import DASHBOARD
+
+clips = sorted((DASHBOARD / "videos" / "grid").glob("*.mp4"))
+for clip in clips:
+    print(f"### {clip.stem}\n")
+    print(f'```{{=html}}\n<video controls src="videos/grid/{clip.name}" data-external="1"></video>\n```\n')
+if not clips:
+    print("No grid clip in `data/videos/grid/` yet.")
+```
+
+## What each success cost
+
+```{python}
+#| output: asis
+from algoarcade.viz import cost_table
+from algoarcade.viz.site import connect
+
+con = connect()
+print(cost_table.markdown(cost_table.rows(con)))
+print(f"\n{cost_table.caption(con)}")
+```

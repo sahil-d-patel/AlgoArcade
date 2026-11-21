@@ -11,6 +11,7 @@ from algoarcade.agent.tools import Field, Game, advance_dialogue, navigate_to, s
 from algoarcade.backends import fake
 from algoarcade.backends.base import Button, GameBackend
 from algoarcade.backends.fake import FakeBackend
+from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeField, FakeReader, FakeState
 
 # The player starts at (1, 1). Walls force detours to the right half, (1, 3) and (1, 4) are
@@ -208,3 +209,42 @@ def test_every_press_is_traced_with_the_state_after_it(tmp_path: Path) -> None:
     assert [line["button"] for line in lines] == [None, "RIGHT", "RIGHT"]
     assert [line["state"]["x"] for line in lines] == [1, 2, 3]
     assert result.presses == len(lines) - 1
+
+
+class Stutters(FakeBackend):
+    """Not ready from the end of each press until the next frame, as FireRed is while it
+    rewrites a party entry."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ready = True
+
+    def step(self, frames: int = 1) -> None:
+        super().step(frames)
+        self.ready = True
+
+    def press(self, buttons: Iterable[Button], hold: int = 8, release: int = 16) -> None:
+        super().press(buttons, hold, release)
+        self.ready = False
+
+
+class StuttersReader(FakeReader):
+    def read(self, backend: GameBackend) -> FakeState:
+        assert isinstance(backend, Stutters)
+        if not backend.ready:
+            raise StateNotReady("rewriting")
+        return super().read(backend)
+
+
+@pytest.mark.usefixtures("walled")
+def test_the_trace_counts_the_frames_a_read_waited_before_each_press(tmp_path: Path) -> None:
+    trace = tmp_path / "presses.jsonl"
+    with trace.open("w") as file:
+        played = Game(Stutters(), StuttersReader(), FakeField(), file)
+        played.record(None)
+        navigate_to(played, 3, 1)
+    lines = [json.loads(line) for line in trace.read_text().splitlines()]
+    # The trace's read after a press fails; navigate_to's read then waits one frame, which the
+    # next press's line counts.
+    assert [line["state"] for line in lines[1:]] == [None, None]
+    assert [line["idle_frames"] for line in lines] == [0, 0, 1]
