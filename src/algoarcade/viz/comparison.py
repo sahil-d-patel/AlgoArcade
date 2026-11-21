@@ -26,8 +26,8 @@ from plotly.colors import DEFAULT_PLOTLY_COLORS
 from algoarcade.training import stats
 from algoarcade.viz.site import RUNS, connect
 
-# The experiment id of the shared baseline arm (PPO, symbolic, count, archive off, from S1).
-# OPS-06 (#34) queues it and has not named it yet: a guess, to check against `runqueue status`.
+# The experiment id of the shared baseline arm (PPO, symbolic, count, archive off, from S1), as
+# experiments/baseline.py queues it.
 BASELINE = "baseline"
 EXPERIMENTS = ("E1", "E2", "E4")
 METRIC = "milestone_count"
