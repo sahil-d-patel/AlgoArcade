@@ -10,6 +10,7 @@ from pathlib import Path
 
 import tyro
 
+from algoarcade.envs.env import ObsMode
 from algoarcade.games.super_mario_land import rewards as sml_rewards
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS
 
@@ -82,6 +83,10 @@ class TrainConfig:
     (TRN-10). 0 trains plain PPO. Needs second_value_head and an env_id in RND_GAMES."""
     int_gamma: float = 0.99
     """With int_coef: the intrinsic return's discount. ppo.gamma stays the extrinsic one."""
+    obs_mode: ObsMode = "symbolic"
+    """With a game env_id: AlgoArcadeEnv's observation (docs/harness-spec.md, AlgoArcadeEnv).
+    The SB3 policy gives the frames of pixels and both to its NatureCNN; the owned trainer has
+    no CNN and refuses them."""
 
     def __post_init__(self) -> None:
         if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:

@@ -138,10 +138,11 @@ def test_second_value_head(second: bool, outputs: int) -> None:
 def test_sb3_checkpoint_acts_like_the_agent() -> None:
     env = make_vec_env(partial(fake_env, {"explore": 0.1}), n_envs=1)
     model = runner.build_model(FAKE, env)
-    agent = ppo.Agent(139, 6, second_value_head=True)
+    agent = ppo.Agent(274, 6, second_value_head=True)
     model.policy.load_state_dict(ppo.sb3_state_dict(agent))
-    x = torch.randn(8, 139)
-    obs = {"vector": x[:, :4], "visited": x[:, 4:].reshape(8, 1, 9, 15)}
+    x = torch.randn(8, 274)
+    # CombinedExtractor joins the keys in the space's sorted order: grid, then vector.
+    obs = {"grid": x[:, :270].reshape(8, 2, 9, 15), "vector": x[:, 270:]}
     logits = agent.actor(x)
     distribution = model.policy.get_distribution(obs).distribution
     assert isinstance(distribution, torch.distributions.Categorical)
@@ -298,7 +299,7 @@ def exiting_env(weights: dict[str, float]) -> gym.Env:
 def test_a_worker_that_exits_raises_and_marks_the_run_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def factory(_env_id: str, _start: str, weights: dict[str, float]) -> tuple:
+    def factory(_env_id: str, _start: str, weights: dict[str, float], _obs_mode: str) -> tuple:
         return partial(exiting_env, dict(weights)), "fake", ""
 
     monkeypatch.setattr(runner, "env_factory", factory)
@@ -311,10 +312,16 @@ def test_a_worker_that_exits_raises_and_marks_the_run_crashed(
     ]
 
 
+def test_pixels_are_refused_because_the_agent_has_no_cnn(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="SB3 runner"):
+        ppo.train(dataclasses.replace(FAKE, obs_mode="pixels", runs_dir=tmp_path))
+    assert not any(tmp_path.iterdir())
+
+
 def test_a_dead_worker_raises_and_marks_the_run_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def factory(_env_id: str, _start: str, weights: dict[str, float]) -> tuple:
+    def factory(_env_id: str, _start: str, weights: dict[str, float], _obs_mode: str) -> tuple:
         return partial(crashing_env, dict(weights)), "fake", ""
 
     monkeypatch.setattr(runner, "env_factory", factory)

@@ -407,3 +407,22 @@ def test_a_terminated_run_takes_its_trainer_with_it(tmp_path: Path, name: str) -
     with pytest.raises(ProcessLookupError):
         os.kill(trainer_pid, 0)
     assert statuses(queue_dir) == [("running", 1)]
+
+
+def test_a_queued_pixels_arm_trains_and_logs_pixels(tmp_path: Path) -> None:
+    queue_dir = tmp_path / "queue"
+    arms = '{"symbolic": {}, "pixels": {"obs_mode": "pixels"}}'
+    queue.main(["submit", str(write_experiment(tmp_path, "E2", arms, [0]))], queue_dir)
+
+    queue.main(["run"], queue_dir)
+
+    assert [r["status"] for r in queue.load(queue_dir)] == ["done", "done"]
+    rows = [
+        row
+        for path in (tmp_path / "runs").glob("*/runs/*.parquet")
+        for row in pq.read_table(path, columns=["arm", "obs_mode", "status"]).to_pylist()
+    ]
+    assert sorted((r["arm"], r["obs_mode"]) for r in rows if r["status"] == "finished") == [
+        ("pixels", "pixels"),
+        ("symbolic", "symbolic"),
+    ]

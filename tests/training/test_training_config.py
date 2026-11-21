@@ -90,6 +90,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "second_value_head": False,
         "int_coef": 0.0,
         "int_gamma": 0.99,
+        "obs_mode": "symbolic",
     }
 
 

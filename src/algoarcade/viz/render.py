@@ -120,7 +120,9 @@ class Policy:
 
     def __iter__(self) -> Iterator[Shot]:
         weights = self.config.reward_weights
-        make, _, _ = env_factory(self.config.env_id, self.config.start_state, weights, render=True)
+        make, _, _ = env_factory(
+            self.config.env_id, self.config.start_state, weights, self.config.obs_mode, render=True
+        )
         env = make()
         model = PPO.load(self.checkpoint, device=self.device)
         normalize = None
