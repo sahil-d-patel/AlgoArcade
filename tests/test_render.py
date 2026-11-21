@@ -32,9 +32,9 @@ FAKE = dataclasses.replace(
 )
 
 
-def bars(image: np.ndarray, game_height: int) -> int:
-    """Bands of non-background rows in the bar column, below the two header lines."""
-    top = game_height + render.PAD + 2 * render.LINE
+def bars(image: np.ndarray, game_height: int, lines: int) -> int:
+    """Bands of non-background rows in the bar column, below the text lines."""
+    top = game_height + render.PAD + lines * render.LINE
     column = image[top:, render.LABEL_WIDTH + 1]
     drawn = (column != render.BACKGROUND).any(axis=1)
     return int(np.count_nonzero(drawn[1:] & ~drawn[:-1]) + drawn[0])
@@ -52,12 +52,13 @@ def test_ten_frames_show_one_bar_per_enabled_component():
         for name, weight in WEIGHTS.items():
             totals[name] += weight * info[f"reward/{name}"]
         screen = env.get_wrapper_attr("backend").screen()
-        image = render.frame(screen, step, episode_return, info, totals)
+        lines = (f"press {step}  return {episode_return:.2f}", str(info["location"]))
+        image = render.frame(render.Shot(screen, lines, totals))
         height, width = screen.shape[0] * render.SCALE, screen.shape[1] * render.SCALE
         assert image.shape[1] == width
         assert image.shape[0] % 16 == 0
         assert width % 16 == 0
-        assert bars(image, height) == len(WEIGHTS)
+        assert bars(image, height, len(lines)) == len(WEIGHTS)
 
 
 @pytest.fixture(scope="module")
@@ -73,11 +74,11 @@ def read_back(path: Path) -> tuple[int, tuple[int, int]]:
     return sum(1 for _ in reader), size
 
 
-def test_an_episode_writes_one_frame_per_step(checkpoint: Path, tmp_path: Path):
+def test_an_episode_writes_the_start_and_one_frame_per_step(checkpoint: Path, tmp_path: Path):
     out = tmp_path / "episode.mp4"
     render.render(checkpoint, out, seed=0)
     frames, (width, height) = read_back(out)
-    assert frames == FAKE_STEP_BUDGET
+    assert frames == 1 + FAKE_STEP_BUDGET
     assert width % 16 == 0
     assert height % 16 == 0
 
@@ -93,7 +94,7 @@ def test_grid_puts_four_seeds_side_by_side(checkpoint: Path, tmp_path: Path):
     _, (width, height) = read_back(tmp_path / "one.mp4")
     frames, size = read_back(tmp_path / "grid.mp4")
     assert len(results) == 4
-    assert frames == FAKE_STEP_BUDGET
+    assert frames == 1 + FAKE_STEP_BUDGET
     assert size == (4 * width, height)
 
 

@@ -56,9 +56,11 @@ class Field(Protocol):
 @dataclass
 class Game:
     """One emulator, its reader and its field. With a trace open, every press appends a JSON
-    line {"button", "time", "state"}: the button, the wall clock and the state after it, null
-    when not ready. The server writes the start state first, with button null, its process id
-    as "pid" and the SHA-256 of the emulator's save state as "start_sha256".
+    line {"button", "time", "state", "idle_frames"}: the button, the wall clock, the state after
+    it (null when not ready) and the frames `read` waited since the previous line, which a
+    replay must step before this press. The server writes the start state first, with button
+    null, its process id as "pid" and the SHA-256 of the emulator's save state as
+    "start_sha256".
 
     With `capture` as well, the first press with a ready state at least `capture_every` presses
     after the last save (or the start) saves the emulator to `capture/<press number>.state`, and
@@ -72,6 +74,7 @@ class Game:
     capture_every: int = 0
     presses: int = 0
     saved_at: int = 0
+    idle_frames: int = 0
 
     def press(self, button: Button) -> None:
         self.backend.press([button])
@@ -89,6 +92,7 @@ class Game:
             "button": None if button is None else button.name,
             "time": time.time(),
             "state": state,
+            "idle_frames": self.idle_frames,
         } | extra
         due = self.presses - self.saved_at >= self.capture_every
         if self.capture is not None and state is not None and due:
@@ -96,6 +100,7 @@ class Game:
             (self.capture / name).write_bytes(self.backend.save_state())
             self.saved_at = self.presses
             line["saved"] = name
+        self.idle_frames = 0
         self.trace.write(json.dumps(line, separators=(",", ":")) + "\n")
         self.trace.flush()
 
@@ -106,6 +111,7 @@ class Game:
                 return self.reader.read(self.backend)
             except StateNotReady:
                 self.backend.step(1)
+                self.idle_frames += 1
         return self.reader.read(self.backend)
 
 
