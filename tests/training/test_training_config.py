@@ -92,6 +92,7 @@ def test_baseline_v1_pins_every_field() -> None:
         "int_gamma": 0.99,
         "obs_mode": "symbolic",
         "hold": None,
+        "pqn": None,
     }
 
 

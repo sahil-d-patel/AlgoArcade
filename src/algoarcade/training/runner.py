@@ -31,12 +31,12 @@ import torch
 import tyro
 from gymnasium import spaces
 from stable_baselines3 import PPO
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.logger import CSVOutputFormat, KVWriter, Logger
 from stable_baselines3.common.preprocessing import is_image_space
+from stable_baselines3.common.type_aliases import PolicyPredictor
 from stable_baselines3.common.vec_env import (
     SubprocVecEnv,
     VecEnv,
@@ -162,7 +162,7 @@ def eval_rng(config: TrainConfig) -> Iterator[None]:
 
 
 def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to write it
-    model: BaseAlgorithm,
+    model: PolicyPredictor,
     eval_env: VecEnv,
     config: TrainConfig,
     run_dir: Path,
@@ -170,7 +170,7 @@ def evaluate(  # noqa: PLR0913 - one value per eval.csv column, plus where to wr
     start: float,
 ) -> float:
     """Play the checkpoint's evaluation episodes from the eval seed, append the row to eval.csv
-    and return the mean return. Both trainers evaluate through this function. The env and,
+    and return the mean return. Every trainer evaluates through this function. The env and,
     inside eval_rng, the sampled actions start from the eval seed, so an evaluation never moves
     training and each episode replays from its checkpoint (algoarcade.viz.render --eval-episode)."""
     eval_env.seed(config.seed + EVAL_SEED_OFFSET)
@@ -354,6 +354,8 @@ def stop_workers(*envs: VecEnv) -> None:
 def train(config: TrainConfig, stop: Path | None = None) -> Path:
     if config.second_value_head:
         raise ValueError("second_value_head is for the owned trainer: algoarcade.training.ppo")
+    if config.pqn is not None:
+        raise ValueError("This config trains PQN: algoarcade.training.pqn")
     run_dir, env_fn, backend, rom_sha1, commit = prepare(config, "sb3")
     run_id = run_dir.name.removeprefix("run_id=")
     game = config.env_id in GAMES
