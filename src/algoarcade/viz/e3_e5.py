@@ -16,9 +16,8 @@ import duckdb
 from algoarcade.training import stats
 from algoarcade.viz.site import RUNS, connect
 
-# E3's count arm is the shared baseline OPS-06 queues, so it may run under another experiment
-# id. Point this at it once it has run.
-COUNT = ("E3", "count")
+# E3's count arm is the shared baseline arm, queued by experiments/baseline.py.
+COUNT = ("baseline", "v1")
 E3 = {"none": ("E3", "none"), "count": COUNT, "rnd": ("E3", "rnd")}
 E5 = {"positive-only": ("E5", "positive-only"), "plus-penalties": ("E5", "plus-penalties")}
 

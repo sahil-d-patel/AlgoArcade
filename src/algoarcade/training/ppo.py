@@ -556,17 +556,20 @@ class Progress:
             logger.record("rollout/continues", sum(self.continues.values()))
 
 
-def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logging
+def learn(  # noqa: PLR0913, PLR0915 - CleanRL's training loop, with checkpoints, logs and stop
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     checkpoint: Callable[[Agent, dict[str, RunningMeanStd] | None, int, bool], None],
     log: RunLog | None,
     logger: Any,
+    stop: Path | None = None,
 ) -> None:
     """Train until config.total_timesteps, rounded up to a whole rollout as SB3 does. A
     checkpoint falls every checkpoint_every steps inside a rollout, before its update, as the SB3
     runner's does, and once more after the last update. It is evaluated when its scheduled step
-    is a multiple of eval_every, and always at the end."""
+    is a multiple of eval_every, and always at the end. Once the file `stop` exists, training
+    ends after the rollout in which it first sees the file, and that rollout's update, with the
+    final checkpoint."""
     ppo = config.ppo
     n = config.n_envs
     torch.manual_seed(config.seed)
@@ -598,11 +601,12 @@ def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logg
     steps = 0
     next_checkpoint = config.checkpoint_every
     progress = Progress(n)
+    stopping = False
 
     def after_step(
         actions: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: dict[str, Any]
     ) -> None:
-        nonlocal steps, next_checkpoint
+        nonlocal steps, next_checkpoint, stopping
         steps += n
         current = unbatch(infos, n)
         taken = step_infos(infos, current, dones)
@@ -612,14 +616,15 @@ def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logg
         progress.step(rewards, dones, taken)
         if rnd is not None:
             rnd.inputs.append(rnd_input(taken))
-        if next_checkpoint <= steps < config.total_timesteps:
+        stopping = stopping or (stop is not None and stop.exists())
+        if next_checkpoint <= steps < config.total_timesteps and not stopping:
             # The scheduled step, not `steps`, which can overshoot it by up to n_envs - 1.
             due = next_checkpoint % config.eval_every == 0
             next_checkpoint += config.checkpoint_every
             checkpoint(agent, obs_rms, steps, due)
 
     start = time.time()
-    while steps < config.total_timesteps:
+    while steps < config.total_timesteps and not stopping:
         rollout, obs = collect(envs, agent, obs_rms, obs, ppo.n_steps, after_step)
         with torch.no_grad():
             last_value = agent.get_value(torch.as_tensor(obs, device=device))
@@ -633,7 +638,7 @@ def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logg
             agent, optimizer, rollout, advantages, ppo, rng, intrinsic
         ).items():
             logger.record(key, value)
-        if steps >= config.total_timesteps:
+        if steps >= config.total_timesteps or stopping:
             checkpoint(agent, obs_rms, steps, True)
         progress.record(logger)
         if intrinsic is not None:
@@ -646,7 +651,9 @@ def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logg
         logger.dump(steps)
 
 
-def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 - three refusals, then the run
+def train(  # noqa: C901, PLR0915 - three refusals, then the run
+    config: TrainConfig, stop: Path | None = None
+) -> Path:
     if config.norm_reward:
         raise ValueError("The owned trainer does not normalise rewards; the plan never does")
     if config.archive:
@@ -692,7 +699,7 @@ def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 - three refusals,
         )
     status = "crashed"
     try:
-        learn(config, envs, checkpoint, log, logger)
+        learn(config, envs, checkpoint, log, logger, stop)
         status = "finished"
     except EOFError as error:
         # A worker that died without a Python exception leaves close() waiting on it forever.

@@ -165,14 +165,14 @@ FIRERED = dataclasses.replace(
     reward_weights=dict(DEFAULT_WEIGHTS),
 )
 
-# TRN-08's baseline, which experiments import and change one field of: 15M steps, 20 sampled
-# evaluation episodes every 1.5M steps. tests/training/test_training_config.py pins every field;
-# why each value: docs/decisions.md, 2026-11-14.
+# TRN-08's baseline, which experiments import and change one field of: 15M steps, 5 sampled
+# evaluation episodes at 7.5M steps and at the end. tests/training/test_training_config.py pins
+# every field; why each value: docs/decisions.md, 2026-11-14 and 2026-11-20.
 BASELINE_V1 = dataclasses.replace(
     FIRERED,
     total_timesteps=15_000_000,
-    eval_every=1_500_000,
-    eval_episodes=20,
+    eval_every=7_500_000,
+    eval_episodes=5,
     eval_deterministic=False,
 )
 
