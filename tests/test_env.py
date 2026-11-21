@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import zlib
 from collections.abc import Iterable
@@ -464,3 +465,40 @@ def test_a_reload_does_not_repay_counts_that_dropped_before_the_cell() -> None:
             _, reward, _, _, info = env.step(action)
             assert reward == WEIGHTS["time"]
         assert info["milestone_count"] == 4
+
+
+class TornReader(FakeReader):
+    """Read number `torn_at` comes back high by `delta`; the RAM, and so the save state, stay real."""
+
+    def __init__(self, torn_at: int, delta: dict[str, int]) -> None:
+        self.reads, self.torn_at, self.delta = 0, torn_at, delta
+
+    def read(self, backend: GameBackend) -> FakeState:
+        self.reads += 1
+        state = super().read(backend)
+        return dataclasses.replace(state, **self.delta) if self.reads == self.torn_at else state
+
+
+def test_one_torn_read_on_the_step_that_reaches_a_cell_is_not_its_best() -> None:
+    backend = FakeBackend()
+    # Read 1 is the reset, reads 2 to 4 are three steps right; step 3 reaches the cell at x 4.
+    env = AlgoArcadeEnv(
+        backend,
+        TornReader(torn_at=4, delta={"badge_count": 1}),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    cell = walk_right(env, 3)[-1]
+    assert cell is not None
+    assert cell.key == (0, 1, 0, 0, 0)
+    assert cell.bests["badge"] == 0
+
+    env.set_next_start(cell)
+    env.reset(seed=1)
+    env.step(5)
+    poke(backend, fake.BADGES, 0b1)
+    assert sum(env.step(5)[4]["reward/badge"] for _ in range(3)) == 1.0

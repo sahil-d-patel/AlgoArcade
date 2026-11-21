@@ -155,7 +155,7 @@ class AlgoArcadeEnv(gym.Env[dict[str, Any], np.int64]):
                         key,
                         zlib.compress(self.backend.save_state(), CELL_COMPRESSION),
                         frozenset(self._visited),
-                        self._rewards.cell_bests(prev, self._state),
+                        self._rewards.bests(),
                         self._milestone_count,
                     )
         return self._observe(self._state), float(reward), False, truncated, info

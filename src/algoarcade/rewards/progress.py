@@ -39,7 +39,9 @@ class NewMaximum(RewardComponent[Progress]):
     episode; only reader validation (ENV-05, ENV-08) prevents that.
 
     An archive reset passes `best`, the term's best when the cell was reached, so the episode
-    starts from it: the loaded count can sit below it, and climbing back pays nothing."""
+    starts from it: the loaded count can sit below it, and climbing back pays nothing. An archive
+    start's first step pays nothing, so a rise the cell's best had not yet confirmed is not paid
+    again on every reset into the cell."""
 
     def __init__(  # noqa: PLR0913 two bounds on reads and two on payment
         self,
@@ -64,21 +66,13 @@ class NewMaximum(RewardComponent[Progress]):
     def best(self) -> int | None:
         return self._best
 
-    def confirmed_best(self, prev: Progress, curr: Progress) -> int | None:
-        """The best once `curr` is confirmed, for an archive cell reached on the step from `prev`.
-        A rise this step's guards refuse as a bad read stays out of it."""
-        prev_value, value = self._count(prev), self._count(curr)
-        if self._best is None or max(prev_value, value) > self._maximum:
-            return self._best
-        if value - prev_value > self._max_rise:
-            return self._best
-        return max(self._best, value)
-
     @override
     def reset(self, state: Progress, best: int | None = None) -> None:
         self._best = best
         self._first_step = True
-        self._settling = False
+        # An archive start's first step only confirms what the loaded state holds: the cell's best
+        # can lag it by a rise that was one read from confirmed when the cell was saved.
+        self._settling = best is not None
 
     @override
     def score(self, prev: Progress, curr: Progress) -> float:
