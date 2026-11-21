@@ -1,4 +1,4 @@
-"""The experiment files under experiments/: each arm differs from the shared baseline arm only in\nits factor."""
+"""The experiment files: each arm differs from the shared baseline arm only in its factor."""
 
 import dataclasses
 import runpy
@@ -15,6 +15,8 @@ EXPERIMENTS = Path(__file__).resolve().parents[1] / "experiments"
 FROM_S1 = dataclasses.replace(BASELINE_V1, start_state="s1", track=True)
 # The shared baseline arm's experiment id is "baseline"; algoarcade.viz.comparison reads it.
 E1_TO_E5 = ("baseline", "E1", "E2", "E3", "E4", "E5")
+LABELS = ("experiment_id", "arm", "seed")
+E6 = {"archive": True, "total_timesteps": 100_000_000, "eval_every": 10_000_000}
 
 
 def test_e3_queues_none_and_rnd_on_the_baseline_seeds() -> None:
@@ -49,17 +51,12 @@ def test_e5_lists_the_components_on_in_each_arm_with_three_seeds() -> None:
         )
 
 
-SHARED_ARM_LABELS = ("experiment_id", "arm", "seed")
-E6 = {"archive": True, "total_timesteps": 100_000_000, "eval_every": 10_000_000}
-
-
 def changed(config: TrainConfig) -> dict[str, Any]:
     """The fields that differ from FROM_S1, leaving out the queue's labels."""
     return {
         field.name: getattr(config, field.name)
         for field in dataclasses.fields(config)
-        if field.name not in SHARED_ARM_LABELS
-        and getattr(config, field.name) != getattr(FROM_S1, field.name)
+        if field.name not in LABELS and getattr(config, field.name) != getattr(FROM_S1, field.name)
     }
 
 

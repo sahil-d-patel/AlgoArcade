@@ -281,7 +281,7 @@ The rates come from the Mac benchmark in `docs/benchmarks.md` (OPS-02, PR #52, c
 
 Evaluation costs more than training on S1. `BASELINE_V1` plays 20 sampled episodes at each of 10 evaluations, and an episode that misses the badge lasts the whole 71,680-decision budget (87,040 from S0). That is 34.7 hours a run against 4.1 hours of training.
 
-The table is in queue order, one machine, with the queue starting November 21. PQN, pixels and RND are not benchmarked and use the PPO rate.
+The table is in queue order on one machine. The finish dates assume the queue starts November 21, a guess. PQN, pixels and RND are not benchmarked and use the PPO rate.
 
 | Block | Runs | Steps each | Hours a run (train + evaluate) | Box-days, redo from the box benchmark | Finishes |
 |---|---|---|---|---|---|
@@ -296,7 +296,7 @@ The table is in queue order, one machine, with the queue starting November 21. P
 
 That is 72 box-days, 12 of them training. Results freeze November 22, so no arm finishes. A run takes 38.9 of the 42.7 hours the queue allows a 15M-step run before it kills it, so the box starts `run` with `--min-steps-per-s 50` (84 hours).
 
-If an arm cannot finish by November 22, cut in this order. Each cut applies to every arm of an experiment at once, before any of its runs starts.
+If an arm cannot finish by November 22, cut in this order. The first two change every E1 to E5 arm at once, before any of their runs starts, so the arms stay comparable.
 
 1. Evaluation: 5 episodes at 7.5M steps and at the end. A run drops to 5.9 hours and the 36 runs of E1 to E5 to 8.8 box-days. This changes `BASELINE_V1`, which TRN-08 fixed, so it is the Lead PM's decision.
 2. Steps: ablation runs drop from 15M to 10M before any arm loses seeds.
