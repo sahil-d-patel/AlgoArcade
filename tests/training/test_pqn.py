@@ -5,6 +5,7 @@ import csv
 import dataclasses
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -161,7 +162,7 @@ def test_the_ppo_trainer_refuses_a_pqn_config(tmp_path: Path) -> None:
     [({"second_value_head": True}, "no second value head"), ({"obs_mode": "pixels"}, "no CNN")],
 )
 def test_pqn_refuses_what_it_cannot_train(
-    tmp_path: Path, change: dict[str, object], match: str
+    tmp_path: Path, change: dict[str, Any], match: str
 ) -> None:
     with pytest.raises(ValueError, match=match):
         pqn.train(dataclasses.replace(FAKE, runs_dir=tmp_path, **change))
