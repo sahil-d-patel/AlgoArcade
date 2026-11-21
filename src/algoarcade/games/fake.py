@@ -65,6 +65,12 @@ FEATURES: dict[str, Callable[[FakeState], float]] = {
 }
 
 
+def walkable(location: tuple[int, int, int]) -> bool:
+    room, x, y = location
+    rows = fake.ROOMS[room]
+    return 0 <= y < len(rows) and 0 <= x < fake.WIDTH and rows[y][x] != "#"
+
+
 class FakeField:
     """The toy game's overworld for the agent's tools. It has no battles, text or menus."""
 

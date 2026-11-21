@@ -646,11 +646,13 @@ def learn(  # noqa: PLR0915 - CleanRL's training loop, with checkpoints and logg
         logger.dump(steps)
 
 
-def train(config: TrainConfig) -> Path:
+def train(config: TrainConfig) -> Path:  # noqa: C901, PLR0915 - three refusals, then the run
     if config.norm_reward:
         raise ValueError("The owned trainer does not normalise rewards; the plan never does")
     if config.archive:
         raise ValueError("Archive resets (ENV-09) run on the SB3 runner only")
+    if config.obs_mode != "symbolic":
+        raise ValueError("The owned trainer has no CNN: pixels and both train on the SB3 runner")
     run_dir, env_fn, backend, rom_sha1, commit = runner.prepare(config, "owned")
     game = config.env_id in runner.GAMES
     # Wall clock, as the schema means it: perf_counter stops while macOS sleeps.
