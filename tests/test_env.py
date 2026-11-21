@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import zlib
 from collections.abc import Iterable
@@ -374,6 +375,57 @@ def test_an_archive_reset_and_a_step_onto_a_visited_tile_pay_nothing() -> None:
     assert info["location"] == (0, 3, 1)
 
 
+def test_a_reset_into_a_cell_reached_on_a_rising_step_pays_nothing() -> None:
+    # The level sum rises on the step that reaches the cell. Its term confirms a rise one step
+    # late, so the cell's bests must already include it or every reset into the cell repays it.
+    backend = FakeBackend()
+    env = AlgoArcadeEnv(
+        backend,
+        FakeReader(),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    walk_right(env, 2)
+    poke(backend, fake.LEVEL_SUM, 9)
+    cell = walk_right(env, 1)[-1]
+    assert cell is not None
+    assert cell.key == (0, 1, 0, 0, 0)
+
+    env.set_next_start(cell)
+    env.reset(seed=1)
+    _, _, _, _, info = env.step(5)
+    raw = {name: info[f"reward/{name}"] for name in WEIGHTS}
+    assert raw == dict.fromkeys(WEIGHTS, 0.0) | {"time": 1.0}
+
+
+def test_a_cell_reached_on_a_one_frame_high_read_keeps_the_real_best() -> None:
+    # A count that reads far too high for one frame is refused by its term's max_rise guard. The
+    # cell reached on that step must not store the bad read as its best, or a reset into the
+    # cell would silence the term until the count passed it.
+    backend = FakeBackend()
+    env = AlgoArcadeEnv(
+        backend,
+        FakeReader(),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    first = walk_right(env, 2)[0]
+    assert first is not None
+    # Five badges at once: the badge term refuses a rise of more than one between reads.
+    poke(backend, fake.BADGES, 0b11111)
+    cell = walk_right(env, 1)[-1]
+    assert cell is not None
+    assert cell.bests["badge"] == first.bests["badge"]
+
+
 COUNTS = (fake.FLAGS, fake.LEVEL_SUM, fake.BADGES, fake.MILESTONES)
 
 
@@ -413,3 +465,42 @@ def test_a_reload_does_not_repay_counts_that_dropped_before_the_cell() -> None:
             _, reward, _, _, info = env.step(action)
             assert reward == WEIGHTS["time"]
         assert info["milestone_count"] == 4
+
+
+class TornReader(FakeReader):
+    """Read number `torn_at` reports `badge_count` badges; the RAM, and so the save state, stay real."""
+
+    def __init__(self, torn_at: int, badge_count: int) -> None:
+        self.reads, self.torn_at, self.badge_count = 0, torn_at, badge_count
+
+    def read(self, backend: GameBackend) -> FakeState:
+        self.reads += 1
+        state = super().read(backend)
+        if self.reads != self.torn_at:
+            return state
+        return dataclasses.replace(state, badge_count=self.badge_count)
+
+
+def test_one_torn_read_on_the_step_that_reaches_a_cell_is_not_its_best() -> None:
+    backend = FakeBackend()
+    # Read 1 is the reset, reads 2 to 4 are three steps right; step 3 reaches the cell at x 4.
+    env = AlgoArcadeEnv(
+        backend,
+        TornReader(torn_at=4, badge_count=1),
+        RewardRegistry(COMPONENTS, WEIGHTS),
+        backend.save_state(),
+        50,
+        FEATURES,
+        archive=True,
+    )
+    env.reset(seed=0)
+    cell = walk_right(env, 3)[-1]
+    assert cell is not None
+    assert cell.key == (0, 1, 0, 0, 0)
+    assert cell.bests["badge"] == 0
+
+    env.set_next_start(cell)
+    env.reset(seed=1)
+    env.step(5)
+    poke(backend, fake.BADGES, 0b1)
+    assert sum(env.step(5)[4]["reward/badge"] for _ in range(3)) == 1.0
