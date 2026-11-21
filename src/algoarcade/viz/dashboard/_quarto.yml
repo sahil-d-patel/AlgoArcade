@@ -12,6 +12,8 @@ website:
     left:
       - index.qmd
       - heatmap.qmd
+      - comparison.qmd
+      - hacks.qmd
   page-footer:
     center: "Commit {{< var commit >}}, rendered {{< var date >}}, runs read: {{< var runs >}}"
 
