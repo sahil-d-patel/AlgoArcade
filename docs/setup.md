@@ -146,6 +146,19 @@ uv run python -m algoarcade.runqueue stop
 - `status` prints each run's status (queued, running, done, failed or stopped), attempts, start and end time, then a count per experiment.
 - `stop` ends the queue at a cutoff, from any terminal while `run` works. Every queued run becomes stopped. The run in progress stops: the trainer saves a checkpoint, evaluates it, writes its end row (status `finished`, with the steps it reached) and exits, and `run` marks it stopped and exits. The Stable-Baselines3 runner stops at its next step; the owned trainer (`algoarcade.training.ppo`, which the queue starts for RND arms) ends after the rollout in which it first sees the file, and that rollout's update. The next `run` clears the stop request. Run with no `run` working, `stop` also marks stopped a run left running by a reboot or a killed `run`.
 
+The experiments go in this order (OPS-06, #34), so the arms that share the baseline train first and E6 from S1 trains ahead of E6 from S0. `e1_pqn.py` arrives with #95; submit it in its place if #95 has merged, or after the others if not.
+
+```sh
+uv run python -m algoarcade.runqueue submit experiments/baseline.py
+uv run python -m algoarcade.runqueue submit experiments/e4_archive.py
+uv run python -m algoarcade.runqueue submit experiments/e1_pqn.py
+uv run python -m algoarcade.runqueue submit experiments/e3_rnd.py
+uv run python -m algoarcade.runqueue submit experiments/e2_observations.py
+uv run python -m algoarcade.runqueue submit experiments/e5_penalties.py
+uv run python -m algoarcade.runqueue submit experiments/e6_brock_s1.py
+uv run python -m algoarcade.runqueue submit experiments/e6_brock_s0.py
+```
+
 Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
 
 The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash. On Windows a trainer dies with its `run`, however `run` ends. On macOS and Linux, Ctrl+C, SIGTERM, a closed terminal (SIGHUP) or an error in `run` stops the trainer: SIGINT to its process group, then SIGKILL after 10 seconds. A `run` killed with SIGKILL leaves it training.

@@ -25,13 +25,8 @@ class StartState:
     name: str
     sha256: str
     goal: Callable[[FireRedState], bool]
-    # None means the run sets it, as the spec says for S0, S1 and the gym states.
+    # None means the run sets it, as the spec says for the gym states.
     step_budget: int | None
-
-
-def no_goal(_state: FireRedState) -> bool:
-    """S0 and S1 run for the furthest milestone, so the episode ends only on its step budget."""
-    return False
 
 
 def left_house(state: FireRedState) -> bool:
@@ -65,16 +60,26 @@ def left_forest_north(state: FireRedState) -> bool:
 
 
 def boulder_badge(state: FireRedState) -> bool:
+    """FLAG_BADGE01_GET (0x820), the last milestone."""
     return bool(state.badge_flags & 1)
 
 
 # Map ids are (group, number) from data/maps/map_groups.json in pret/pokefirered.
+#
+# s0's and s1's budgets are 11.2 and 11.3 times the scripted playthrough's decisions to
+# brock_goal (docs/harness-spec.md, Start states and segments).
 MANIFEST = (
     StartState(
-        "s0", "1182e804a325282810cb810dfb6a354b199ca56f0b90f99cf08c049ff5290bbf", no_goal, None
+        "s0",
+        "1182e804a325282810cb810dfb6a354b199ca56f0b90f99cf08c049ff5290bbf",
+        boulder_badge,
+        87_040,
     ),
     StartState(
-        "s1", "ef6d2693b4d567092a3c89bbff5d2df1b8f8103e8124fb2e9d4e13221a56d2b2", no_goal, None
+        "s1",
+        "ef6d2693b4d567092a3c89bbff5d2df1b8f8103e8124fb2e9d4e13221a56d2b2",
+        boulder_badge,
+        71_680,
     ),
     # The same bytes as s0.
     StartState(

@@ -1,10 +1,7 @@
 """E5, do penalties help or hurt (TRN-10, #36). docs/technical-plan.md, Experiments.
 
 The factor is the reward set, on BASELINE_V1 from S1. Three seeds per arm, so the result is
-exploratory. Both arms are queued here, 6 runs, as OPS-06 counts them; the technical plan's
-compute budget puts E5 on the Mac.
-
-S1 has no step budget yet, so these runs stop at startup. Submit them once OPS-06 sets one.
+exploratory. Both arms are queued here, 6 runs, as OPS-06 counts them.
 """
 
 import dataclasses

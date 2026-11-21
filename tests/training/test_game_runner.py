@@ -22,6 +22,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from algoarcade.backends import fake
 from algoarcade.envs.env import AlgoArcadeEnv
+from algoarcade.games.firered.manifest import STATES
 from algoarcade.logs.schema import TABLES, validate
 from algoarcade.training import runner
 from algoarcade.training.config import PRESETS
@@ -164,6 +165,27 @@ def test_firered_logs_the_readers_values(tmp_path: Path) -> None:
         for e in episodes.to_pylist()
         for name in config.reward_weights
     )
+
+
+@pytest.mark.rom
+def test_an_s1_episode_reaches_its_goal_on_the_boulder_badge() -> None:
+    if not FIRERED_ROM.is_file():
+        pytest.skip("Needs the local FireRed ROM")
+    pytest.importorskip(
+        "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
+    )
+    after_brock = STATES / "brock_goal.state"
+    if not after_brock.is_file():
+        pytest.skip(f"{after_brock} is missing")
+    env_fn, _, _ = env_factory("firered", "s1", FIRERED.reward_weights, "symbolic")
+    env = env_fn()
+    env.reset(seed=0)
+    assert env.step(5)[4]["goal"] is False
+    unwrapped = env.unwrapped
+    assert isinstance(unwrapped, AlgoArcadeEnv)
+    unwrapped.backend.load_state(after_brock.read_bytes())
+    assert env.step(5)[4]["goal"] is True
+    env.close()
 
 
 @pytest.mark.parametrize("deterministic", [True, False])
