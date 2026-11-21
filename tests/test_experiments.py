@@ -10,6 +10,7 @@ import pytest
 from algoarcade.rewards.registry import DEFAULT_WEIGHTS, WEIGHTS
 from algoarcade.runqueue.queue import load_experiment, run_name
 from algoarcade.training.config import BASELINE_V1, TrainConfig
+from algoarcade.viz import comparison, e3_e5
 
 EXPERIMENTS = Path(__file__).resolve().parents[1] / "experiments"
 FROM_S1 = dataclasses.replace(BASELINE_V1, start_state="s1", track=True)
@@ -80,11 +81,22 @@ def test_an_ops06_experiment_changes_only_its_factor_from_s1(
 def test_every_e1_to_e5_file_runs_on_s1_from_the_same_base() -> None:
     bases = {path.name: runpy.run_path(str(path)) for path in EXPERIMENTS.glob("*.py")}
     s1 = {name for name, module in bases.items() if module["EXPERIMENT"] in E1_TO_E5}
-    assert {"baseline.py", "e3_rnd.py", "e4_archive.py", "e5_penalties.py"} <= s1
+    assert {
+        "baseline.py",
+        "e2_observations.py",
+        "e3_rnd.py",
+        "e4_archive.py",
+        "e5_penalties.py",
+    } <= s1
     assert all(bases[name]["BASE"] == FROM_S1 for name in s1)
     assert {
         config.start_state for name in s1 for config in load_experiment(EXPERIMENTS / name)
     } == {"s1"}
+
+
+def test_the_tables_read_the_shared_baseline_arm_by_its_queued_labels() -> None:
+    labels = {(c.experiment_id, c.arm) for c in load_experiment(EXPERIMENTS / "baseline.py")}
+    assert labels == {e3_e5.COUNT} == {(comparison.BASELINE, "v1")}
 
 
 def test_trn08_keeps_the_evaluation_its_runs_were_queued_with() -> None:
