@@ -1,6 +1,7 @@
 """Save states along an LLM attempt, kept for E8's curriculum only when it reaches its goal."""
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import Iterable
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any
 
 from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 
+from algoarcade.agent.curriculum import keep
 from algoarcade.agent.loop import Run, run
 from algoarcade.agent.tools import Game
 from algoarcade.backends.base import Button, GameBackend
@@ -118,3 +120,22 @@ def test_a_save_due_on_a_press_that_is_not_ready_moves_to_the_next_ready_one(
     # next and not ready, so 8 saves.
     assert [i for i, line in enumerate(lines) if "saved" in line] == [4, 8]
     assert sorted(p.name for p in tmp_path.glob("*.state")) == ["00004.state", "00008.state"]
+
+
+def test_a_torn_read_on_a_saved_press_is_not_its_best(tmp_path: Path) -> None:
+    start = dataclasses.asdict(FakeReader().read(FakeBackend()))
+    torn = start | {"x": 2, "badge_count": 5, "milestone_count": 9}
+    presses = [
+        {"state": start, "start_sha256": ""},
+        {"state": start | {"x": 2}},
+        {"state": torn, "saved": "00002.state"},
+        {"state": start | {"x": 2}},
+    ]
+    (tmp_path / "captured").mkdir()
+    (tmp_path / "captured" / "00002.state").write_bytes(b"")
+    keep(presses, tmp_path / "captured", tmp_path / "out", 3, lambda s: FakeState(**s), "fake", 2)
+    (state,) = json.loads((tmp_path / "out" / "manifest.json").read_text(encoding="utf-8"))[
+        "states"
+    ]
+    assert state["bests"]["badge"] == 0
+    assert state["bests"]["milestone"] == 0
