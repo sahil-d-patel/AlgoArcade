@@ -7,12 +7,12 @@ power-on. Check yours against the hashes with:
     uv run python -m algoarcade.games.firered.manifest DIR        # e.g. a capture_states --out
 """
 
-import hashlib
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from algoarcade.backends.mgba import state_sha256
 from algoarcade.games.firered.reader import FireRedState
 
 # Captured on FireRed (USA) rev 1. A rev 1 state on a rev 0 ROM has not been tried.
@@ -23,7 +23,7 @@ STATES = Path(__file__).resolve().parents[4] / "data" / "states"
 @dataclass(frozen=True)
 class StartState:
     name: str
-    sha256: str
+    sha256: str  # state_sha256 of the file, not the file's own SHA-256
     goal: Callable[[FireRedState], bool]
     # None means the run sets it, as the spec says for the gym states.
     step_budget: int | None
@@ -71,20 +71,20 @@ def boulder_badge(state: FireRedState) -> bool:
 MANIFEST = (
     StartState(
         "s0",
-        "1182e804a325282810cb810dfb6a354b199ca56f0b90f99cf08c049ff5290bbf",
+        "fd6dbb1af079fad68164ca909e064565894752fdbddf15c217b2edd3675a0ed8",
         boulder_badge,
         87_040,
     ),
     StartState(
         "s1",
-        "ef6d2693b4d567092a3c89bbff5d2df1b8f8103e8124fb2e9d4e13221a56d2b2",
+        "87c56871f090f15239310ad54cebfc1e622b052213f72f0596719c3e1e4e483e",
         boulder_badge,
         71_680,
     ),
     # The same bytes as s0.
     StartState(
         "seg_01_house",
-        "1182e804a325282810cb810dfb6a354b199ca56f0b90f99cf08c049ff5290bbf",
+        "fd6dbb1af079fad68164ca909e064565894752fdbddf15c217b2edd3675a0ed8",
         left_house,
         2048,
     ),
@@ -92,26 +92,26 @@ MANIFEST = (
     # the edge of town and Route 1 cannot be entered.
     StartState(
         "seg_02_pallet",
-        "f9b44a259496b85647ef3f6641f9684983b21aa691151a5f6bb4f027d0cc1001",
+        "76487009819a0547a760fd3792a8961d24f3f2f791b7e921f74a22edf6333f29",
         entered_route1,
         4096,
     ),
     StartState(
         "seg_03_rival",
-        "d64505bd62dfc764abe982b6dc9c0f174ca84195613e87539d92861fb00cd145",
+        "d765defaa9f6a5f1bae3f289ddc735734aefe76cebf3a6cae1631348b5b47b04",
         won_rival_battle,
         3072,
     ),
     # The same bytes as seg_02_pallet's goal state: the first frame on Route 1.
     StartState(
         "seg_04_route1",
-        "cfeb7e5396c4bc8635cd68c53a4c2cb20c47c4ad6a38e11ae654ba5ca22c5700",
+        "3fc6bd10e30b73a1f3b16630bde80a9c047258cebe82ed69a45cdb683c073d57",
         entered_viridian,
         6144,
     ),
     StartState(
         "seg_05_forest",
-        "77cb5f4db82e77a66b50a76e4371b24f154ed0e50eb8bcbd091835368264f814",
+        "356f9ad13565560c29818a396c37d6a6924e37f89741b7fc4bf8d05cb2b54177",
         left_forest_north,
         8192,
     ),
@@ -119,13 +119,13 @@ MANIFEST = (
     # forest. Pressing A every turn wins the Brock battle, so label results from these states.
     StartState(
         "gym_door",
-        "ed1ff580b2b01aaaebd7407bec6843dbd714e85e55ad3398874c2501f2f9a318",
+        "c960cb7373eeb1c9770ea8a38c31c8688625967d721151e21ce963e0c220b2cf",
         boulder_badge,
         None,
     ),
     StartState(
         "brock",
-        "74c3d3b78fc610989906f8de9d64c4443ce5deb5cea58845976fa444c2c3c58f",
+        "263a03c58fc47db834e9bbef148cdd5642bcf626a75cce5a47e1e847e9e694c0",
         boulder_badge,
         None,
     ),
@@ -138,7 +138,7 @@ def check(directory: Path = STATES) -> list[str]:
         path = directory / f"{entry.name}.state"
         if not path.is_file():
             lines.append(f"MISSING   {entry.name}  {path}")
-        elif hashlib.sha256(path.read_bytes()).hexdigest() != entry.sha256:
+        elif state_sha256(path.read_bytes()) != entry.sha256:
             lines.append(f"MISMATCH  {entry.name}  {path}")
         else:
             lines.append(f"OK        {entry.name}")

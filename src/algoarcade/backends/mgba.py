@@ -1,3 +1,6 @@
+import hashlib
+import struct
+import zlib
 from collections.abc import Iterable
 from importlib import import_module
 from pathlib import Path
@@ -17,6 +20,42 @@ IWRAM_SIZE = 0x8000
 SAVESTATE_SCREENSHOT = 1
 SAVESTATE_SAVEDATA = 2
 SAVESTATE_RTC = 8
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Byte ranges of the core state (GBASerializedState in mGBA 0.10's
+# include/mgba/internal/gba/serialize.h; the Mac compared the 0.10.2 and 0.10.5 headers on #102)
+# that state_sha256 zeroes: the built-in BIOS's checksum, the audio state and samples, and the
+# sound I/O registers 0x060-0x0AF, FIFOs included. At s0 the win64 bundle's 0.10.2 and Homebrew's
+# 0.10.5 differed only inside them.
+UNHASHED_RANGES = ((0x004, 0x008), (0x130, 0x1F0), (0x370, 0x3D0), (0x460, 0x4B0))
+
+
+def state_sha256(state: bytes) -> str:
+    """SHA-256 of what a save state holds, equal across OSes and mGBA 0.10 versions for the
+    same game state.
+
+    A state saved with a screenshot is a PNG. mGBA zlib-compresses the core state into a gbAs
+    chunk and each extdata item into a gbAx chunk after an 8-byte type and size header. The same
+    states regenerated on Windows and macOS gave different files, so this hashes
+    the decompressed gbAs, with UNHASHED_RANGES zeroed, and gbAx contents, and skips the
+    screenshot. Any other state is hashed as is. Loading restores the screenshot until the next
+    frame, so a pixel observation taken before any frame runs is not covered by this hash."""
+    if not state.startswith(PNG_SIGNATURE):
+        return hashlib.sha256(state).hexdigest()
+    digest = hashlib.sha256()
+    position = len(PNG_SIGNATURE)
+    while position < len(state):
+        (length,) = struct.unpack_from(">I", state, position)
+        kind = state[position + 4 : position + 8]
+        body = state[position + 8 : position + 8 + length]
+        position += 12 + length
+        if kind == b"gbAs":
+            core = bytearray(zlib.decompress(body))
+            for start, end in UNHASHED_RANGES:
+                core[start:end] = bytes(end - start)
+            digest.update(kind + core)
+        elif kind == b"gbAx":
+            digest.update(kind + body[:8] + zlib.decompress(body[8:]))
+    return digest.hexdigest()
 
 
 class MgbaBackend:
@@ -107,7 +146,7 @@ class MgbaBackend:
             flags = SAVESTATE_SCREENSHOT | SAVESTATE_SAVEDATA | SAVESTATE_RTC
             if not self._lib.mCoreLoadStateNamed(self._handle, file.handle, flags):
                 raise ValueError("mGBA rejected the save state")
-            self._screen_ready = state.startswith(b"\x89PNG\r\n\x1a\n")
+            self._screen_ready = state.startswith(PNG_SIGNATURE)
         finally:
             file.close()
 

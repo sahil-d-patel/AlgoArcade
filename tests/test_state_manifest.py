@@ -1,10 +1,9 @@
-import hashlib
 from pathlib import Path
 
 import pytest
 from capture_states import ROM, STAGES, Player, options_ok, play
 
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.games.firered.manifest import (
     MANIFEST,
     ROM_SHA1,
@@ -118,7 +117,7 @@ def load(backend, name: str, sha256: str | None = None) -> None:
         pytest.skip(f"{path} is missing")
     data = path.read_bytes()
     if sha256 is not None:
-        assert hashlib.sha256(data).hexdigest() == sha256, f"{path} differs from the manifest"
+        assert state_sha256(data) == sha256, f"{path} differs from the manifest"
     backend.load_state(data)
 
 
@@ -168,4 +167,4 @@ def test_state_manifest_s0_replay_from_power_on(backend) -> None:
     state = play(backend, stage)
     assert Player(backend).location()[:2] == (4, 1)  # MAP_PALLET_TOWN_PLAYERS_HOUSE_2F
     assert options_ok(backend, ROM_SHA1)
-    assert hashlib.sha256(state).hexdigest() == MANIFEST[0].sha256
+    assert state_sha256(state) == MANIFEST[0].sha256

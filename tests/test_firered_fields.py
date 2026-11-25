@@ -7,7 +7,7 @@ from capture_states import Player
 from capture_validation_states import SEGMENTS, play
 
 from algoarcade.backends.base import Button
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
 from algoarcade.games.firered.reader import BattlePokemon, FireRedReader, FireRedState
@@ -81,55 +81,55 @@ CAPTURES = {
     ),
     "validate_bedroom_default.state": (
         REV1,
-        "8dae7b01d5bac2f066fb06903547a1d941ee12935e48e2bede1249f8493a6a67",
+        "ae4d673d182e57f2712d4284d290d38a5fa0b492283520bbff178bc608a33a72",
     ),
     "validate_bedroom.state": (
         REV1,
-        "ad03ebdf5ec4a93f306d76896f636df5eebb7639d85cbf86570845dbcfc43b1d",
+        "8e05fc489a9dbaf9f59880708f5418609d63f900e81f669b092d04cec7d86bf5",
     ),
     "validate_starter.state": (
         REV1,
-        "4efa9f1a6dc6ea522ae72062c30a60f776be578235f43a6a5fa0a8b70e5f295c",
+        "10520889885dbaba3d417674cc65e01fedec99a7a5b2833e25850ceb9f52bf02",
     ),
     "validate_rival_text.state": (
         REV1,
-        "5347edf9a63c170cfe341b42a3b3fa164ba08bc8f1e385e7e38849fa095e4473",
+        "9677be51807e5a2f49872ad7bc25767c2a85513b91096870e3bbb0bbd37bac73",
     ),
     "validate_battle.state": (
         REV1,
-        "f1cf692066eb5bb93742af5adbf8c2a1367c88b5d4573b37a8d4f33474865796",
+        "818705837c99c7b84c160bc52c5b4ef4933527da428e43fa64b3b09a77f68570",
     ),
     "validate_after_battle.state": (
         REV1,
-        "678a504168ce0c52738ae5ca62d193d7161b8a9120b802269eba5d116c17c59f",
+        "18b1ac104ff13af79482dba06acdd71c181f9d17fffad60d14e62ddab9dcb7de",
     ),
     "validate_pallet.state": (
         REV1,
-        "ffe14ce0f7e7909433a1ee9851d31d959a24f49f91770409c155cc34fd8abe76",
+        "d5e1c43ab6a2b8859b3508cd1500a167d1bcb3bb36857e38163a3b574c0a19b3",
     ),
     "validate_viridian.state": (
         REV1,
-        "65f121b24f6762057d679d08322ad3f22434f8338c08e6127c47be7640ad8f2d",
+        "cc6875a4005fb1dc37c91a1db7be4446a17e8f87cc13e22b05560daaac7b4863",
     ),
     "validate_pokedex.state": (
         REV1,
-        "e6335f08f060340552b23d7eab9f4427567df6334184a324a78a503bec0672d3",
+        "20352a4e98d3805abbdf1e081220cc5006f8a29644c26ca9da16d273c7ebc56d",
     ),
     "validate_poisoned.state": (
         REV1,
-        "07541dde2d66f665d4a22d34a33c9986f3575c1b580fbe8a83bfcd4bb89f2cd3",
+        "8779a0b710557f7b033f5982cbd7a0f8d949b1de2ade379f6ec8470e52dbe171",
     ),
     "validate_potion.state": (
         REV1,
-        "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
+        "40a563131087383b0c9b5f63e7827e5e7de17329c1eaf152171d29e31e393350",
     ),
     "validate_brock_lost.state": (
         REV1,
-        "bbe9ee5dcd2499a159929060861c382ac9f44bc794453b9ed900bdcc5d3985a8",
+        "00416c6a0d8e88c98cc9f5370c6d3b4855f2db5752c19ccc7c3e6cb030d70e93",
     ),
     "brock_goal.state": (
         REV1,
-        "1c789cc028a8f7d3ed2b7aa4a52f920ba253f86b8d303ef3b12a5684551f0f0a",
+        "7383d12db9892df7906f7552ea79fae47b61ba9184727aa8f244eb8ecfee8a16",
     ),
 }
 
@@ -157,7 +157,9 @@ def load_capture(backend: MgbaBackend, filename: str) -> FireRedState:
     if not path.is_file():
         pytest.skip(f"Needs local capture {filename}")
     data = path.read_bytes()
-    assert hashlib.sha256(data).hexdigest() == sha256
+    # Kumario1's rev 0 files are handed around, never regenerated, so they keep the file hash.
+    digest = hashlib.sha256(data).hexdigest() if revision == REV0 else state_sha256(data)
+    assert digest == sha256
     backend.load_state(data)
     return FireRedReader(backend.rom.sha1).read(backend)
 
@@ -547,7 +549,7 @@ def read_start_state(name: str, inputs: str = "") -> FireRedState:
     if not rom.is_file() or not path.is_file():
         pytest.skip(f"Needs the local FireRed ROM and {path.name}")
     data = path.read_bytes()
-    assert hashlib.sha256(data).hexdigest() == {e.name: e.sha256 for e in MANIFEST}[name]
+    assert state_sha256(data) == {e.name: e.sha256 for e in MANIFEST}[name]
     pytest.importorskip(
         "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
     )
@@ -670,7 +672,7 @@ def test_firered_fields_battle_enemy_switch_reads_no_stale_battler(
     if firered_backend.rom.sha1 != ROM_SHA1 or not path.is_file():
         pytest.skip("Needs brock.state and the rev 1 ROM it was captured on")
     data = path.read_bytes()
-    assert hashlib.sha256(data).hexdigest() == {e.name: e.sha256 for e in MANIFEST}["brock"]
+    assert state_sha256(data) == {e.name: e.sha256 for e in MANIFEST}["brock"]
     firered_backend.load_state(data)
     states = []
     for _ in range(40):

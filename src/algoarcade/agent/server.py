@@ -34,7 +34,7 @@ from algoarcade.agent import tools
 from algoarcade.agent.tools import DIALOGUE_PRESSES, NAVIGATE_PRESSES, Game
 from algoarcade.backends.base import Button
 from algoarcade.backends.fake import FakeBackend
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.games.base import StateNotReady
 from algoarcade.games.fake import FakeField, FakeReader
 from algoarcade.games.firered.field import FireRedField
@@ -80,7 +80,7 @@ def start_state(name: str) -> bytes:
         rom = identify(rom_path)
         if rom.sha1 != ROM_SHA1:
             raise ValueError(f"{rom_path} is {rom.name}; the start states were captured on rev 1")
-        if hashlib.sha256(state).hexdigest() != entry.sha256:
+        if state_sha256(state) != entry.sha256:
             raise ValueError(f"{path} does not match the manifest hash")
     return state
 
