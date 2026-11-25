@@ -1,4 +1,3 @@
-import hashlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,7 +6,7 @@ from capture_states import Player
 from capture_validation_states import play
 
 from algoarcade.backends.base import Button
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.envs.env import AlgoArcadeEnv
 from algoarcade.games.firered.features import FEATURES
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
@@ -48,11 +47,11 @@ BLANK = FireRedState(
 # Manifest states, goal states from scripts/capture_states.py and two from
 # scripts/capture_validation_states.py.
 HASHES = {entry.name: entry.sha256 for entry in MANIFEST} | {
-    "seg_03_rival_goal": "c7d822061aa8fbf0b1922ff8a6ddb88714aa6f7364b86ff6c8b37b5be046ea2b",
-    "seg_05_forest_goal": "6a4908eb8f19ef2de0b79ebb1a49906b03734c17c7a3cb8d9f22ce52ea0998f2",
-    "brock_goal": "1c789cc028a8f7d3ed2b7aa4a52f920ba253f86b8d303ef3b12a5684551f0f0a",
-    "validate_parcel": "2695da9e2b59db8e2ea70481b8f39da74a990c765631eb8f4029c09998fb98e4",
-    "validate_pokedex": "e6335f08f060340552b23d7eab9f4427567df6334184a324a78a503bec0672d3",
+    "seg_03_rival_goal": "602b26e6acce7928485eead0ed24a398cd571c4db1d90c3c15b6440e62fbc90e",
+    "seg_05_forest_goal": "de9a4a884843680dfc9753080f44c52de546a7844602aa29278d433d3380fd22",
+    "brock_goal": "9a0d4c2650196123afad6528df4e42eca0e761f4b9f0ad717a32245d75180b61",
+    "validate_parcel": "60fdb3fd56946fff80579088d340bb924e75c60a80c38cd37ded12a3452cf90e",
+    "validate_pokedex": "f89bc59a7df6ea41b1e99bffad4577763240fae0b87ba1f811d9422ceb23716b",
 }
 RIVAL_DONE = replace(BLANK, event_flags=("FLAG_BEAT_RIVAL_IN_OAKS_LAB",))
 
@@ -114,7 +113,7 @@ def start(name: str) -> MgbaBackend:
         backend.close()
         pytest.skip("The start states were captured on rev 1")
     data = path.read_bytes()
-    assert hashlib.sha256(data).hexdigest() == HASHES[name]
+    assert state_sha256(data) == HASHES[name]
     backend.load_state(data)
     return backend
 

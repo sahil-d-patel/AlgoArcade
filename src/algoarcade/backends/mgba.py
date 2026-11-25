@@ -1,3 +1,6 @@
+import hashlib
+import struct
+import zlib
 from collections.abc import Iterable
 from importlib import import_module
 from pathlib import Path
@@ -17,6 +20,32 @@ IWRAM_SIZE = 0x8000
 SAVESTATE_SCREENSHOT = 1
 SAVESTATE_SAVEDATA = 2
 SAVESTATE_RTC = 8
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def state_sha256(state: bytes) -> str:
+    """SHA-256 of what a save state holds, equal on every OS for the same emulator state.
+
+    A state saved with a screenshot is a PNG. mGBA zlib-compresses the core state into a gbAs
+    chunk and each extdata item into a gbAx chunk after an 8-byte type and size header. The same
+    states regenerated on Windows and macOS gave different files, so this hashes
+    the decompressed gbAs and gbAx contents and skips the screenshot. Any other state is hashed
+    as is. Loading restores the screenshot until the next frame, so a pixel observation taken
+    before any frame runs is not covered by this hash."""
+    if not state.startswith(PNG_SIGNATURE):
+        return hashlib.sha256(state).hexdigest()
+    digest = hashlib.sha256()
+    position = len(PNG_SIGNATURE)
+    while position < len(state):
+        (length,) = struct.unpack_from(">I", state, position)
+        kind = state[position + 4 : position + 8]
+        body = state[position + 8 : position + 8 + length]
+        position += 12 + length
+        if kind == b"gbAs":
+            digest.update(kind + zlib.decompress(body))
+        elif kind == b"gbAx":
+            digest.update(kind + body[:8] + zlib.decompress(body[8:]))
+    return digest.hexdigest()
 
 
 class MgbaBackend:
@@ -107,7 +136,7 @@ class MgbaBackend:
             flags = SAVESTATE_SCREENSHOT | SAVESTATE_SAVEDATA | SAVESTATE_RTC
             if not self._lib.mCoreLoadStateNamed(self._handle, file.handle, flags):
                 raise ValueError("mGBA rejected the save state")
-            self._screen_ready = state.startswith(b"\x89PNG\r\n\x1a\n")
+            self._screen_ready = state.startswith(PNG_SIGNATURE)
         finally:
             file.close()
 

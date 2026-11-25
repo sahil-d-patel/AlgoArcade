@@ -1,4 +1,3 @@
-import hashlib
 import io
 import itertools
 import json
@@ -16,7 +15,7 @@ from algoarcade.agent.tools import (
     shortest_path,
 )
 from algoarcade.backends.base import Button
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.games.firered.field import FireRedField, decode
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1
 from algoarcade.games.firered.maps import MapGrid, load_maps
@@ -26,9 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # Manifest states, seg_01_house_goal from scripts/capture_states.py and validate_rival_text from
 # scripts/capture_validation_states.py, all rev 1.
 HASHES = {entry.name: entry.sha256 for entry in MANIFEST} | {
-    "seg_01_house_goal": "b3dadbaeb797824282cc74b8cf0013bd088a7358f0067e2d5b5f3854db4f09bf",
-    "validate_rival_text": "5347edf9a63c170cfe341b42a3b3fa164ba08bc8f1e385e7e38849fa095e4473",
-    "validate_potion": "202e53c584a704aa3e0bf695c734d604dff1b8d82aa0d6ccc8679437eb4b65d6",
+    "seg_01_house_goal": "1dc7b3e67a0b3bdb769b0925bee5eba41ca60392af8f4a69c98843273cd9e1aa",
+    "validate_rival_text": "6d824cb2d5d0ece989392d019327579a33e086fe97d9b9fee08ad811ed3868b1",
+    "validate_potion": "ae25fc02a1de611dfc0afe439403d3e2dc3e32cf3d369f99a224fb2add8c87b2",
 }
 ROUTE1 = (3, 19)
 
@@ -66,7 +65,7 @@ def load(
     if not path.is_file():
         pytest.skip(f"Needs {path.name}")
     data = path.read_bytes()
-    assert hashlib.sha256(data).hexdigest() == HASHES[name]
+    assert state_sha256(data) == HASHES[name]
     backend.load_state(data)
     field = FireRedField(backend.rom.sha1, maps)
     return Game(backend, FireRedReader(backend.rom.sha1), field, io.StringIO())

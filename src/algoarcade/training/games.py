@@ -6,7 +6,6 @@ factory that builds its own emulator. A worker that raises reaches the parent on
 so anything that can be checked before the workers start is checked here.
 """
 
-import hashlib
 from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from pathlib import Path
@@ -16,7 +15,7 @@ import gymnasium as gym
 
 from algoarcade.backends.base import Button, GameBackend, read_u8
 from algoarcade.backends.fake import FakeBackend
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.backends.pyboy import PyBoyBackend
 from algoarcade.envs.env import HOLD, AlgoArcadeEnv, ObsMode
 from algoarcade.games import fake
@@ -283,7 +282,7 @@ def env_factory(  # noqa: PLR0913 the config fields a game env needs, then rende
         raise ValueError(f"start_state {start_state!r}: use one of {usable}")
     path = manifest.STATES / f"{entry.name}.state"
     state = path.read_bytes()
-    if hashlib.sha256(state).hexdigest() != entry.sha256:
+    if state_sha256(state) != entry.sha256:
         raise ValueError(f"{path} does not match the manifest hash")
     rom = identify(rom_path)
     if rom.sha1 != manifest.ROM_SHA1:

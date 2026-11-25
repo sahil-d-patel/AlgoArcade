@@ -1,11 +1,10 @@
-import hashlib
 import struct
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.games.firered.addresses import ADDRESSES
 from algoarcade.games.firered.manifest import MANIFEST, ROM_SHA1, StartState
 from algoarcade.games.firered.maps import (
@@ -196,7 +195,7 @@ def test_offline_collision_matches_the_live_map_buffer(
         "mgba.core", reason="mGBA binding did not load; see docs/setup.md", exc_type=ImportError
     )
     data = path.read_bytes()
-    assert hashlib.sha256(data).hexdigest() == entry.sha256
+    assert state_sha256(data) == entry.sha256
     backend = MgbaBackend(rom, render=False)
     try:
         backend.load_state(data)

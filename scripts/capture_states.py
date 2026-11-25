@@ -22,13 +22,12 @@ Inputs, separated by spaces; a suffix xN repeats one input N times:
 """
 
 import argparse
-import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from algoarcade.backends.base import Button, GameBackend, read_u8, read_u32
-from algoarcade.backends.mgba import MgbaBackend
+from algoarcade.backends.mgba import MgbaBackend, state_sha256
 from algoarcade.games.firered.addresses import ADDRESSES
 from algoarcade.games.firered.manifest import ROM_SHA1, STATES
 from algoarcade.games.firered.reader import FireRedReader
@@ -342,7 +341,7 @@ def main() -> None:
             backend.close()
         for name in stage.saves:
             (args.out / f"{name}.state").write_bytes(state)
-            print(f"{name}  {hashlib.sha256(state).hexdigest()}  {stage.location}")
+            print(f"{name}  {state_sha256(state)}  {stage.location}")
 
 
 if __name__ == "__main__":

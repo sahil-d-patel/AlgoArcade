@@ -1,14 +1,56 @@
 import hashlib
+import struct
+import zlib
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from algoarcade.backends.base import Button
-from algoarcade.backends.mgba import EWRAM_BASE, EWRAM_SIZE, IWRAM_BASE, IWRAM_SIZE, MgbaBackend
+from algoarcade.backends.mgba import (
+    EWRAM_BASE,
+    EWRAM_SIZE,
+    IWRAM_BASE,
+    IWRAM_SIZE,
+    PNG_SIGNATURE,
+    MgbaBackend,
+    state_sha256,
+)
 from algoarcade.rom import UnknownRomError
 
 ROM = Path(__file__).resolve().parents[1] / "data" / "roms" / "firered.gba"
+
+
+def png_state(core: bytes, screenshot: bytes, level: int) -> bytes:
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+        )
+
+    savedata = b"\xff" * 4096
+    return (
+        PNG_SIGNATURE
+        + chunk(b"IDAT", zlib.compress(screenshot, level))
+        + chunk(b"gbAs", zlib.compress(core, level))
+        + chunk(b"gbAx", struct.pack("<II", 2, len(savedata)) + zlib.compress(savedata, level))
+        + chunk(b"IEND", b"")
+    )
+
+
+def test_state_sha256_ignores_compression_and_the_screenshot() -> None:
+    core = bytes(range(256)) * 64
+    first = png_state(core, b"\x00" * 1024, level=1)
+    second = png_state(core, b"\x7f" * 1024, level=9)
+    assert first != second
+    assert state_sha256(first) == state_sha256(second)
+    assert state_sha256(png_state(core[:-1] + b"\x00", b"\x00" * 1024, level=1)) != state_sha256(
+        first
+    )
+
+
+def test_state_sha256_hashes_a_state_without_a_screenshot_as_is() -> None:
+    raw = b"\x1d\x00\x00\x00 not a PNG"
+    assert state_sha256(raw) == hashlib.sha256(raw).hexdigest()
 
 
 @pytest.fixture
