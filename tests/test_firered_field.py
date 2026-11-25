@@ -25,9 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # Manifest states, seg_01_house_goal from scripts/capture_states.py and validate_rival_text from
 # scripts/capture_validation_states.py, all rev 1.
 HASHES = {entry.name: entry.sha256 for entry in MANIFEST} | {
-    "seg_01_house_goal": "1dc7b3e67a0b3bdb769b0925bee5eba41ca60392af8f4a69c98843273cd9e1aa",
-    "validate_rival_text": "6d824cb2d5d0ece989392d019327579a33e086fe97d9b9fee08ad811ed3868b1",
-    "validate_potion": "ae25fc02a1de611dfc0afe439403d3e2dc3e32cf3d369f99a224fb2add8c87b2",
+    "seg_01_house_goal": "499c66e0a70aa05883177665c0da5360a99ec22353f2a65d1fc41269b950fbc3",
+    "validate_rival_text": "9677be51807e5a2f49872ad7bc25767c2a85513b91096870e3bbb0bbd37bac73",
+    "validate_potion": "40a563131087383b0c9b5f63e7827e5e7de17329c1eaf152171d29e31e393350",
 }
 ROUTE1 = (3, 19)
 

@@ -47,11 +47,11 @@ BLANK = FireRedState(
 # Manifest states, goal states from scripts/capture_states.py and two from
 # scripts/capture_validation_states.py.
 HASHES = {entry.name: entry.sha256 for entry in MANIFEST} | {
-    "seg_03_rival_goal": "602b26e6acce7928485eead0ed24a398cd571c4db1d90c3c15b6440e62fbc90e",
-    "seg_05_forest_goal": "de9a4a884843680dfc9753080f44c52de546a7844602aa29278d433d3380fd22",
-    "brock_goal": "9a0d4c2650196123afad6528df4e42eca0e761f4b9f0ad717a32245d75180b61",
-    "validate_parcel": "60fdb3fd56946fff80579088d340bb924e75c60a80c38cd37ded12a3452cf90e",
-    "validate_pokedex": "f89bc59a7df6ea41b1e99bffad4577763240fae0b87ba1f811d9422ceb23716b",
+    "seg_03_rival_goal": "88d5f1f5ba15cb3b23c4603986ace0a91dc5ae06deaa71260af58f0a62b2f412",
+    "seg_05_forest_goal": "186d5bcdfa29aa4d8e249404fee1ee11e1b669b846f51e44acb4862d241ce77b",
+    "brock_goal": "7383d12db9892df7906f7552ea79fae47b61ba9184727aa8f244eb8ecfee8a16",
+    "validate_parcel": "e670612ee05f789ecb32955d38981f037e22159663e8d5bcfc08a5a7fccd9803",
+    "validate_pokedex": "20352a4e98d3805abbdf1e081220cc5006f8a29644c26ca9da16d273c7ebc56d",
 }
 RIVAL_DONE = replace(BLANK, event_flags=("FLAG_BEAT_RIVAL_IN_OAKS_LAB",))
 

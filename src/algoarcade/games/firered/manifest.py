@@ -71,20 +71,20 @@ def boulder_badge(state: FireRedState) -> bool:
 MANIFEST = (
     StartState(
         "s0",
-        "614363f51439fdf9212ed231a75c453e91a30d280aa22f28095ef24aa0cc35f2",
+        "fd6dbb1af079fad68164ca909e064565894752fdbddf15c217b2edd3675a0ed8",
         boulder_badge,
         87_040,
     ),
     StartState(
         "s1",
-        "3d11fca855f9f4a4fad869d30bdfe15a42cd05a912c2431415d51e5e871467cb",
+        "87c56871f090f15239310ad54cebfc1e622b052213f72f0596719c3e1e4e483e",
         boulder_badge,
         71_680,
     ),
     # The same bytes as s0.
     StartState(
         "seg_01_house",
-        "614363f51439fdf9212ed231a75c453e91a30d280aa22f28095ef24aa0cc35f2",
+        "fd6dbb1af079fad68164ca909e064565894752fdbddf15c217b2edd3675a0ed8",
         left_house,
         2048,
     ),
@@ -92,26 +92,26 @@ MANIFEST = (
     # the edge of town and Route 1 cannot be entered.
     StartState(
         "seg_02_pallet",
-        "527591a12ea5fc6358fb308ad3cf15c7df8b9c02a7a6117b1ac8ee65cc03c281",
+        "76487009819a0547a760fd3792a8961d24f3f2f791b7e921f74a22edf6333f29",
         entered_route1,
         4096,
     ),
     StartState(
         "seg_03_rival",
-        "74bc5ffb5fa74bcc4c7dcf1a61daa178d85355f5fa6e5ca226b4246fd37a529c",
+        "d765defaa9f6a5f1bae3f289ddc735734aefe76cebf3a6cae1631348b5b47b04",
         won_rival_battle,
         3072,
     ),
     # The same bytes as seg_02_pallet's goal state: the first frame on Route 1.
     StartState(
         "seg_04_route1",
-        "41ec4c32d3e8dc14be6a4ff29f82ab9be34c379f9e77579126fbb22a2e2a9b90",
+        "3fc6bd10e30b73a1f3b16630bde80a9c047258cebe82ed69a45cdb683c073d57",
         entered_viridian,
         6144,
     ),
     StartState(
         "seg_05_forest",
-        "32077774dcc94f1f077a59b72899e699c6bde0a37f6c7c0526bf7b997aedbe63",
+        "356f9ad13565560c29818a396c37d6a6924e37f89741b7fc4bf8d05cb2b54177",
         left_forest_north,
         8192,
     ),
@@ -119,13 +119,13 @@ MANIFEST = (
     # forest. Pressing A every turn wins the Brock battle, so label results from these states.
     StartState(
         "gym_door",
-        "f6e79eacde1a2cbba76db8b5ce27ca125a411cbd644fa8f797fe2a660ba3e4a8",
+        "c960cb7373eeb1c9770ea8a38c31c8688625967d721151e21ce963e0c220b2cf",
         boulder_badge,
         None,
     ),
     StartState(
         "brock",
-        "270b2832bbb1ddd55b7bb81042f75da4871a1f7249ab41d234263f5cd829732c",
+        "263a03c58fc47db834e9bbef148cdd5642bcf626a75cce5a47e1e847e9e694c0",
         boulder_badge,
         None,
     ),

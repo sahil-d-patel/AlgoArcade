@@ -81,55 +81,55 @@ CAPTURES = {
     ),
     "validate_bedroom_default.state": (
         REV1,
-        "279bca8f7eeac0b582af65b07d650897d06298ff6299ec632934e3e22678003b",
+        "ae4d673d182e57f2712d4284d290d38a5fa0b492283520bbff178bc608a33a72",
     ),
     "validate_bedroom.state": (
         REV1,
-        "f731a765b0c1e8530c55a83be904568d085cd7ef6363f1d00db2777092dd3948",
+        "8e05fc489a9dbaf9f59880708f5418609d63f900e81f669b092d04cec7d86bf5",
     ),
     "validate_starter.state": (
         REV1,
-        "df3f0c73e5a4bd2a49ef4918eef18509b75bef86c1533172bbf9446c44577227",
+        "10520889885dbaba3d417674cc65e01fedec99a7a5b2833e25850ceb9f52bf02",
     ),
     "validate_rival_text.state": (
         REV1,
-        "6d824cb2d5d0ece989392d019327579a33e086fe97d9b9fee08ad811ed3868b1",
+        "9677be51807e5a2f49872ad7bc25767c2a85513b91096870e3bbb0bbd37bac73",
     ),
     "validate_battle.state": (
         REV1,
-        "73811349eb919f8c0611b4cef1c2b68a39e96cae0562d58e1baeafeaf934591e",
+        "818705837c99c7b84c160bc52c5b4ef4933527da428e43fa64b3b09a77f68570",
     ),
     "validate_after_battle.state": (
         REV1,
-        "aa54db997efcf7e9a87e725d67e4902276dc915f7c879947dbba5ae546caf4ea",
+        "18b1ac104ff13af79482dba06acdd71c181f9d17fffad60d14e62ddab9dcb7de",
     ),
     "validate_pallet.state": (
         REV1,
-        "79334f3312f1a37dfa6d4136d92af1a6145faa2867bba18faf595d66ff73607e",
+        "d5e1c43ab6a2b8859b3508cd1500a167d1bcb3bb36857e38163a3b574c0a19b3",
     ),
     "validate_viridian.state": (
         REV1,
-        "6c3cde1ad28dff0bd9898dd19e400b9214a5852d316ab7a23c2cf705275ffc9c",
+        "cc6875a4005fb1dc37c91a1db7be4446a17e8f87cc13e22b05560daaac7b4863",
     ),
     "validate_pokedex.state": (
         REV1,
-        "f89bc59a7df6ea41b1e99bffad4577763240fae0b87ba1f811d9422ceb23716b",
+        "20352a4e98d3805abbdf1e081220cc5006f8a29644c26ca9da16d273c7ebc56d",
     ),
     "validate_poisoned.state": (
         REV1,
-        "81e5b51a81a9fd9d70f21e4ea83a4e545d7bae3957215bf2b609ad105cb4c1e2",
+        "8779a0b710557f7b033f5982cbd7a0f8d949b1de2ade379f6ec8470e52dbe171",
     ),
     "validate_potion.state": (
         REV1,
-        "ae25fc02a1de611dfc0afe439403d3e2dc3e32cf3d369f99a224fb2add8c87b2",
+        "40a563131087383b0c9b5f63e7827e5e7de17329c1eaf152171d29e31e393350",
     ),
     "validate_brock_lost.state": (
         REV1,
-        "e25e792876f39cdb822e6ad6ce4f0454ea97ab35dc2cf5bead90cdf3ed87ce0c",
+        "00416c6a0d8e88c98cc9f5370c6d3b4855f2db5752c19ccc7c3e6cb030d70e93",
     ),
     "brock_goal.state": (
         REV1,
-        "9a0d4c2650196123afad6528df4e42eca0e761f4b9f0ad717a32245d75180b61",
+        "7383d12db9892df7906f7552ea79fae47b61ba9184727aa8f244eb8ecfee8a16",
     ),
 }
 
