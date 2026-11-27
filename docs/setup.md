@@ -171,18 +171,23 @@ setx ALGOARCADE_WEBHOOK_URL "<webhook URL>"
 
 `setx` changes only processes started after it. Set the variable before you register the task below, then sign out and back in so the task's next start sees it. Do the same after changing it.
 
-`run` starts every night from Task Scheduler. Register the task once, in PowerShell from the clone:
+Task Scheduler starts `run` every 5 minutes and when you sign in. A start while `run` is already working is skipped, so a queue that stopped, after a reboot or a crash, starts again within 5 minutes, and a run submitted to an idle queue starts within 5 minutes. Register the task once, in PowerShell from the clone:
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute (Get-Command uv).Source `
   -Argument "run python -m algoarcade.runqueue run" -WorkingDirectory (Get-Location).Path
 $trigger = New-ScheduledTaskTrigger -Daily -At 1am
+$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At 1am `
+  -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+$logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
   -MultipleInstances IgnoreNew -StartWhenAvailable -Priority 4
-Register-ScheduledTask -TaskName "AlgoArcade run queue" -Action $action -Trigger $trigger -Settings $settings
+Register-ScheduledTask -TaskName "AlgoArcade run queue" -Action $action -Trigger $trigger, $logon -Settings $settings
 ```
 
-A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. `-Priority 4` is normal priority; the default, 7, is below normal and would lower the steps per second the runs measure. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. Not run on the box yet.
+A task registered with only the nightly trigger gets the new ones from `Set-ScheduledTask -TaskName "AlgoArcade run queue" -Trigger $trigger, $logon`, after the `$trigger` and `$logon` lines above.
+
+A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. `-Priority 4` is normal priority; the default, 7, is below normal and would lower the steps per second the runs measure. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. The box has run the queue from this task since November 26.
 
 ### Freezing results
 
