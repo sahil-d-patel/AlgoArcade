@@ -49,8 +49,9 @@ class Cell:
 def make_backend(name: str, rom: Path | None, render: bool) -> tuple[GameBackend, tuple]:
     if name == "fake":
         return fake.FakeBackend(), ((fake.RAM_BASE, fake.RAM_SIZE),)
-    from algoarcade.backends.mgba import MgbaBackend  # arrives with ENV-04
+    from algoarcade.backends.mgba import MgbaBackend
 
+    assert rom is not None  # main() requires --rom for a real backend
     return MgbaBackend(rom, render=render), GBA_RAM
 
 
