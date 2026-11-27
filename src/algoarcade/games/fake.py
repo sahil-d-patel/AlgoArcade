@@ -1,9 +1,13 @@
 """State reader for the toy game in algoarcade.backends.fake."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
+from numpy.typing import NDArray
+
 from algoarcade.backends import fake
-from algoarcade.backends.base import GameBackend, read_u8, read_u32
+from algoarcade.backends.base import Button, GameBackend, read_u8, read_u32
 
 
 @dataclass(frozen=True)
@@ -15,8 +19,13 @@ class FakeState:
     frame: int
     story_flags: int
     party_level_sum: int
+    badge_flags: int
     badge_count: int
     milestone_count: int
+    party_count: int
+    party_hp_frac: float
+    text_box_open: bool
+    text_progress: int
 
     @property
     def location(self) -> tuple[int, int, int]:
@@ -26,6 +35,8 @@ class FakeState:
 class FakeReader:
     def read(self, backend: GameBackend) -> FakeState:
         flags = read_u8(backend, fake.RAM_BASE + fake.FLAGS)
+        text = read_u8(backend, fake.RAM_BASE + fake.TEXT)
+        badges = read_u8(backend, fake.RAM_BASE + fake.BADGES)
         return FakeState(
             room=read_u8(backend, fake.RAM_BASE + fake.ROOM),
             x=read_u8(backend, fake.RAM_BASE + fake.PLAYER_X),
@@ -34,6 +45,47 @@ class FakeReader:
             frame=read_u32(backend, fake.RAM_BASE + fake.FRAME),
             story_flags=flags.bit_count(),
             party_level_sum=read_u8(backend, fake.RAM_BASE + fake.LEVEL_SUM),
-            badge_count=read_u8(backend, fake.RAM_BASE + fake.BADGES).bit_count(),
+            badge_flags=badges,
+            badge_count=badges.bit_count(),
             milestone_count=read_u8(backend, fake.RAM_BASE + fake.MILESTONES),
+            # The fake has a level sum but no party; it stands for one Pokemon.
+            party_count=1,
+            party_hp_frac=read_u8(backend, fake.RAM_BASE + fake.HP_PERCENT) / 100,
+            text_box_open=text != 0,
+            text_progress=text,
         )
+
+
+# The observation vector for AlgoArcadeEnv, each value scaled into [0, 1].
+FEATURES: dict[str, Callable[[FakeState], float]] = {
+    "room": lambda s: s.room,
+    "x": lambda s: s.x / (fake.WIDTH - 1),
+    "y": lambda s: s.y / (len(fake.ROOMS[0]) - 1),
+    "chest_opened": lambda s: s.chest_opened,
+}
+
+
+def walkable(location: tuple[int, int, int]) -> bool:
+    room, x, y = location
+    rows = fake.ROOMS[room]
+    return 0 <= y < len(rows) and 0 <= x < fake.WIDTH and rows[y][x] != "#"
+
+
+class FakeField:
+    """The toy game's overworld for the agent's tools. It has no battles, text or menus."""
+
+    def walkable(self, backend: GameBackend, /) -> NDArray[np.bool_]:
+        room = fake.ROOMS[read_u8(backend, fake.RAM_BASE + fake.ROOM)]
+        return np.array([[tile != "#" for tile in row] for row in room])
+
+    def text(self, _backend: GameBackend, _state: FakeState, /) -> str:
+        return ""
+
+    def choice(self, _backend: GameBackend, /) -> bool:
+        return False
+
+    def battle(self, _state: FakeState, /) -> bool:
+        return False
+
+    def ledges(self, _state: FakeState, /) -> dict[tuple[int, int], Button]:
+        return {}

@@ -21,7 +21,7 @@ E3 asks whether RND beats tile counts, and E5 asks whether penalties help or hur
 - [ ] The pull request has the E3 table (IQM, 95% interval, seed count, probability of improvement for count over none and RND over count) and the E5 table labelled exploratory.
 - [ ] For every window of one real baseline run, the components sum to the logged total reward within 1e-6. The largest difference is pasted.
 - [ ] `uv run pytest tests/test_decomposition.py` passes in CI on fake-logger data.
-- [ ] The catalogue covers the five scripted exploits (oscillation, menu spam, faint loop, reset farming, grass camping), each marked observed (run id, clip) or not observed (test name).
+- [ ] The catalogue covers the six scripted exploits (oscillation, menu spam, faint loop, reset farming, grass camping, warp flicker), each marked observed (run id, clip) or not observed (test name).
 - [ ] Every clip plays in the rendered page with Wi-Fi off, and `git ls-files '*.mp4'` prints nothing.
 - [ ] The `reward-component` skill lists every exploit in the catalogue.
 

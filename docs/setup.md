@@ -49,7 +49,7 @@ With the ROM at `data/roms/firered.gba`, check the backend with `uv run pytest t
 
 ## ROMs
 
-We do not share ROMs. Each member supplies their own dumps and puts them in `data/roms/`, which git ignores. Create the folder if it is not there. Save states go in `data/states/` the same way.
+We do not share ROMs. Each member supplies their own dumps and puts them in `data/roms/`, which git ignores. Create the folder if it is not there. Save states go in `data/states/` the same way; see [Save states](#save-states).
 
 Check that yours is a revision the project supports:
 
@@ -60,6 +60,28 @@ uv run python -m algoarcade.rom data/roms/firered.gba
 It prints the hash and the name, or exits with an error that lists the hashes we accept. FireRed (USA) rev 0 is the target and rev 1 also works. Super Mario Land joins the table when ENV-03 lands.
 
 The harness runs the same check every time it loads a ROM. A wrong revision would not crash. It would read the wrong addresses and produce believable, wrong rewards.
+
+## Save states
+
+The FireRed start states are not downloadable: save states hold game data and the repository is public. Sahil (PM) sends the files directly. Put them in `data/states/` and check them against the manifest:
+
+```sh
+uv run python -m algoarcade.games.firered.manifest
+```
+
+It prints one line per state, `OK` or `MISSING` or `MISMATCH`, and exits non-zero unless all nine are OK. Never post the files anywhere public.
+
+The states were captured on FireRed rev 1. With a rev 1 ROM you can regenerate them yourself instead; it takes about 90 seconds:
+
+```sh
+uv run python scripts/capture_states.py
+```
+
+The script replays recorded inputs from power-on, checks the location and the options after each stage, and writes the nine states plus the `_goal` states the tests use. On macOS arm64 with libmgba-py 0.2.0, the output hashes matched the manifest on every run; other platforms are not run yet. `--from gym_door` replays that stage and the ones after it, starting from the states already in the folder. `--out DIR` reads and writes `DIR` instead of `data/states/`, and the script writes `data/states/` only with the rev 1 ROM. To check a file, regenerate into a scratch folder and run `uv run python -m algoarcade.games.firered.manifest DIR`.
+
+With a rev 0 ROM, use `--out`. The address table is the same for both revisions, but nobody has run the script on rev 0.
+
+FireRed training also needs the map data, for the observation's walkability channel: `uv run python scripts/fetch_maps.py` writes it to `data/pokefirered/`. Without it the runner stops before starting workers and names the command.
 
 ## Checks
 
@@ -86,8 +108,94 @@ CI runs the same check on Linux, Windows and macOS for every pull request.
 We train on two machines: a Windows desktop (the box) and a Mac. OPS-01 sets up access. Three rules, from the first day:
 
 - Nobody debugs on the box. Debug on your own machine with one environment and 1,000 steps.
-- Runs go through the queue once OPS-04 lands. Do not launch runs by hand after that.
+- Runs go through the run queue. Do not launch runs by hand.
 - A stray process costs a night of training. If you started something, stop it before you log out.
+
+### The run queue
+
+An experiment is a Python file under `experiments/`, committed before you submit it. It sets `EXPERIMENT` (the id), `BASE` (a `TrainConfig`), `ARMS` (each arm's name to the `TrainConfig` fields it replaces in `BASE`) and `SEEDS`:
+
+```python
+import dataclasses
+
+from algoarcade.rewards.registry import DEFAULT_WEIGHTS, WEIGHTS
+from algoarcade.training.config import PRESETS
+
+EXPERIMENT = "E5"
+BASE = dataclasses.replace(PRESETS["firered"][1], start_state="seg_02_pallet", track=True)
+PENALTIES = ("blackout", "anti_loop", "anti_spam", "time")
+ARMS = {
+    "positive": {},
+    "penalties": {"reward_weights": DEFAULT_WEIGHTS | {n: WEIGHTS[n] for n in PENALTIES}},
+}
+SEEDS = [0, 1, 2]
+```
+
+Several files can share an experiment id, so E1 to E4 can go in arm by arm as each arm's code lands. The commands, from the clone:
+
+```sh
+uv run python -m algoarcade.runqueue submit experiments/e5.py --dry-run   # print the runs only
+uv run python -m algoarcade.runqueue submit experiments/e5.py
+uv run python -m algoarcade.runqueue status
+uv run python -m algoarcade.runqueue run
+uv run python -m algoarcade.runqueue stop
+```
+
+- `submit` queues one run per arm and seed, named `<experiment>-<arm>-seed<n>`: seed 0 of every arm, then seed 1, so a queue cut short leaves the arms with the same seeds. It refuses a name already in the queue. The config is fixed at submit. The code is whatever the clone has checked out when the run starts, and the run records that commit.
+- `run` trains the queued runs in submit order, each in its own process, until none is left. A run that exits with an error is retried once, from step 0, then marked failed, and the next run starts. An attempt still running after 1 hour plus `total_timesteps` / 100 seconds (43 hours for 15M steps; `run --min-steps-per-s` changes the 100) is killed with its workers and counts as a crash. A second `run` exits at once while one is working. Ctrl+C stops the queue and puts the current run back without using up an attempt.
+- `status` prints each run's status (queued, running, done, failed or stopped), attempts, start and end time, then a count per experiment.
+- `stop` ends the queue at a cutoff, from any terminal while `run` works. Every queued run becomes stopped. The run in progress stops: the trainer saves a checkpoint, evaluates it, writes its end row (status `finished`, with the steps it reached) and exits, and `run` marks it stopped and exits. The Stable-Baselines3 runner stops at its next step; the owned trainer (`algoarcade.training.ppo`, which the queue starts for RND arms) ends after the rollout in which it first sees the file, and that rollout's update. The next `run` clears the stop request. Run with no `run` working, `stop` also marks stopped a run left running by a reboot or a killed `run`.
+
+The experiments go in this order (OPS-06, #34), so the arms that share the baseline train first and E6 from S1 trains ahead of E6 from S0. `e1_pqn.py` arrives with #95; submit it in its place if #95 has merged, or after the others if not.
+
+```sh
+uv run python -m algoarcade.runqueue submit experiments/baseline.py
+uv run python -m algoarcade.runqueue submit experiments/e4_archive.py
+uv run python -m algoarcade.runqueue submit experiments/e1_pqn.py
+uv run python -m algoarcade.runqueue submit experiments/e3_rnd.py
+uv run python -m algoarcade.runqueue submit experiments/e2_observations.py
+uv run python -m algoarcade.runqueue submit experiments/e5_penalties.py
+uv run python -m algoarcade.runqueue submit experiments/e6_brock_s1.py
+uv run python -m algoarcade.runqueue submit experiments/e6_brock_s0.py
+```
+
+Each attempt trains into `data/runs/run_id=<run>-<time>/` and writes its experiment id and arm to the runs table. With `track=True` the experiment id is also the run's W&B group; log in once on the box with `uv run wandb login`.
+
+The queue lives in `data/runs/queue/`: `queue.json`, each run's config under `configs/`, and each attempt's output in `logs/<run>-<attempt>.log`. If the box reboots or `run` is killed mid-run, the next `run` counts that attempt as a crash. On Windows a trainer dies with its `run`, however `run` ends. On macOS and Linux, Ctrl+C, SIGTERM, a closed terminal (SIGHUP) or an error in `run` stops the trainer: SIGINT to its process group, then SIGKILL after 10 seconds. A `run` killed with SIGKILL leaves it training.
+
+A failed run posts its experiment id, run name, the exception line of each traceback (each once) and the end of its log to the team channel, in at most 1,900 characters. The message carries both Discord's `content` and Slack's `text`. The webhook URL is a secret: set it as a user environment variable on the box, never in a file in the repo. The trainer does not get it, and a failed post prints only the error type. Without the variable, `run` prints a line and goes on.
+
+```powershell
+setx ALGOARCADE_WEBHOOK_URL "<webhook URL>"
+```
+
+`setx` changes only processes started after it. Set the variable before you register the task below, then sign out and back in so the task's next start sees it. Do the same after changing it.
+
+`run` starts every night from Task Scheduler. Register the task once, in PowerShell from the clone:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute (Get-Command uv).Source `
+  -Argument "run python -m algoarcade.runqueue run" -WorkingDirectory (Get-Location).Path
+$trigger = New-ScheduledTaskTrigger -Daily -At 1am
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `
+  -MultipleInstances IgnoreNew -StartWhenAvailable -Priority 4
+Register-ScheduledTask -TaskName "AlgoArcade run queue" -Action $action -Trigger $trigger -Settings $settings
+```
+
+A zero `ExecutionTimeLimit` removes Task Scheduler's default three-day limit, which would stop the queue partway through a run. `-Priority 4` is normal priority; the default, 7, is below normal and would lower the steps per second the runs measure. The task runs only while you are signed in: lock the box, do not sign out. `Start-ScheduledTask "AlgoArcade run queue"` starts it now. Not run on the box yet.
+
+### Freezing results
+
+The results freeze (OPS-07) fixes the runs every published number comes from. Parquet is git-ignored, so `docs/results-v1/manifest.json` holds each run's SHA-256 per Parquet file, and the tag `results-v1` marks the commit holding it and `headline.json`.
+
+```sh
+uv run python -m algoarcade.runqueue stop        # at the cutoff, on each machine
+uv run python -m algoarcade.results manifest     # every run under data/runs, and queued runs with no directory
+uv run python -m algoarcade.results check        # recompute every checksum: 0 mismatches or exit 1
+uv run poe results                               # check, then write docs/results-v1/headline.json
+```
+
+`manifest` reads every `run_id=*` folder and every `*/queue.json` one level under `--runs` (default `data/runs`), so the Mac's queue folder can sit beside the box's under another name. A run's steps are the most it logged, so a run killed without its end row keeps the count of its last closed file. A run finds its queue entry by experiment, arm and seed, so an owned-trainer run, whose id adds `-owned`, still does. A later attempt of the same queued run supersedes the earlier one, which stays in the manifest but not in the numbers. `headline.json` scores each run on the evaluation episodes of its last checkpoint, groups runs by experiment, arm and start state (IQM, 95% bootstrap interval, n, `exploratory` under five), lists every run with its steps, furthest milestone and badge (milestone 9 counts, so a badge won in an episode the cutoff left open does), and gives the probability of improvement for every pair of groups on the same env, start state and step budget. The same Parquet gives the same bytes.
 
 ## Gamma
 

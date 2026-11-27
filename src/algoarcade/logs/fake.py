@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,7 @@ import pyarrow as pa
 
 from algoarcade.logs.schema import EPISODES, REWARD_COMPONENTS, RUNS, STEPS, VISITS
 from algoarcade.logs.writer import ROWS_PER_FILE, RollingWriter, run_dir
+from algoarcade.rewards.registry import COMPONENTS, RewardRegistry
 
 # (name, map_group, map_num, width, height) from pret/pokefirered at commit
 # ce6406d8c2eaf46d543c8a2606de0c3cb1951982: data/maps/map_groups.json gives the ids,
@@ -55,9 +57,27 @@ BADGE_CHANCE = 0.0005
 START_LEVEL_SUM = 5
 
 
+@dataclass(frozen=True)
+class _Snapshot:
+    """What the reward components see of a walker. None of the enabled components reads the
+    party or text fields."""
+
+    location: tuple[int, int, int, int]
+    story_flags: int
+    party_level_sum: int
+    badge_count: int
+    milestone_count: int
+    party_count: int = 1
+    party_hp_frac: float = 1.0
+    text_box_open: bool = False
+    text_progress: int = 0
+
+
 class _Walker:
-    def __init__(self, rng: np.random.Generator) -> None:
+    def __init__(self, rng: np.random.Generator, weights: dict[str, float]) -> None:
         self.episode_id = -1
+        self.weights = weights
+        self.rewards = RewardRegistry(COMPONENTS, weights)
         self.reset(rng)
 
     @property
@@ -68,6 +88,11 @@ class _Walker:
     @property
     def milestone_count(self) -> int:
         return self.furthest + self.badges
+
+    def snapshot(self) -> _Snapshot:
+        return _Snapshot(
+            self.location, self.story_flags, self.level_sum, self.badges, self.milestone_count
+        )
 
     def reset(self, rng: np.random.Generator) -> None:
         self.episode_id += 1
@@ -81,8 +106,9 @@ class _Walker:
         self.furthest = 0
         self.goal_step: int | None = None
         self.visited = {self.location}
-        self.totals = dict.fromkeys(WEIGHTS, 0.0)
+        self.totals = dict.fromkeys(self.weights, 0.0)
         self.episode_return = 0.0
+        self.rewards.reset(self.snapshot())
 
     def _place(self, rng: np.random.Generator) -> None:
         _, _, _, width, height = MAPS[self.map]
@@ -92,7 +118,7 @@ class _Walker:
         """Moves one decision. Returns the action, each component's raw value and the reward."""
         self.episode_step += 1
         action = int(rng.integers(len(MOVES)))
-        level_sum, badges, milestones = self.level_sum, self.badges, self.milestone_count
+        prev = self.snapshot()
         name, _, _, width, height = MAPS[self.map]
         if self.battle:
             self.battle -= 1
@@ -112,20 +138,12 @@ class _Walker:
             self.badges = 1
             self.goal_step = self.episode_step
         self.furthest = max(self.furthest, self.map)
-        new_milestones = self.milestone_count - milestones
-        self.story_flags += new_milestones
-        new_tile = self.location not in self.visited
+        self.story_flags += self.milestone_count - prev.milestone_count
         self.visited.add(self.location)
-        raw = {
-            "events": float(new_milestones),
-            "explore": float(new_tile),
-            "level": float(min(self.level_sum - level_sum, 1)),
-            "badge": float(self.badges - badges),
-            "milestone": float(new_milestones),
-        }
+        reward, info = self.rewards.step(prev, self.snapshot())
+        raw = {c: info[f"reward/{c}"] for c in self.weights}
         for c, value in raw.items():
             self.totals[c] += value
-        reward = sum(WEIGHTS[c] * value for c, value in raw.items())
         self.episode_return += reward
         return action, raw, reward
 
@@ -159,15 +177,21 @@ def _end_episode(episodes: dict[str, list], w: _Walker, rng: np.random.Generator
     w.reset(rng)
 
 
-def fake_run(
-    run_id: str, seed: int, env_steps: int, step_log_every: int = STEP_LOG_EVERY
+def fake_run(  # noqa: PLR0913 the runs row's arm fields and what the arm pays
+    run_id: str,
+    seed: int,
+    env_steps: int,
+    step_log_every: int = STEP_LOG_EVERY,
+    experiment_id: str = "fake",
+    arm: str = "fake",
+    weights: dict[str, float] = WEIGHTS,
 ) -> dict[str, pa.Table]:
     """One synthetic run of `env_steps` training decisions across NUM_ENVS walkers, as the four
     tables. At every checkpoint, EVAL_EPISODES evaluation episodes run on a separate walker; they
-    write per-episode rows only."""
+    write per-episode rows only. `weights` changes what the walk is paid, not where it goes."""
     rng = np.random.default_rng(seed)
-    walkers = [_Walker(rng) for _ in range(NUM_ENVS)]
-    evaluator = _Walker(rng)
+    walkers = [_Walker(rng, weights) for _ in range(NUM_ENVS)]
+    evaluator = _Walker(rng, weights)
     steps: dict[str, list] = {name: [] for name in STEPS.names}
     episodes: dict[str, list] = {name: [] for name in EPISODES.names}
     visits: Counter[tuple[int, int, int, int, int]] = Counter()
@@ -208,12 +232,11 @@ def fake_run(
                 if evaluator.episode_step == EPISODE_STEPS:
                     evaluation = {"env_idx": 0, "is_eval": True, "checkpoint_step": total}
                     _end_episode(episodes, evaluator, rng, **keys, **evaluation)
-    weights = json.dumps(WEIGHTS, sort_keys=True)
     start = {
         "run_id": run_id,
         "status": "running",
-        "experiment_id": "fake",
-        "arm": "fake",
+        "experiment_id": experiment_id,
+        "arm": arm,
         "algorithm": "random",
         "trainer": "fake",
         "seed": seed,
@@ -224,9 +247,11 @@ def fake_run(
         "obs_mode": "symbolic",
         "frames_per_decision": 24,
         "num_envs": NUM_ENVS,
-        "reward_config_hash": hashlib.sha1(weights.encode()).hexdigest(),
+        "reward_config_hash": hashlib.sha1(
+            json.dumps(weights, sort_keys=True).encode()
+        ).hexdigest(),
         "git_commit": "none",
-        "hyperparameters": json.dumps({"gamma": 0.997, "reward_weights": WEIGHTS}),
+        "hyperparameters": json.dumps({"gamma": 0.997, "reward_weights": weights}),
         "step_log_every": step_log_every,
         "machine": "fake",
         "env_steps": 0,
@@ -259,8 +284,21 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--env-steps", type=int, default=2_000_000)
     parser.add_argument("--step-log-every", type=int, default=STEP_LOG_EVERY)
     parser.add_argument("--root", type=Path, default=Path("data/runs"))
+    parser.add_argument("--experiment-id", default="fake")
+    parser.add_argument("--arm", default="fake")
+    parser.add_argument(
+        "--weights", type=json.loads, default=WEIGHTS, help="JSON, e.g. '{\"explore\": 0.02}'"
+    )
     args = parser.parse_args(argv)
-    run = fake_run(args.run_id, args.seed, args.env_steps, args.step_log_every)
+    run = fake_run(
+        args.run_id,
+        args.seed,
+        args.env_steps,
+        args.step_log_every,
+        args.experiment_id,
+        args.arm,
+        args.weights,
+    )
     for table, batch in run.items():
         # One file per runs row: a real run writes its start row at launch, its end row at exit.
         rows_per_file = 1 if table == "runs" else ROWS_PER_FILE

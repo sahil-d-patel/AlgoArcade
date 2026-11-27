@@ -216,7 +216,7 @@ Before you open the PR, cut the diff down to the change itself: no comments that
 Then fill in the pull request template. Paste the real output under "How it was verified". If you did not run something, say so. Two questions in the template are specific to this project:
 
 - **Touches a reward component?** Say how an agent would exploit it.
-- **Touches the logging schema after November 1?** Say which runs need re-running. A PM has to agree first.
+- **Touches the logging schema after November 8?** Say which runs need re-running. A PM has to agree first.
 
 ---
 

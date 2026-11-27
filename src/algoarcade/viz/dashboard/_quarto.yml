@@ -1,0 +1,30 @@
+project:
+  type: website
+  pre-render: python -m algoarcade.viz.site
+  resources:
+    - videos/
+
+website:
+  title: AlgoArcade
+  # The search index is fetched at runtime, which a page opened from disk cannot do.
+  search: false
+  navbar:
+    left:
+      - index.qmd
+      - heatmap.qmd
+      - comparison.qmd
+      - agents.qmd
+      - hacks.qmd
+  page-footer:
+    center: "Commit {{< var commit >}}, rendered {{< var date >}}, runs read: {{< var runs >}}"
+
+format:
+  html:
+    # Inlines every script and stylesheet: Chrome will not load Quarto's module scripts from
+    # disk. Videos opt out with data-external="1".
+    embed-resources: true
+    include-in-header:
+      text: <script src="plotly.min.js"></script>
+
+execute:
+  echo: false

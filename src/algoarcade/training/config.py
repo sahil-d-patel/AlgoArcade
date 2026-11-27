@@ -10,6 +10,13 @@ from pathlib import Path
 
 import tyro
 
+from algoarcade.envs.env import HOLD, RELEASE, ObsMode
+from algoarcade.games.super_mario_land import rewards as sml_rewards
+from algoarcade.rewards.registry import DEFAULT_WEIGHTS
+
+# The games whose step info carries every field of RND's input (algoarcade.training.ppo).
+RND_GAMES = ("firered", "fake")
+
 
 @dataclass(frozen=True)
 class PPOConfig:
@@ -24,6 +31,28 @@ class PPOConfig:
     gae_lambda: float
     clip_range: float
     ent_coef: float
+    vf_coef: float
+    """Weight of the value loss, the mean squared error to the return."""
+    max_grad_norm: float
+
+
+@dataclass(frozen=True)
+class PQNConfig:
+    """CleanRL's pqn.py arguments, under our names. The learning rate falls linearly to 0 over the
+    run, as CleanRL's anneal_lr does."""
+
+    learning_rate: float
+    n_steps: int
+    """Steps per environment per update."""
+    n_minibatches: int
+    n_epochs: int
+    gamma: float
+    q_lambda: float
+    start_e: float
+    end_e: float
+    exploration_fraction: float
+    """Epsilon falls from start_e to end_e over this fraction of total_timesteps."""
+    max_grad_norm: float
 
 
 @dataclass(frozen=True)
@@ -34,13 +63,79 @@ class TrainConfig:
     """Total env steps across all environments. PPO rounds up to a whole rollout."""
     n_envs: int
     checkpoint_every: int
-    """Env steps between checkpoints. Each checkpoint is evaluated."""
+    """Env steps between checkpoints. Every checkpoint is saved."""
+    eval_every: int
+    """Env steps between evaluations, a multiple of checkpoint_every. The final checkpoint is
+    always evaluated."""
     ppo: PPOConfig
+    norm_obs: bool
+    norm_reward: bool
+    """VecNormalize's switches. The plan normalizes observations and never the reward."""
+    eval_deterministic: bool
+    """Evaluate with the policy's argmax instead of sampled actions. From a segment's start state
+    the argmax replays one episode, so success rates sample (decisions.md, 2026-11-14)."""
     seed: int = 0
     eval_episodes: int = 10
     runs_dir: Path = Path("data/runs")
     track: bool = False
     """Send SB3's scalars to Weights & Biases."""
+    start_state: str = ""
+    """With env_id firered or super_mario_land: a manifest entry with a step budget, such as
+    seg_01_house or level_1_1."""
+    reward_weights: dict[str, float] = dataclasses.field(default_factory=dict)
+    """With a game env_id: component name to weight."""
+    step_log_every: int = 4
+    """With a game env_id: log every Nth decision of each episode to the steps table."""
+    archive: bool = False
+    """With a game env_id: archive resets (ENV-09) for training episodes. Evaluation never uses
+    them. Off in the baseline."""
+    archive_p: float = 0.5
+    """With archive: the chance a training reset loads an archived cell. A starting guess."""
+    curriculum: str = ""
+    """With a game env_id: a folder under data/states/curriculum/ that a successful LLM attempt
+    wrote (AGT-06, E8). Training episodes start from its latest state and move one state earlier
+    each time the goal rate over the last `curriculum_window` episodes from the current state
+    reaches `curriculum_threshold`. Evaluation never uses it. Off in the baseline; not with
+    archive."""
+    curriculum_threshold: float = 0.8
+    curriculum_window: int = 100
+    """AGT-06's guesses: 80% over 100 episodes."""
+    experiment_id: str = ""
+    """Set by the run queue. Logged in the runs table, and the run's W&B group."""
+    arm: str = ""
+    """Set by the run queue. Logged in the runs table."""
+    second_value_head: bool = False
+    """Owned trainer only: a second value output, which RND trains on the intrinsic return."""
+    int_coef: float = 0.0
+    """Owned trainer only: RND's intrinsic advantage weight, against 1 for the extrinsic one
+    (TRN-10). 0 trains plain PPO. Needs second_value_head and an env_id in RND_GAMES."""
+    int_gamma: float = 0.99
+    """With int_coef: the intrinsic return's discount. ppo.gamma stays the extrinsic one."""
+    obs_mode: ObsMode = "symbolic"
+    """With a game env_id: AlgoArcadeEnv's observation (docs/harness-spec.md, AlgoArcadeEnv).
+    The SB3 policy gives the frames of pixels and both to its NatureCNN; the owned trainer has
+    no CNN and refuses them."""
+    hold: int | None = None
+    """With a game env_id: frames each 24-frame decision holds its button. None takes the game's
+    default, 16 on Super Mario Land and 8 elsewhere; the runner records the value it used."""
+    pqn: PQNConfig | None = None
+    """Train PQN (algoarcade.training.pqn) with these values instead of PPO. The ppo block is then
+    unused."""
+
+    def __post_init__(self) -> None:
+        if self.eval_every <= 0 or self.eval_every % self.checkpoint_every:
+            raise ValueError(
+                f"eval_every {self.eval_every} is not a positive multiple of checkpoint_every "
+                f"{self.checkpoint_every}"
+            )
+        if self.int_coef and not self.second_value_head:
+            raise ValueError("int_coef (RND) needs second_value_head for the intrinsic value")
+        if self.int_coef and self.env_id not in RND_GAMES:
+            raise ValueError(f"int_coef (RND) needs an env_id in {RND_GAMES}, not {self.env_id!r}")
+        if self.hold is not None and not 0 < self.hold < HOLD + RELEASE:
+            raise ValueError(
+                f"hold {self.hold}: use 1 to {HOLD + RELEASE - 1} frames of the decision"
+            )
 
 
 def save_config(config: TrainConfig, path: Path) -> None:
@@ -49,18 +144,31 @@ def save_config(config: TrainConfig, path: Path) -> None:
 
 def load_config(path: Path) -> TrainConfig:
     raw = json.loads(path.read_text())
-    raw["ppo"] = PPOConfig(**raw["ppo"])
+    # Runs saved before TRN-07 wrote neither field; SB3 trained them with 0.5 and 0.5.
+    raw["ppo"] = PPOConfig(**{"vf_coef": 0.5, "max_grad_norm": 0.5} | raw["ppo"])
+    if raw.get("pqn") is not None:
+        raw["pqn"] = PQNConfig(**raw["pqn"])
     raw["runs_dir"] = Path(raw["runs_dir"])
+    # Runs saved before 2026-11-14 wrote neither field; they evaluated every checkpoint, argmax.
+    raw.setdefault("eval_every", raw["checkpoint_every"])
+    raw.setdefault("eval_deterministic", True)
+    # Runs saved before ENV-11 held every game's buttons 8 frames, TRN-05's Super Mario Land
+    # runs included.
+    if raw["env_id"] in ("fake", "firered", "super_mario_land"):
+        raw.setdefault("hold", 8)
     return TrainConfig(**raw)
 
 
 # The project baseline from docs/technical-plan.md, "PPO starting point". batch_size is not in
 # that table; 4,096 (8 minibatches per 32,768-step rollout) is a guess for TRN-05 to tune.
+# vf_coef and max_grad_norm are SB3's defaults in every preset, written out so the owned trainer
+# (TRN-07) takes the same values from config.
 BASELINE = TrainConfig(
     env_id=tyro.MISSING,
     total_timesteps=15_000_000,
     n_envs=16,
     checkpoint_every=500_000,
+    eval_every=500_000,
     ppo=PPOConfig(
         learning_rate=0.0003,
         n_steps=2048,
@@ -70,7 +178,47 @@ BASELINE = TrainConfig(
         gae_lambda=0.95,
         clip_range=0.2,
         ent_coef=0.01,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
     ),
+    norm_obs=True,
+    norm_reward=False,
+    eval_deterministic=True,
+)
+
+# TRN-05's FireRed runs, on the default reward: the five positive terms at their starting
+# weights, penalties off. 1M steps and 3 eval episodes are guesses; a deterministic policy from
+# an indoor state replays the same episode, so more eval episodes add little.
+FIRERED = dataclasses.replace(
+    BASELINE,
+    env_id="firered",
+    start_state=tyro.MISSING,
+    total_timesteps=1_000_000,
+    eval_episodes=3,
+    reward_weights=dict(DEFAULT_WEIGHTS),
+)
+
+# TRN-08's baseline, which experiments import and change one field of: 15M steps, 5 sampled
+# evaluation episodes at 7.5M steps and at the end. tests/training/test_training_config.py pins
+# every field; why each value: docs/decisions.md, 2026-11-14 and 2026-11-20.
+BASELINE_V1 = dataclasses.replace(
+    FIRERED,
+    total_timesteps=15_000_000,
+    eval_every=7_500_000,
+    eval_episodes=5,
+    eval_deterministic=False,
+)
+
+# TRN-05's Super Mario Land runs: the same PPO values as FireRed, explore on the location, from the
+# first frame of 1-1. 2M steps is the top of TRN-05's 1M to 2M guess; PyBoy runs about 7,000 env
+# steps/s with 16 envs on the Mac, so a run takes minutes.
+SUPER_MARIO_LAND = dataclasses.replace(
+    BASELINE,
+    env_id="super_mario_land",
+    start_state="level_1_1",
+    total_timesteps=2_000_000,
+    eval_episodes=3,
+    reward_weights=dict(sml_rewards.DEFAULT_WEIGHTS),
 )
 
 # The control tasks end within 500 steps, so they do not need the baseline's long horizon. These
@@ -82,6 +230,7 @@ CARTPOLE = TrainConfig(
     total_timesteps=100_000,
     n_envs=8,
     checkpoint_every=10_000,
+    eval_every=10_000,
     ppo=PPOConfig(
         learning_rate=0.001,
         n_steps=32,
@@ -92,7 +241,12 @@ CARTPOLE = TrainConfig(
         gae_lambda=0.8,
         clip_range=0.2,
         ent_coef=0.0,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
     ),
+    norm_obs=False,
+    norm_reward=False,
+    eval_deterministic=True,
 )
 
 ACROBOT = TrainConfig(
@@ -100,6 +254,7 @@ ACROBOT = TrainConfig(
     total_timesteps=500_000,
     n_envs=16,
     checkpoint_every=50_000,
+    eval_every=50_000,
     ppo=PPOConfig(
         learning_rate=0.0003,
         n_steps=256,
@@ -110,11 +265,38 @@ ACROBOT = TrainConfig(
         gae_lambda=0.94,
         clip_range=0.2,
         ent_coef=0.0,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
     ),
+    norm_obs=False,
+    norm_reward=False,
+    eval_deterministic=True,
 )
+
+# CleanRL's pqn.py defaults at 1ed8062 (TRN-09). Gamma is CleanRL's too; a FireRed run replaces it
+# with the baseline's 0.997.
+PQN_CLEANRL = PQNConfig(
+    learning_rate=0.00025,
+    n_steps=128,
+    n_minibatches=4,
+    n_epochs=4,
+    gamma=0.99,
+    q_lambda=0.65,
+    start_e=1.0,
+    end_e=0.05,
+    exploration_fraction=0.5,
+    max_grad_norm=10.0,
+)
+
+# CleanRL's CartPole run: 4 envs and 500,000 steps. TRN-09's bar is a mean return of 400.
+PQN_CARTPOLE = dataclasses.replace(CARTPOLE, total_timesteps=500_000, n_envs=4, pqn=PQN_CLEANRL)
 
 PRESETS = {
     "baseline": ("The project PPO baseline. Pass --env-id.", BASELINE),
+    "firered": ("FireRed on mGBA, default reward. Pass --start-state.", FIRERED),
+    "baseline_v1": ("The experiments' baseline (TRN-08). Pass --start-state.", BASELINE_V1),
+    "super_mario_land": ("Super Mario Land 1-1 on PyBoy, explore reward.", SUPER_MARIO_LAND),
     "cartpole": ("CartPole-v1 with rl-baselines3-zoo values.", CARTPOLE),
     "acrobot": ("Acrobot-v1 with rl-baselines3-zoo values.", ACROBOT),
+    "pqn_cartpole": ("PQN on CartPole-v1 with CleanRL's values.", PQN_CARTPOLE),
 }

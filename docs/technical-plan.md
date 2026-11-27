@@ -177,6 +177,8 @@ Every component has a name, a weight in config, and its own column in the logs.
 | anti_spam | A press with no effect while a text box is open | -0.02 | off |
 | time | Every step | -0.001 | off |
 
+The four progress terms (events, level, badge, milestone) pay a rise one step late, once two consecutive reads agree on it. A count read while a save block moves can be wrong for one frame, and a one-frame spike must not pay. So the confirming step pays even if it changed nothing, and a rise on an episode's last step is never paid.
+
 The default set is positive only, and the evidence for that is consistent. Pleines et al. had their heal reward farmed. The best pure-RL entry in the PokéAgent Challenge used positive-only milestone rewards. An open Emerald project reports that every penalty it tried backfired. The penalty components stay in the registry, and whether they help on FireRed is experiment E5.
 
 Weights are starting points. The ratios matter most: badge above everything, events above level, and exploration over a full episode worth a few events.
@@ -190,6 +192,8 @@ Anyone adding a component writes in the pull request how an agent would exploit 
 - Blackout farming: fainting to get a free heal. The heal component is off by default and never fires on a blackout transition.
 - Menu spam: opening and closing menus because the screen changes. Start is not in the default action set.
 - Reset farming: any reward paid on reset teaches the agent to die fast. Every component returns zero on the reset step.
+- Warp flicker: stepping on and off a warp so a progress count misreads high for a frame. A progress term pays only a rise two consecutive reads agree on.
+- Archive farming: resetting into an archived state again and again to collect its progress or its path once more. Progress terms take their best from the loaded state, and novelty starts from the cell's visited set.
 
 ### Catching what we did not predict
 
@@ -273,20 +277,33 @@ E1 to E4 share one baseline arm, so they need 30 runs, not 45.
 
 ### Compute budget
 
-Measured on the Mac (docs/benchmarks.md): 1,005 agent steps per second at 24 frames per decision with 16 environments, under a random policy, so about 86.8M steps a day (1,005 × 86,400). The training box is not measured yet; its column still uses the 500 steps per second guess.
+The rates come from the Mac benchmark in `docs/benchmarks.md` on #52's branch (OPS-02, PR #52, commit 66f2eab, run 2026-11-03 from `s1.state`): 1,005 agent steps/s with 16 environments at 24 frames per decision, and 2,753 frames/s in one process, which is 114.7 decisions/s. Training uses the first. Evaluation uses the second, because it plays one environment. TRN-08's evaluations on the same Mac ran at 114 to 115 decisions/s, and its training at a median 596 steps/s before the first evaluation (15 runs, other jobs running), so the training hours below are a lower bound. The box has not been benchmarked. Every day count here is redone from its numbers.
 
-| Block | Runs | Steps each | Mac-days at 1,005 steps/s | Box-days at 500 steps/s (guess) |
-|---|---|---|---|---|
-| E1 to E4 | 30 | 15M | 5.2 (450M / 86.8M) | 10.4 |
-| E5 | 3 new | 15M | 0.5 (45M / 86.8M) | 1.0 |
-| E6 from S1 | 3 | 100M | 3.5 (300M / 86.8M) | 6.9 |
-| E6 from S0 | 2 | 100M or more | 2.3 or more (200M / 86.8M) | 4.6 or more |
+Evaluation plays one environment, and every episode lasts the whole 71,680-decision budget (87,040 from S0). `BASELINE_V1` plays 5 sampled episodes at 7.5M steps and at the end, 1.74 hours a run against 4.15 hours of training. Until November 20 it played 20 episodes at each of 10 evaluations, 34.7 of a run's 38.9 hours (decisions.md, 2026-11-20). E6 evaluates every 10M steps, ten times a run.
 
-Policy inference and logging will lower these; the benchmark measures emulation only.
+The table is in queue order on one machine. The finish dates assume the queue starts November 21, a guess. PQN, pixels and RND are not benchmarked and use the PPO rate.
 
-That is about 23 box-days at the guessed rate, or about 11.5 days at the Mac's measured rate. The queue goes live November 8 and results freeze November 22, which leaves 14 days, or 28 machine-days across two machines. On paper that fits. In practice most arms only become ready during week 5, so it does not.
+| Block | Runs | Steps each | Hours a run, train + evaluate (Mac benchmark) | Box-days (Mac benchmark, redo from the box benchmark) | Finishes |
+|---|---|---|---|---|---|
+| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 4.15 + 1.74 = 5.88 | 1.2 | Nov 22 |
+| E4 archive on | 5 | 15M | 5.88 | 1.2 | Nov 23 |
+| E1 PQN | 5 | 15M | 5.88 | 1.2 | Nov 24 |
+| E3 none and RND | 10 | 15M | 5.88 | 2.5 | Nov 27 |
+| E2 pixels | 5 | 15M | 5.88 | 1.2 | Nov 28 |
+| E5 both arms | 6 | 15M | 5.88 | 1.5 | Nov 29 |
+| E6 from S1 | 3 | 100M | 27.64 + 8.68 = 36.32 | 4.5 | Dec 4 |
+| E6 from S0 | 2 | 100M | 27.64 + 10.54 = 38.18 | 3.2 | Dec 7 |
 
-So the Mac is the second training machine. The training box runs E1, E3, E4 and the S1 Brock runs. The Mac runs E2, E5, E9 and the cold-start runs. The Brock runs are the first thing to spill past November 22: they keep running, and the writeup reports where they stood. If the benchmark comes in low, ablation runs drop from 15M to 10M steps before any arm loses seeds.
+That is 16.5 box-days, 12 of them training; E1 to E5 take 8.8. Results freeze November 22, so only the baseline arm can finish by then, and only if the queue starts early on November 21. A 15M-step run takes 5.9 of the 42.7 hours the queue allows it before it kills it.
+
+If an arm cannot finish by November 22, cut in this order. The first two change every E1 to E5 arm at once, before any of their runs starts, so the arms stay comparable.
+
+1. Evaluation: 5 episodes at 7.5M steps and at the end. Taken on November 20 (decisions.md).
+2. Steps: ablation runs drop from 15M to 10M before any arm loses seeds.
+3. Machines: E2, E5 and E6 from S0 move to the Mac, as planned before the benchmark.
+4. Seeds: an arm reports the seeds it finished, labeled exploratory under five.
+
+The Brock runs keep running after November 22, and the writeup reports where they stood.
 
 How many steps Brock takes on FireRed is not known. Our estimate is 50 to 150 million from S1 and 100 to 300 million from S0, built from Red results on faster emulators. Treat it as a guess.
 
@@ -361,7 +378,7 @@ The issues are sized at about five hours a week per member. That is more than th
 |---|---|---|
 | 1 | Oct 18 | Each person's starter task merged through a pull request |
 | 2 | Oct 25 | Emulators, memory reads, training runner and MCP server run on every machine |
-| 3 | Nov 1 | Logging schema frozen. First PPO curve on FireRed |
+| 3 | Nov 1 | First PPO curve on FireRed. The logging schema freeze moved to Nov 8 (#20) |
 | 4 | Nov 8 | Baseline clears the early segments across seeds. Run queue owns the box. Trainer parity decided |
 | 5 | Nov 15 | Feature freeze. Every experiment and the Brock runs queued. LLM arm evaluated. Second game trained |
 | 6 | Nov 22 | Everyone on analysis and visualization. Results frozen |
@@ -369,7 +386,7 @@ The issues are sized at about five hours a week per member. That is more than th
 
 Four dates cannot move.
 
-- Schema freeze, November 1. Runs logged before it are thrown away. If the StateReader is not validated on real memory by then, the freeze moves to November 8 instead of freezing a schema nobody has tested.
+- Schema freeze, November 8. Runs logged before it are thrown away. It was November 1, with the rule that it moves to November 8 if the StateReader is not validated on real memory by then; ENV-08 was not, so it moved (#20).
 - Run queue, November 8. Experiments do not fit without it.
 - Feature freeze, November 15. After it, only fixes and visualization merge.
 - Results freeze, November 22. Thanksgiving is the 26th, so week 7 is writing only.

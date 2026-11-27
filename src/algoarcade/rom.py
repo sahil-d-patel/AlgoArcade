@@ -22,6 +22,11 @@ KNOWN_ROMS: dict[str, Rom] = {
     for rom in (
         Rom("41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc", "firered", "Pokemon FireRed (USA) rev 0"),
         Rom("dd5945db9b930750cb39d00c84da8571feebf417", "firered", "Pokemon FireRed (USA) rev 1"),
+        Rom(
+            "418203621b887caa090215d97e3f509b79affd3e",
+            "super_mario_land",
+            "Super Mario Land (World) rev A",
+        ),
     )
 }
 

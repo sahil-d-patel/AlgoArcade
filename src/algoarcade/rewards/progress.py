@@ -22,51 +22,75 @@ class Progress(GameState, Protocol):
 
 
 class NewMaximum(RewardComponent[Progress]):
-    """Pays the amount a count rises above its best so far this episode, up to `cap` per step.
-    A drop, or a climb back to the old best, pays nothing, so moving a count up and down cannot be
-    farmed. The excess of a rise above the cap is never paid.
+    """Pays a rise in a count above its best so far this episode, up to `cap` per step and
+    nothing past `ceiling`. The rules are in docs/harness-spec.md, Reward registry.
 
-    A read above `maximum`, or more than `max_rise` above the best, pays nothing and does not
-    become the best. The best comes only from two consecutive reads that agree: the second is 0 to
-    `max_rise` above the first. On the first step the pair is the reset read and the next read,
-    and their rise pays. Any later pair, after a rejected read, only sets the best and pays
-    nothing. So a bad reset read is never trusted on its own, and a bad best is replaced once two
-    reads agree. A bad read that repeats on two consecutive steps can therefore become the best
-    and silence the term for the episode; only reader validation (ENV-05, ENV-08) prevents that."""
+    A rise pays one step late, on the read that confirms it: a step pays up to `min(prev, curr)`.
+    FireRed's save blocks move on warps, battles and menus, and for one frame a count can read
+    high, so a single read must never pay. The confirming step therefore pays even when nothing
+    changed on it, and a rise on an episode's last step is never paid.
 
-    def __init__(
+    On the first step the best becomes the reset read if the first read agrees with it, so a rise
+    on the first step pays on the second; a reset read up to `max_rise` too low becomes the best
+    too. With no best, or `prev` more than `max_rise` above it, an agreeing pair sets the best to
+    `prev` and the next step pays nothing, so re-establishing the best never pays; a real rise
+    inside that pair is lost with it, at most `max_rise`. A bad read
+    repeated on two consecutive steps becomes the best this way and can silence the term for the
+    episode; only reader validation (ENV-05, ENV-08) prevents that.
+
+    An archive reset passes `best`, the term's best when the cell was reached, so the episode
+    starts from it: the loaded count can sit below it, and climbing back pays nothing. An archive
+    start's first step pays nothing, so a rise the cell's best had not yet confirmed is not paid
+    again on every reset into the cell."""
+
+    def __init__(  # noqa: PLR0913 two bounds on reads and two on payment
         self,
         name: str,
         count: Callable[[Progress], int],
         maximum: int,
         max_rise: int,
         cap: float = float("inf"),
+        ceiling: float = float("inf"),
     ) -> None:
         self.name = name
         self._count = count
         self._maximum = maximum
         self._max_rise = max_rise
         self._cap = cap
+        self._ceiling = ceiling
         self._best: int | None = None
         self._first_step = True
+        self._settling = False
+
+    @property
+    def best(self) -> int | None:
+        return self._best
 
     @override
-    def reset(self, state: Progress) -> None:
-        self._best = None
+    def reset(self, state: Progress, best: int | None = None) -> None:
+        self._best = best
         self._first_step = True
+        # An archive start's first step only confirms what the loaded state holds: the cell's best
+        # can lag it by a rise that was one read from confirmed when the cell was saved.
+        self._settling = best is not None
 
     @override
     def score(self, prev: Progress, curr: Progress) -> float:
-        value = self._count(curr)
+        prev_value, value = self._count(prev), self._count(curr)
         first_step, self._first_step = self._first_step, False
-        if value > self._maximum:
+        settling, self._settling = self._settling, False
+        if max(prev_value, value) > self._maximum or value - prev_value > self._max_rise:
             return 0.0
-        if self._best is not None and value - self._best <= self._max_rise:
-            gain = max(0, value - self._best)
-            self._best = max(self._best, value)
-            return min(float(gain), self._cap)
-        rise = value - self._count(prev)
-        if 0 <= rise <= self._max_rise:
-            self._best = value
-            return min(float(rise), self._cap) if first_step else 0.0
+        if self._best is not None and prev_value - self._best <= self._max_rise:
+            confirmed = min(prev_value, value)
+            paid = 0.0 if settling else self._paid(self._best, confirmed)
+            self._best = max(self._best, confirmed)
+            return paid
+        if value >= prev_value:
+            self._best = prev_value
+            self._settling = not first_step
         return 0.0
+
+    def _paid(self, low: int, high: int) -> float:
+        rise = min(high, self._ceiling) - min(low, self._ceiling)
+        return min(float(max(0, rise)), self._cap)

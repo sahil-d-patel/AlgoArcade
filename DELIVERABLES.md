@@ -16,7 +16,7 @@ Kickoff was October 11, 2026, and assignments start Thursday October 15. A deliv
 | 6 | Reward registry and exploit tests | Named, separately logged components. Each known hack is a scripted test. | Pri | Oct 25, Nov 1 | TRN-04, TRN-06 |
 | 7 | MCP server and LLM loop | The same harness exposed to a language model, with hard cost caps. | Jayden | Oct 25, Nov 1 | AGT-02, AGT-03 |
 | 8 | Gymnasium environment and start states | AlgoArcadeEnv on all three backends. Start states S0 and S1, five segments. | Rishi, Akshaj | Nov 1 | ENV-07, ENV-06 |
-| 9 | Logging pipeline and schema freeze | Parquet writer, fake logger, schema frozen. Runs logged before this are thrown away. | Sahil | Nov 1 | OPS-03 |
+| 9 | Logging pipeline and schema freeze | Parquet writer, fake logger, schema frozen. Runs logged before this are thrown away. Moved from Nov 1 because ENV-08 was not validated by then (#20). | Sahil | Nov 8 | OPS-03 |
 | 10 | First learning curves | PPO on Super Mario Land and two FireRed segments. | Isaac | Nov 1 | TRN-05 |
 | 11 | Run queue | The training box runs experiments unattended. The matrix does not fit without it. | Sahil | Nov 8 | OPS-04 |
 | 12 | Baseline reproduced, trainer decided | Early segments cleared over five seeds. Our PPO trainer passes or fails its parity gate. | Isaac, Pri | Nov 8 | TRN-07, TRN-08 |
@@ -57,6 +57,6 @@ Writeup                                                  ██████
 ## Working agreements
 
 - **Each deliverable maps to one or more GitHub Issues.** The board is the source of truth; this file is the summary.
-- **Four dates do not move:** schema freeze (Nov 1), run queue (Nov 8), feature freeze (Nov 15), results freeze (Nov 22). Everything else is an estimate.
+- **Four dates do not move:** schema freeze (Nov 8), run queue (Nov 8), feature freeze (Nov 15), results freeze (Nov 22). The schema freeze moved once, from Nov 1, by its own rule (#20). Everything else is an estimate.
 - **"Done" is defined per issue** via acceptance criteria, not by a date passing.
 - **Reprioritize openly.** If a deliverable is cut or moved, a PM writes why in the issue and in [`docs/decisions.md`](docs/decisions.md).

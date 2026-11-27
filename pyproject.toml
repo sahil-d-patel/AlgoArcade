@@ -15,8 +15,11 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ruff", "pyrefly", "pytest", "poethepoet", "prek", "typos"]
-train = ["torch", "stable-baselines3", "wandb", "matplotlib"]
+train = ["torch", "stable-baselines3", "wandb", "matplotlib", "scipy", "imageio-ffmpeg", "pillow"]
 agent = ["mcp>=2.3,<3", "anthropic"]
+viz = ["duckdb>=2,<3", "plotly>=7.1,<8", "pillow", "imageio-ffmpeg"]
+# Not a default group: quarto-cli downloads Quarto (140 to 240 MB) at install and pulls in Jupyter.
+dashboard = ["quarto-cli>=1.11.9,<2"]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,7 +29,7 @@ build-backend = "hatchling.build"
 packages = ["src/algoarcade"]
 
 [tool.uv]
-default-groups = ["dev", "train", "agent"]
+default-groups = ["dev", "train", "agent", "viz"]
 
 [tool.ruff]
 target-version = "py312"
@@ -45,17 +48,20 @@ ignore = ["E501"]
 "tools/**" = ["T20"]
 ".claude/hooks/**" = ["T20"]
 "scripts/**" = ["T20"]
+# A command line tool: printing is its output.
+"src/algoarcade/runqueue/**" = ["T20"]
+"src/algoarcade/results.py" = ["T20"]
 "tests/**" = ["ARG", "PLR2004"]
 
 [tool.pyrefly]
-project-includes = ["src", "tests", "tools"]
-search-path = ["src", "tools", "tools/github", ".claude/hooks"]
+project-includes = ["src", "tests", "tools", "scripts"]
+search-path = ["src", "tools", "tools/github", ".claude/hooks", "scripts"]
 # The train group is optional; without it these resolve to Any instead of failing.
 ignore-missing-imports = ["stable_baselines3", "stable_baselines3.*", "wandb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tools", "tools/github", ".claude/hooks"]
+pythonpath = ["tools", "tools/github", ".claude/hooks", "scripts"]
 addopts = ["--strict-markers"]
 markers = ["rom: needs a ROM file; skipped when the ROM is absent"]
 
@@ -68,13 +74,15 @@ sav = "sav"
 GAE = "GAE"
 
 [tool.typos.default]
-# A field name in the decompilation.
-extend-ignore-identifiers-re = ["otId"]
+# A field name and a misspelt function symbol in the decompilation.
+extend-ignore-identifiers-re = ["otId", "Hask_MultichoiceGridMenu_HandleInput"]
 
 [tool.poe.tasks]
 fmt = { cmd = "ruff format", help = "Format the code" }
 lint = { cmd = "ruff check", help = "Lint" }
 types = { cmd = "pyrefly check", help = "Type check" }
 test = { cmd = "pytest", help = "Run the tests" }
+results = { cmd = "python -m algoarcade.results headline", help = "Check data/runs against docs/results-v1/manifest.json, then write docs/results-v1/headline.json" }
 items = { cmd = "python tools/github/bootstrap.py --check", help = "Validate the work item files" }
+dashboard = { cmd = "uv run --group dashboard quarto render src/algoarcade/viz/dashboard", help = "Install the dashboard group if needed and render the dashboard to src/algoarcade/viz/dashboard/_site/" }
 check = { sequence = [{ cmd = "ruff format --check" }, "lint", "types", "test"], help = "What CI runs: format check, lint, types, tests" }
