@@ -277,24 +277,24 @@ E1 to E4 share one baseline arm, so they need 30 runs, not 45.
 
 ### Compute budget
 
-The rates come from the Mac benchmark in `docs/benchmarks.md` on #52's branch (OPS-02, PR #52, commit 66f2eab, run 2026-11-03 from `s1.state`): 1,005 agent steps/s with 16 environments at 24 frames per decision, and 2,753 frames/s in one process, which is 114.7 decisions/s. Training uses the first. Evaluation uses the second, because it plays one environment. TRN-08's evaluations on the same Mac ran at 114 to 115 decisions/s, and its training at a median 596 steps/s before the first evaluation (15 runs, other jobs running), so the training hours below are a lower bound. The box has not been benchmarked. Every day count here is redone from its numbers.
+The rates come from the box benchmark in `docs/benchmarks.md` (OPS-02, PR #52, run 2026-11-27 from `s1.state`): 641 agent steps/s with 16 environments at 24 frames per decision, and 1,576 frames/s in one process, which is 65.7 decisions/s. Training uses the first. Evaluation uses the second, because it plays one environment. The Mac measured 1,005 steps/s and 114.7 decisions/s on the same benchmark, so a run there takes 0.62 of the box's time. TRN-08's evaluations on the Mac ran at 114 to 115 decisions/s, matching its benchmark, and its training at a median 596 steps/s before the first evaluation (15 runs, other jobs running), so the training hours below may be a lower bound.
 
 Evaluation plays one environment, and every episode lasts the whole 71,680-decision budget (87,040 from S0). `BASELINE_V1` plays 5 sampled episodes at 7.5M steps and at the end, 1.74 hours a run against 4.15 hours of training. Until November 20 it played 20 episodes at each of 10 evaluations, 34.7 of a run's 38.9 hours (decisions.md, 2026-11-20). E6 evaluates every 10M steps, ten times a run.
 
-The table is in queue order on one machine. The finish dates assume the queue starts November 21, a guess. PQN, pixels and RND are not benchmarked and use the PPO rate.
+The table is in queue order on the box alone. The queue started on the box on November 26 at 21:33, and the finish dates count from then. PQN, pixels and RND are not benchmarked and use the PPO rate.
 
-| Block | Runs | Steps each | Hours a run, train + evaluate (Mac benchmark) | Box-days (Mac benchmark, redo from the box benchmark) | Finishes |
+| Block | Runs | Steps each | Hours a run, train + evaluate | Box-days | Finishes |
 |---|---|---|---|---|---|
-| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 4.15 + 1.74 = 5.88 | 1.2 | Nov 22 |
-| E4 archive on | 5 | 15M | 5.88 | 1.2 | Nov 23 |
-| E1 PQN | 5 | 15M | 5.88 | 1.2 | Nov 24 |
-| E3 none and RND | 10 | 15M | 5.88 | 2.5 | Nov 27 |
-| E2 pixels | 5 | 15M | 5.88 | 1.2 | Nov 28 |
-| E5 both arms | 6 | 15M | 5.88 | 1.5 | Nov 29 |
-| E6 from S1 | 3 | 100M | 27.64 + 8.68 = 36.32 | 4.5 | Dec 4 |
-| E6 from S0 | 2 | 100M | 27.64 + 10.54 = 38.18 | 3.2 | Dec 7 |
+| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 6.50 + 3.03 = 9.53 | 2.0 | Nov 28 |
+| E4 archive on | 5 | 15M | 9.53 | 2.0 | Nov 30 |
+| E1 PQN | 5 | 15M | 9.53 | 2.0 | Dec 2 |
+| E3 none and RND | 10 | 15M | 9.53 | 4.0 | Dec 6 |
+| E2 pixels | 5 | 15M | 9.53 | 2.0 | Dec 8 |
+| E5 both arms | 6 | 15M | 9.53 | 2.4 | Dec 11 |
+| E6 from S1 | 3 | 100M | 43.34 + 15.16 = 58.50 | 7.3 | Dec 18 |
+| E6 from S0 | 2 | 100M | 43.34 + 18.41 = 61.74 | 5.1 | Dec 23 |
 
-That is 16.5 box-days, 12 of them training; E1 to E5 take 8.8. Results freeze November 22, so only the baseline arm can finish by then, and only if the queue starts early on November 21. A 15M-step run takes 5.9 of the 42.7 hours the queue allows it before it kills it.
+That is 26.8 box-days, 18.8 of them training; E1 to E5 take 14.3. At 641 steps/s the box trains 55.4M steps a day (641 × 86,400), so E1 to E4's 30 runs of 15M steps (the first five rows, 450M steps) take 8.1 days of training and 11.9 with evaluation. A 15M-step run takes 9.5 of the 42.7 hours the queue allows it before it kills it, and a 100M-step run 62 of 278.8.
 
 If an arm cannot finish by November 22, cut in this order. The first two change every E1 to E5 arm at once, before any of their runs starts, so the arms stay comparable.
 
