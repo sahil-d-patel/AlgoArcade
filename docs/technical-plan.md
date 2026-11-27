@@ -277,24 +277,24 @@ E1 to E4 share one baseline arm, so they need 30 runs, not 45.
 
 ### Compute budget
 
-The rates come from the box benchmark in `docs/benchmarks.md` (OPS-02, PR #52, run 2026-11-27 from `s1.state`): 641 agent steps/s with 16 environments at 24 frames per decision, and 1,576 frames/s in one process, which is 65.7 decisions/s. Training uses the first. Evaluation uses the second, because it plays one environment. The Mac measured 1,005 steps/s and 114.7 decisions/s on the same benchmark, so a run there takes 0.62 of the box's time. TRN-08's evaluations on the Mac ran at 114 to 115 decisions/s, matching its benchmark, and its training at a median 596 steps/s before the first evaluation (15 runs, other jobs running), so the training hours below may be a lower bound.
+The rates come from the first finished run on the box, `baseline-v1-seed0` (commit `4b716af`, 15,007,744 steps, November 26 21:33 to November 27 11:46, 14.22 hours). It trained for 10.88 hours, which is 383 steps/s, and its two evaluations took 1.67 hours each, which is 59.6 decisions/s. Training ran at 393 steps/s before the midpoint evaluation and 374 after it. The box benchmark in `docs/benchmarks.md` (OPS-02, PR #52) measured 641 steps/s and 65.7 decisions/s, so real training runs at 60% of the benchmark rate and evaluation at 91%. The benchmark plays a random policy and does not update a network. On the same benchmark the Mac measured 1,005 steps/s and 114.7 decisions/s, so a run there takes 0.62 of the box's time. TRN-08's evaluations on the Mac ran at 114 to 115 decisions/s, matching its benchmark, and its training at a median 596 steps/s before the first evaluation (15 runs, other jobs running), so the training hours below may be a lower bound.
 
 Evaluation plays one environment, and every episode lasts the whole 71,680-decision budget (87,040 from S0). `BASELINE_V1` plays 5 sampled episodes at 7.5M steps and at the end, 1.74 hours a run against 4.15 hours of training. Until November 20 it played 20 episodes at each of 10 evaluations, 34.7 of a run's 38.9 hours (decisions.md, 2026-11-20). E6 evaluates every 10M steps, ten times a run.
 
-The table is in queue order on the box alone. The queue started on the box on November 26 at 21:33, and the finish dates count from then. PQN, pixels and RND are not benchmarked and use the PPO rate.
+The table is in queue order on the box alone. The queue started on the box on November 26 at 21:33, and the finish dates count from then. PQN, pixels and RND have not run on the box and use the PPO baseline's rate.
 
 | Block | Runs | Steps each | Hours a run, train + evaluate | Box-days | Finishes |
 |---|---|---|---|---|---|
-| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 6.50 + 3.03 = 9.53 | 2.0 | Nov 28 |
-| E4 archive on | 5 | 15M | 9.53 | 2.0 | Nov 30 |
-| E1 PQN | 5 | 15M | 9.53 | 2.0 | Dec 2 |
-| E3 none and RND | 10 | 15M | 9.53 | 4.0 | Dec 6 |
-| E2 pixels | 5 | 15M | 9.53 | 2.0 | Dec 8 |
-| E5 both arms | 6 | 15M | 9.53 | 2.4 | Dec 11 |
-| E6 from S1 | 3 | 100M | 43.34 + 15.16 = 58.50 | 7.3 | Dec 18 |
-| E6 from S0 | 2 | 100M | 43.34 + 18.41 = 61.74 | 5.1 | Dec 23 |
+| Baseline arm (`experiments/baseline.py`) | 5 | 15M | 10.88 + 3.34 = 14.22 | 3.0 | Nov 29 |
+| E4 archive on | 5 | 15M | 14.22 | 3.0 | Dec 2 |
+| E1 PQN | 5 | 15M | 14.22 | 3.0 | Dec 5 |
+| E3 none and RND | 10 | 15M | 14.22 | 5.9 | Dec 11 |
+| E2 pixels | 5 | 15M | 14.22 | 3.0 | Dec 14 |
+| E5 both arms | 6 | 15M | 14.22 | 3.6 | Dec 18 |
+| E6 from S1 | 3 | 100M | 72.53 + 16.70 = 89.22 | 11.2 | Dec 29 |
+| E6 from S0 | 2 | 100M | 72.53 + 20.28 = 92.80 | 7.7 | Jan 6 |
 
-That is 26.8 box-days, 18.8 of them training; E1 to E5 take 14.3. At 641 steps/s the box trains 55.4M steps a day (641 × 86,400), so E1 to E4's 30 runs of 15M steps (the first five rows, 450M steps) take 8.1 days of training and 11.9 with evaluation. A 15M-step run takes 9.5 of the 42.7 hours the queue allows it before it kills it, and a 100M-step run 62 of 278.8.
+That is 40.2 box-days, 31.4 of them training; E1 to E5 take 21.3. At 383 steps/s the box trains 33.1M steps a day (383 × 86,400), so E1 to E4's 30 runs of 15M steps (the first five rows, 450M steps) take 13.6 days of training and 17.8 with evaluation. A 15M-step run takes 14.2 of the 42.7 hours the queue allows it before it kills it, and a 100M-step run 89 (S1) or 93 (S0) of 278.8.
 
 If an arm cannot finish by November 22, cut in this order. The first two change every E1 to E5 arm at once, before any of their runs starts, so the arms stay comparable.
 
