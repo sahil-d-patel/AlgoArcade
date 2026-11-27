@@ -50,11 +50,45 @@ Other jobs were running on the Mac during this run, so these are a lower bound. 
 
 ## Training box (Windows desktop)
 
-Not run yet. On the box, from this branch in PowerShell, with the same files in `data\roms\` and `data\states\`:
+Reproduce in PowerShell from the repo root, with the same files in `data\roms\` and `data\states\`:
 
 ```
 uv run python scripts/fetch_mgba.py
 uv run python scripts/benchmark.py --backend mgba --rom data/roms/firered.gba --state data/states/s1.state --menu-state data/states/start_menu.state
 ```
 
-Paste the output here as its own section.
+This run used this branch's `scripts/benchmark.py` on `main` at `4b716af`, which is why the header says uncommitted changes. `start_menu.state` was made the same way as the Mac's. Nothing else was running; CPU load was 2% before the start.
+
+Command: `uv run python scripts/benchmark.py --backend mgba --rom data/roms/firered.gba --state data/states/s1.state --menu-state data/states/start_menu.state`
+Commit: `4b716af` (uncommitted changes)
+OS: Windows-11-10.0.26200-SP0, AMD64, 16 logical CPUs
+Python: 3.12.16
+Date: 2026-11-27 02:50 UTC
+Start state: `data\states\s1.state`
+
+### Emulator frames per second, one process, 24 frames per decision
+
+| Render | No state read | State read |
+|---|---|---|
+| off | 1,550 | 1,576 |
+| on | 1,429 | 1,429 |
+
+### Agent steps per second, random policy, render off, state read on
+
+| Frames per decision | Hold / release | 4 envs | 8 envs | 12 envs | 16 envs |
+|---|---|---|---|---|---|
+| 8 | 4 / 4 | 767 | 1,397 | 1,719 | 1,922 |
+| 16 | 8 / 8 | 383 | 693 | 858 | 960 |
+| 24 | 8 / 16 | 252 | 462 | 572 | 641 |
+| 48 | 8 / 40 | 127 | 230 | 283 | 320 |
+
+### Menu presses that moved the cursor, out of 20
+
+| Frames per decision | Hold / release | Moved |
+|---|---|---|
+| 8 | 4 / 4 | 20 |
+| 16 | 8 / 8 | 20 |
+| 24 | 8 / 16 | 20 |
+| 48 | 8 / 40 | 20 |
+
+The box trains at 641 steps/s against the Mac's 1,005 at the default 24 frames, and one process runs at 57% of the Mac's frame rate. The box runs mGBA 0.10.2 from libmgba-py's win64 build and the Mac runs Homebrew's 0.10.5; this benchmark does not say how much of the gap that explains.
